@@ -1,9 +1,11 @@
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 from supabash.logger import setup_logger
 from supabash.config import config_manager
+from supabash.tools.nmap import NmapScanner
 
 app = typer.Typer(
     name="supabash",
@@ -49,8 +51,60 @@ def scan(
     """
     logger.info(f"Command 'scan' triggered for target: {target} with profile: {profile}")
     console.print(f"[bold blue][*] Starting {profile} scan against {target}...[/bold blue]")
-    # Placeholder for Phase 2 implementation
-    console.print("[yellow][!] This is a placeholder. Logic coming in Phase 2.[/yellow]")
+
+    scanner = NmapScanner()
+    
+    # Determine ports based on profile
+    ports = None
+    args = "-sV -O" # Default: Service + OS detection
+    
+    if profile == "fast":
+        args += " -F" # Fast scan mode (top 100 ports)
+    elif profile == "full":
+        ports = "1-65535"
+        args += " -T4" # Faster execution for full scan
+    elif profile == "stealth":
+        args = "-sS -T2" # Syn scan, slower timing
+    
+    with console.status(f"[bold green]Running Nmap ({profile})... This may take a moment.[/bold green]"):
+        result = scanner.scan(target, ports=ports, arguments=args)
+
+    if not result["success"]:
+        error_msg = result.get('error', '')
+        console.print(f"[bold red][!] Scan Failed:[/bold red] {error_msg}")
+        
+        if "root privileges" in error_msg or "permission denied" in error_msg.lower():
+            console.print("\n[yellow][bulb] Hint: Nmap OS detection (-O) and SYN scans (-sS) require root privileges.[/yellow]")
+            console.print("[yellow]       Try running: [bold]sudo supabash scan ...[/bold][/yellow]")
+        return
+
+    data = result["scan_data"]
+    if not data["hosts"]:
+        console.print("[yellow][!] No hosts found or host is down.[/yellow]")
+        return
+
+    # Display Results
+    for host in data["hosts"]:
+        ip = host["ip"]
+        hostnames = ", ".join(host["hostnames"])
+        os_name = host["os"][0]["name"] if host["os"] else "Unknown"
+        
+        console.print(Panel(f"[bold]Target:[/bold] {ip} ({hostnames})\n[bold]OS:[/bold] {os_name}", title="Scan Results", border_style="green"))
+        
+        if host["ports"]:
+            table = Table(show_header=True, header_style="bold magenta")
+            table.add_column("Port")
+            table.add_column("State")
+            table.add_column("Service")
+            table.add_column("Version")
+
+            for p in host["ports"]:
+                version_info = f"{p['product']} {p['version']}".strip()
+                table.add_row(str(p['port']), p['state'], p['service'], version_info)
+            
+            console.print(table)
+        else:
+            console.print("[yellow]No open ports found.[/yellow]")
 
 @app.command()
 def audit(
@@ -127,7 +181,7 @@ def config(
     console.print("2. [bold yellow]Add New Custom Provider[/bold yellow]")
     console.print("3. Exit")
 
-    option = typer.prompt("Select option", default="1")
+    option = typer.prompt("Select an option by number")
 
     if option == "3":
         return

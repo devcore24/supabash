@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "supabash"
+version = "0.1.0"
+description = "Autonomous AI Security Audit Agent"
+authors = [
+  { name = "DevCore24", email = "dev@example.com" },
+]
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = [
+    "typer",
+    "rich",
+    "litellm",
+    "python-dotenv",
+    "pyyaml",
+    "requests"
+]
+
+[project.scripts]
+supabash = "supabash.__main__:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]

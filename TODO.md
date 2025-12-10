@@ -41,8 +41,8 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
     - [ ] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
 - [ ] **Web Module Wrappers**
     - [x] **Nikto:** Wrapper for server config scanning.
-    - [ ] **Nuclei:** Wrapper for template-based scanning (Crucial for modern CVEs).
-    - [ ] **Gobuster:** Wrapper for directory brute-forcing.
+    - [x] **Nuclei:** Wrapper for template-based scanning (Crucial for modern CVEs).
+    - [x] **Gobuster:** Wrapper for directory brute-forcing.
 - [ ] **SQL & Auth Wrappers**
     - [ ] **Sqlmap:** Wrapper for automated SQL injection detection.
     - [ ] **Hydra:** Wrapper for service authentication brute-forcing.
