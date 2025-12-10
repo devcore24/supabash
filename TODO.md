@@ -1,6 +1,6 @@
-# 📝 SupaBash Development Roadmap
+# 📝 Supabash Development Roadmap
 
-This document outlines the step-by-step tasks required to build **SupaBash**, the AI-driven security audit agent.
+This document outlines the step-by-step tasks required to build **Supabash**, the AI-driven security audit agent.
 
 ---
 
@@ -49,7 +49,7 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
     - [x] **Nuclei:** Wrapper for template-based scanning (Crucial for modern CVEs).
     - [x] **Gobuster:** Wrapper for directory brute-forcing.
 - [ ] **SQL & Auth Wrappers**
-    - [ ] **Sqlmap:** Wrapper for automated SQL injection detection.
+    - [x] **Sqlmap:** Wrapper for automated SQL injection detection.
     - [ ] **Hydra:** Wrapper for service authentication brute-forcing.
 - [ ] **Container Module**
     - [ ] **Trivy:** Wrapper to scan local Docker images.
@@ -122,7 +122,7 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
     - [ ] Test the argument builders.
 - [ ] **Integration Testing**
     - [ ] Spin up a deliberately vulnerable container (e.g., `dvwa` or `juiceshop`).
-    - [ ] Run SupaBash against it to verify it finds known issues.
+    - [ ] Run Supabash against it to verify it finds known issues.
 - [ ] **Performance Tuning**
     - [ ] Optimize async execution (can we run Gobuster and Nmap at the same time?).
 

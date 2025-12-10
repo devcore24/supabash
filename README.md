@@ -14,11 +14,12 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
-![Status](https://img.shields.io/badge/Status-Beta-orange)
+![Status](https://img.shields.io/badge/Status-WIP-orange)
 
-> **⚠️ Development Status:** This project is currently in **Active Development (Phase 2)**. The Core Architecture and CLI are ready, but the AI orchestration and tool wrappers are being implemented. Usage commands are currently placeholders.
+> **⚠️ Development Status:** This project is currently in **Active Development (Phase 2)**. The Core Architecture and CLI are ready, but the AI orchestration and tool wrappers are being implemented. Usage commands are currently placeholders.  
+> Progress: `[████████------------]` **38%**
 
-**SupaBash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, SupaBash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
+**Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
 **Don't just find the vulnerability. Bash it, understand it, and fix it.**
 
@@ -36,7 +37,7 @@
 
 ## 🛠️ The Arsenal
 
-SupaBash comes pre-configured to orchestrate the following tools. The agent manages the installation and execution of these dependencies.
+Supabash comes pre-configured to orchestrate the following tools. The agent manages the installation and execution of these dependencies.
 
 ### 🔍 Recon & Discovery
 *   **Nmap** (Network mapping & service detection)
@@ -93,7 +94,7 @@ SupaBash comes pre-configured to orchestrate the following tools. The agent mana
 
 ## 📥 Installation
 
-SupaBash requires **Linux** (Kali, Ubuntu, Debian) or **WSL2**.
+Supabash requires **Linux** (Kali, Ubuntu, Debian) or **WSL2**.
 
 ### One-Command Setup
 We provide a bootstrap script to install Python dependencies and system binaries automatically.
@@ -169,12 +170,13 @@ supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
 - Nuclei (template-based vuln scanner)
 - Gobuster (directory brute-forcing)
 - WhatWeb (tech stack detection)
+- sqlmap (SQL injection detection)
 
 ---
 
 ## 📊 Example Audit Output
 
-When SupaBash detects an issue, it provides context and solutions:
+When Supabash detects an issue, it provides context and solutions:
 
 ```json
 {
@@ -192,9 +194,9 @@ When SupaBash detects an issue, it provides context and solutions:
 
 ## ⚠️ Legal Disclaimer
 
-**SupaBash is for educational purposes and authorized security auditing only.**
+**Supabash is for educational purposes and authorized security auditing only.**
 
-Usage of SupaBash for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state, and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program.
+Usage of Supabash for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state, and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program.
 
 ---
 
