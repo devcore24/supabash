@@ -17,7 +17,7 @@
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 2)**. The Core Architecture and CLI are ready, but the AI orchestration and tool wrappers are being implemented. Usage commands are currently placeholders.  
-> Progress: `[████████------------]` **38%**
+> Progress: `[█████████-----------]` **45%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -171,6 +171,9 @@ supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
 - Gobuster (directory brute-forcing)
 - WhatWeb (tech stack detection)
 - sqlmap (SQL injection detection)
+- Hydra (credential brute-forcing)
+- Trivy (container image vulnerability scanning)
+- Supabase RLS checker (public access detection)
 
 ---
 

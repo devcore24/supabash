@@ -50,11 +50,11 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] **Gobuster:** Wrapper for directory brute-forcing.
 - [ ] **SQL & Auth Wrappers**
     - [x] **Sqlmap:** Wrapper for automated SQL injection detection.
-    - [ ] **Hydra:** Wrapper for service authentication brute-forcing.
+    - [x] **Hydra:** Wrapper for service authentication brute-forcing.
 - [ ] **Container Module**
-    - [ ] **Trivy:** Wrapper to scan local Docker images.
+    - [x] **Trivy:** Wrapper to scan local Docker images.
 - [ ] **Supabase Specific Module**
-    - [ ] Implement the RLS (Row Level Security) checker for Supabase URLs.
+    - [x] Implement the RLS (Row Level Security) checker for Supabase URLs.
 - [ ] **Wireless Module (Experimental)**
     - [ ] **Aircrack-ng:** Basic wrapper for monitoring and capturing (requires hardware access).
 

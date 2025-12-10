@@ -6,6 +6,9 @@ from .masscan import MasscanScanner
 from .rustscan import RustscanScanner
 from .whatweb import WhatWebScanner
 from .sqlmap import SqlmapScanner
+from .hydra import HydraRunner
+from .trivy import TrivyScanner
+from .supabase_rls import SupabaseRLSChecker
 
 __all__ = [
     "NmapScanner",
@@ -16,4 +19,7 @@ __all__ = [
     "RustscanScanner",
     "WhatWebScanner",
     "SqlmapScanner",
+    "HydraRunner",
+    "TrivyScanner",
+    "SupabaseRLSChecker",
 ]
