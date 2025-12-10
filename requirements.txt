@@ -1,0 +1,6 @@
+typer
+rich
+openai
+python-dotenv
+pyyaml
+requests

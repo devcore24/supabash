@@ -7,11 +7,11 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
 ## 🏗️ Phase 1: Foundation & Architecture
 *Goal: Set up the project structure, dependency management, and installation scripts.*
 
-- [ ] **Project Initialization**
-    - [ ] Create git repository and standard folder structure (`/src`, `/tests`, `/docs`).
-    - [ ] Create virtual environment setup (`python -m venv venv`).
-    - [ ] Initialize `requirements.txt` (Typer, Rich, OpenAI, Subprocess, etc.).
-    - [ ] **Logging System:** Implement file-based logging for debugging (rotational logs in `~/.supabash/logs`).
+- [x] **Project Initialization**
+    - [x] Create git repository and standard folder structure (`/src`, `/tests`, `/docs`).
+    - [x] Create virtual environment setup (`python -m venv venv`).
+    - [x] Initialize `requirements.txt` (Typer, Rich, OpenAI, Subprocess, etc.).
+    - [x] **Logging System:** Implement file-based logging for debugging (rotational logs in `~/.supabash/logs`).
 - [ ] **The "One-Command" Installer (`install.sh`)**
     - [ ] Write Bash script to detect OS (Debian/Ubuntu/Kali).
     - [ ] Implement `apt-get` logic for system binaries (nmap, nikto, sqlmap, etc.).
