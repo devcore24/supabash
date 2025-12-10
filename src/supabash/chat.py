@@ -11,6 +11,8 @@ from supabash.tools import (
     MasscanScanner,
     RustscanScanner,
 )
+from supabash.llm import LLMClient
+from supabash import prompts
 
 logger = setup_logger(__name__)
 
@@ -24,6 +26,7 @@ class ChatSession:
     })
     last_scan_result: Optional[Dict[str, Any]] = None
     last_scan_tool: Optional[str] = None
+    llm: LLMClient = field(default_factory=LLMClient)
 
     def run_scan(self, target: str, profile: str = "fast", scanner_name: str = "nmap") -> Dict[str, Any]:
         scanner_name = scanner_name.lower()
@@ -106,3 +109,32 @@ class ChatSession:
             capture_output=True,
             text=True,
         ).stdout.strip() or "python"
+
+    def summarize_findings(self) -> Optional[str]:
+        if not self.last_scan_result:
+            return None
+        try:
+            payload = {
+                "tool": self.last_scan_tool,
+                "result": self.last_scan_result,
+            }
+            messages = [
+                {"role": "system", "content": prompts.ANALYZER_PROMPT},
+                {"role": "user", "content": json.dumps(payload)},
+            ]
+            return self.llm.chat(messages)
+        except Exception as e:
+            logger.error(f"LLM summary failed: {e}")
+            return None
+
+    def remediate(self, title: str, evidence: str = "", severity: str = "") -> Optional[str]:
+        try:
+            finding = {"title": title, "evidence": evidence, "severity": severity}
+            messages = [
+                {"role": "system", "content": prompts.REMEDIATOR_PROMPT},
+                {"role": "user", "content": json.dumps(finding)},
+            ]
+            return self.llm.chat(messages)
+        except Exception as e:
+            logger.error(f"LLM remediation failed: {e}")
+            return None

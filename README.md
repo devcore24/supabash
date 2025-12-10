@@ -181,6 +181,7 @@ supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
 - Trivy (container image vulnerability scanning)
 - Supabase RLS checker (public access detection)
 - LLM client wrapper (litellm-based) with config-driven provider/model selection
+- Chat session with slash commands (/scan, /details, /report, /test, /summary, /fix)
 
 ---
 

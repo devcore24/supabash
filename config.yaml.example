@@ -6,7 +6,7 @@ llm:
   anthropic:
     api_key: YOUR_ANTHROPIC_KEY
     model: claude-3-opus-20240229
-    api_base: ''
+    api_base: https://api.anthropic.com/v1
   gemini:
     api_key: YOUR_GEMINI_KEY
     model: gemini-1.5-pro-latest

@@ -320,7 +320,7 @@ def chat():
     """
     logger.info("Command 'chat' triggered")
     console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
-    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /details, /report, /test[/dim]")
+    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /details, /report, /test, /summary, /fix[/dim]")
     session = ChatSession()
 
     def show_scan(result):
@@ -390,6 +390,28 @@ def chat():
                 show_scan(session.last_scan_result)
             continue
 
+        if user_input.startswith("/summary"):
+            summary = session.summarize_findings()
+            if summary:
+                console.print(Panel(summary, title="LLM Summary", border_style="cyan"))
+            else:
+                console.print("[yellow]No summary available (no data or LLM error).[/yellow]")
+            continue
+
+        if user_input.startswith("/fix"):
+            parts = user_input.split(" ", 2)
+            if len(parts) < 2:
+                console.print("[red]Usage:[/red] /fix <title> [evidence]")
+                continue
+            title = parts[1]
+            evidence = parts[2] if len(parts) > 2 else ""
+            resp = session.remediate(title=title, evidence=evidence)
+            if resp:
+                console.print(Panel(resp, title="LLM Fix", border_style="green"))
+            else:
+                console.print("[yellow]No fix available (LLM error).[/yellow]")
+            continue
+
         if user_input.startswith("/report"):
             parts = shlex.split(user_input)
             path = Path(parts[1]) if len(parts) > 1 else Path("chat_report.json")
@@ -413,7 +435,7 @@ def chat():
                 console.print(Panel(res["stderr"][-2000:], title="stderr", border_style="red"))
             continue
 
-        console.print("[yellow]Freeform chat not implemented yet. Use slash commands: /scan, /details, /report, /test[/yellow]")
+        console.print("[yellow]Freeform chat not implemented yet. Use slash commands: /scan, /details, /report, /test, /summary, /fix[/yellow]")
 
 if __name__ == "__main__":
     app()

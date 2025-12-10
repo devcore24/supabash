@@ -24,3 +24,19 @@ Output JSON:
   "notes": "brief rationale"
 }
 Keep it actionable and short."""
+
+REMEDIATOR_PROMPT = """You are a security remediation assistant. Given a vulnerability finding, produce a concise fix.
+
+Input fields:
+- title
+- severity
+- evidence
+- context (optional code/config hints)
+
+Output JSON:
+{
+  "summary": "one-line fix summary",
+  "steps": ["ordered, concrete steps to remediate"],
+  "code_sample": "minimal illustrative snippet if applicable"
+}
+Be specific and brief."""

@@ -73,6 +73,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [ ] Design the "Remediator" prompt: Input = Vulnerability -> Output = Code Fix.
 - [ ] **Interactive Chat Interface**
     - [x] Implement `supabash chat` command with slash commands (/scan, /details, /report, /test).
+    - [x] Add LLM-backed summary and remediation commands (/summary, /fix).
     - [ ] Enable the agent to ask clarifying questions to the user.
     - [ ] Chat workflow:
         - Single session as control plane; acknowledge and confirm scope before running tools.
