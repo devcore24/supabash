@@ -168,6 +168,7 @@ supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
 - Nikto (web scanner)
 - Nuclei (template-based vuln scanner)
 - Gobuster (directory brute-forcing)
+- WhatWeb (tech stack detection)
 
 ---
 

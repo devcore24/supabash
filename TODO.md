@@ -43,7 +43,7 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
         - [x] Masscan wrapper with list-output parser.
         - [x] Rustscan wrapper with greppable parser.
     - [x] **CLI Integration:** Allow selecting Nmap/Masscan/Rustscan via `--scanner`.
-    - [ ] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
+    - [x] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
 - [ ] **Web Module Wrappers**
     - [x] **Nikto:** Wrapper for server config scanning.
     - [x] **Nuclei:** Wrapper for template-based scanning (Crucial for modern CVEs).
