@@ -12,19 +12,19 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
     - [x] Create virtual environment setup (`python -m venv venv`).
     - [x] Initialize `requirements.txt` (Typer, Rich, OpenAI, Subprocess, etc.).
     - [x] **Logging System:** Implement file-based logging for debugging (rotational logs in `~/.supabash/logs`).
-- [ ] **The "One-Command" Installer (`install.sh`)**
-    - [ ] Write Bash script to detect OS (Debian/Ubuntu/Kali).
-    - [ ] Implement `apt-get` logic for system binaries (nmap, nikto, sqlmap, etc.).
-    - [ ] Add specific installation logic for external tools (Nuclei, Trivy).
-    - [ ] Add Python dependency installation step.
-    - [ ] Create the global entry point (symlink `supabash` to `/usr/local/bin`).
-- [ ] **CLI Skeleton (Python)**
-    - [ ] Set up `Typer` application entry point.
-    - [ ] Design the ASCII Art Banner (The "Bashing" theme).
-    - [ ] Create placeholder commands: `scan`, `audit`, `config`, `chat`.
-- [ ] **Configuration Manager**
-    - [ ] Create a config handler (YAML/JSON) to store API Keys and default settings.
-    - [ ] Implement `supabash config` command to set keys interactively.
+- [x] **The "One-Command" Installer (`install.sh`)**
+    - [x] Write Bash script to detect OS (Debian/Ubuntu/Kali).
+    - [x] Implement `apt-get` logic for system binaries (nmap, nikto, sqlmap, etc.).
+    - [x] Add specific installation logic for external tools (Nuclei, Trivy).
+    - [x] Add Python dependency installation step.
+    - [x] Create the global entry point (symlink `supabash` to `/usr/local/bin`).
+- [x] **CLI Skeleton (Python)**
+    - [x] Set up `Typer` application entry point.
+    - [x] Design the ASCII Art Banner (The "Bashing" theme).
+    - [x] Create placeholder commands: `scan`, `audit`, `config`, `chat`.
+- [x] **Configuration Manager**
+    - [x] Create a config handler (YAML/JSON) to store API Keys and default settings.
+    - [x] Implement `supabash config` command to set keys interactively.
 
 ---
 
