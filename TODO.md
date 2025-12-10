@@ -31,10 +31,10 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
 ## 🛠️ Phase 2: The "Hands" (Tool Wrappers)
 *Goal: Enable Python to execute Linux security binaries and capture their output.*
 
-- [ ] **Command Execution Engine**
-    - [ ] Create a `CommandRunner` class to handle `subprocess` calls safely.
-    - [ ] Implement timeout handling (so Nmap doesn't hang forever).
-    - [ ] Implement robust error handling and output decoding.
+- [x] **Command Execution Engine**
+    - [x] Create a `CommandRunner` class to handle `subprocess` calls safely.
+    - [x] Implement timeout handling (so Nmap doesn't hang forever).
+    - [x] Implement robust error handling and output decoding.
 - [ ] **Recon Module Wrappers**
     - [ ] **Nmap:** Parse XML/Greppable output into JSON.
     - [ ] **Masscan/Rustscan:** Wrapper for high-speed port discovery.

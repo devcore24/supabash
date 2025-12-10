@@ -1,0 +1,21 @@
+# Core Recon & Scanning Tools (Install via apt/pacman/brew)
+nmap
+masscan
+nikto
+sqlmap
+hydra
+gobuster
+whatweb
+sslscan
+dnsenum
+enum4linux
+
+# Wireless (Optional)
+aircrack-ng
+wifite
+
+# Utilities
+jq
+curl
+wget
+git

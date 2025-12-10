@@ -16,6 +16,8 @@
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Status](https://img.shields.io/badge/Status-Beta-orange)
 
+> **⚠️ Development Status:** This project is currently in **Active Development (Phase 2)**. The Core Architecture and CLI are ready, but the AI orchestration and tool wrappers are being implemented. Usage commands are currently placeholders.
+
 **SupaBash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, SupaBash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
 **Don't just find the vulnerability. Bash it, understand it, and fix it.**
