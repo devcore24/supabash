@@ -1,0 +1,19 @@
+core:
+  log_level: INFO
+  save_reports: true
+llm:
+  provider: anthropic
+  anthropic:
+    api_key: YOUR_ANTHROPIC_KEY
+    model: claude-3-opus-20240229
+    api_base: ''
+  gemini:
+    api_key: YOUR_GEMINI_KEY
+    model: gemini-1.5-pro-latest
+  openai:
+    api_key: YOUR_OPENAI_KEY
+    model: gpt-4-turbo
+  mistral:
+    api_key: YOUR_MISTRAL_KEY
+    model: mistral-large-latest
+    api_base: https://api.mistral.ai/v1

@@ -145,6 +145,23 @@ supabash chat
 
 ---
 
+## ⚙️ Configuration
+
+- Default config lives in the project root as `config.yaml` (falls back to `~/.supabash/config.yaml`).
+- Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `~/.supabash/logs/debug.log`.
+- Manage providers, API keys, and models with `supabash config`.
+
+---
+
+## ✅ Implemented Wrappers (Beta)
+- Nmap (used by `supabash scan`)
+- Masscan (library wrapper for fast port discovery)
+- Nikto (web scanner)
+- Nuclei (template-based vuln scanner)
+- Gobuster (directory brute-forcing)
+
+---
+
 ## 📊 Example Audit Output
 
 When SupaBash detects an issue, it provides context and solutions:

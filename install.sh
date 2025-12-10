@@ -48,10 +48,17 @@ install_apt_deps() {
         git
         curl
         wget
+        unzip
         nmap
+        masscan
         nikto
         sqlmap
         hydra
+        gobuster
+        whatweb
+        sslscan
+        dnsenum
+        enum4linux
         # Add other standard tools here
     )
 

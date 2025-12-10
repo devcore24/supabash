@@ -12,6 +12,8 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
     - [x] Create virtual environment setup (`python -m venv venv`).
     - [x] Initialize `requirements.txt` (Typer, Rich, OpenAI, Subprocess, etc.).
     - [x] **Logging System:** Implement file-based logging for debugging (rotational logs in `~/.supabash/logs`).
+        - [x] Honor `core.log_level` from `config.yaml`.
+        - [x] Use a shared rotating handler to avoid duplicate log entries.
 - [x] **The "One-Command" Installer (`install.sh`)**
     - [x] Write Bash script to detect OS (Debian/Ubuntu/Kali).
     - [x] Implement `apt-get` logic for system binaries (nmap, nikto, sqlmap, etc.).
@@ -38,6 +40,8 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
 - [ ] **Recon Module Wrappers**
     - [x] **Nmap:** Parse XML/Greppable output into JSON.
     - [ ] **Masscan/Rustscan:** Wrapper for high-speed port discovery.
+        - [x] Masscan wrapper with list-output parser.
+        - [ ] Rustscan wrapper.
     - [ ] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
 - [ ] **Web Module Wrappers**
     - [x] **Nikto:** Wrapper for server config scanning.

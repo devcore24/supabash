@@ -13,7 +13,9 @@ app = typer.Typer(
     add_completion=False,
 )
 console = Console()
-logger = setup_logger()
+core_config = config_manager.config.get("core", {})
+log_level = core_config.get("log_level", "INFO")
+logger = setup_logger(log_level=log_level)
 
 BANNER = r"""
    _____                   _               _     
@@ -168,13 +170,16 @@ def config(
     console.print(f"Config File: [dim]{config_manager.config_file}[/dim]")
     console.print("\n[bold]Available Providers:[/bold]")
     
-    for i, prov in enumerate(available_providers, 1):
-        is_active = " (Active)" if prov == current_provider else ""
-        details = llm_config[prov]
-        model_name = details.get("model", "unknown")
-        key_status = "OK" if details.get("api_key") and details.get("api_key") != "YOUR_KEY_HERE" else "MISSING"
-        
-        console.print(f"{i}. [green]{prov}[/green] [dim]({model_name})[/dim] - Key: {key_status}{is_active}")
+    if not available_providers:
+        console.print("[yellow]No providers configured yet. Add one to get started.[/yellow]")
+    else:
+        for i, prov in enumerate(available_providers, 1):
+            is_active = " (Active)" if prov == current_provider else ""
+            details = llm_config[prov]
+            model_name = details.get("model", "unknown")
+            key_status = "OK" if details.get("api_key") and details.get("api_key") != "YOUR_KEY_HERE" else "MISSING"
+            
+            console.print(f"{i}. [green]{prov}[/green] [dim]({model_name})[/dim] - Key: {key_status}{is_active}")
 
     console.print(f"\n[bold]Options:[/bold]")
     console.print("1. Switch/Edit existing provider")
@@ -210,7 +215,12 @@ def config(
         return
 
     # Option 1: Switch/Edit Logic
-    choice = typer.prompt(f"Enter provider name to switch/edit (e.g. {available_providers[0]})")
+    if not available_providers:
+        console.print("[red]No providers to switch/edit. Add a provider first.[/red]")
+        return
+
+    example_name = available_providers[0]
+    choice = typer.prompt(f"Enter provider name to switch/edit (e.g. {example_name})")
     
     if choice not in available_providers:
         console.print(f"[red]Provider '{choice}' not found.[/red]")
