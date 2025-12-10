@@ -143,6 +143,14 @@ supabash chat
 > "Scan the target for SQL injection and tell me how to patch the code."
 ```
 
+### Scanner Engine Selection
+Choose your recon engine with `--scanner`:
+```bash
+supabash scan 192.168.1.10 --scanner nmap     # default
+supabash scan 192.168.1.10 --scanner masscan # fast sweep
+supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
+```
+
 ---
 
 ## ⚙️ Configuration
@@ -156,6 +164,7 @@ supabash chat
 ## ✅ Implemented Wrappers (Beta)
 - Nmap (used by `supabash scan`)
 - Masscan (library wrapper for fast port discovery)
+- Rustscan (fast scanner using nmap greppable output)
 - Nikto (web scanner)
 - Nuclei (template-based vuln scanner)
 - Gobuster (directory brute-forcing)

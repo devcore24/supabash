@@ -6,6 +6,8 @@ from rich.text import Text
 from supabash.logger import setup_logger
 from supabash.config import config_manager
 from supabash.tools.nmap import NmapScanner
+from supabash.tools.masscan import MasscanScanner
+from supabash.tools.rustscan import RustscanScanner
 
 app = typer.Typer(
     name="supabash",
@@ -16,6 +18,12 @@ console = Console()
 core_config = config_manager.config.get("core", {})
 log_level = core_config.get("log_level", "INFO")
 logger = setup_logger(log_level=log_level)
+
+SCANNERS = {
+    "nmap": NmapScanner,
+    "masscan": MasscanScanner,
+    "rustscan": RustscanScanner,
+}
 
 BANNER = r"""
    _____                   _               _     
@@ -47,35 +55,69 @@ def main(ctx: typer.Context):
 def scan(
     target: str = typer.Argument(..., help="Target IP or Domain to scan"),
     profile: str = typer.Option("fast", "--profile", "-p", help="Scan profile: fast, full, stealth"),
+    scanner_name: str = typer.Option("nmap", "--scanner", "-s", help="Scanner engine: nmap, masscan, rustscan"),
 ):
     """
     Launch a basic reconnaissance scan against a target.
     """
-    logger.info(f"Command 'scan' triggered for target: {target} with profile: {profile}")
-    console.print(f"[bold blue][*] Starting {profile} scan against {target}...[/bold blue]")
+    scanner_name = scanner_name.lower()
+    if scanner_name not in SCANNERS:
+        console.print(f"[red]Unknown scanner '{scanner_name}'. Choose from: {', '.join(SCANNERS.keys())}[/red]")
+        raise typer.Exit(code=1)
 
-    scanner = NmapScanner()
-    
-    # Determine ports based on profile
+    logger.info(f"Command 'scan' triggered for target: {target} with profile: {profile} using {scanner_name}")
+    console.print(f"[bold blue][*] Starting {profile} scan against {target} with {scanner_name}...[/bold blue]")
+
+    scanner_cls = SCANNERS[scanner_name]
+    scanner = scanner_cls()
+
+    # Determine scan parameters based on scanner
     ports = None
-    args = "-sV -O" # Default: Service + OS detection
-    
-    if profile == "fast":
-        args += " -F" # Fast scan mode (top 100 ports)
-    elif profile == "full":
-        ports = "1-65535"
-        args += " -T4" # Faster execution for full scan
-    elif profile == "stealth":
-        args = "-sS -T2" # Syn scan, slower timing
-    
-    with console.status(f"[bold green]Running Nmap ({profile})... This may take a moment.[/bold green]"):
-        result = scanner.scan(target, ports=ports, arguments=args)
+    args = None
+    extra_kwargs = {}
+
+    if scanner_name == "nmap":
+        args = "-sV -O"  # Default: Service + OS detection
+        if profile == "fast":
+            args += " -F"  # Fast scan mode (top 100 ports)
+        elif profile == "full":
+            ports = "1-65535"
+            args += " -T4"  # Faster execution for full scan
+        elif profile == "stealth":
+            args = "-sS -T2"  # Syn scan, slower timing
+    elif scanner_name == "masscan":
+        ports = "1-1000"
+        rate = 1000
+        if profile == "full":
+            ports = "1-65535"
+            rate = 5000
+        elif profile == "stealth":
+            rate = 100
+        extra_kwargs["rate"] = rate
+    elif scanner_name == "rustscan":
+        ports = "1-1000"
+        batch = 2000
+        if profile == "full":
+            ports = "1-65535"
+            batch = 5000
+        elif profile == "stealth":
+            batch = 1000
+        extra_kwargs["batch"] = batch
+
+    status_msg = f"[bold green]Running {scanner_name} ({profile})... This may take a moment.[/bold green]"
+    with console.status(status_msg):
+        if scanner_name == "nmap":
+            result = scanner.scan(target, ports=ports, arguments=args)
+        elif scanner_name == "masscan":
+            result = scanner.scan(target, ports=ports, rate=extra_kwargs["rate"], arguments=args)
+        else:
+            result = scanner.scan(target, ports=ports, batch=extra_kwargs["batch"], arguments=args)
 
     if not result["success"]:
         error_msg = result.get('error', '')
         console.print(f"[bold red][!] Scan Failed:[/bold red] {error_msg}")
         
-        if "root privileges" in error_msg or "permission denied" in error_msg.lower():
+        if scanner_name == "nmap" and ("root privileges" in error_msg or "permission denied" in error_msg.lower()):
             console.print("\n[yellow][bulb] Hint: Nmap OS detection (-O) and SYN scans (-sS) require root privileges.[/yellow]")
             console.print("[yellow]       Try running: [bold]sudo supabash scan ...[/bold][/yellow]")
         return
@@ -87,22 +129,30 @@ def scan(
 
     # Display Results
     for host in data["hosts"]:
-        ip = host["ip"]
-        hostnames = ", ".join(host["hostnames"])
-        os_name = host["os"][0]["name"] if host["os"] else "Unknown"
+        ip = host.get("ip", "unknown")
+        hostnames = ", ".join(host.get("hostnames", []))
+        os_matches = host.get("os", [])
+        os_name = os_matches[0]["name"] if os_matches else "Unknown"
         
         console.print(Panel(f"[bold]Target:[/bold] {ip} ({hostnames})\n[bold]OS:[/bold] {os_name}", title="Scan Results", border_style="green"))
         
-        if host["ports"]:
+        ports_list = host.get("ports", [])
+        if ports_list:
             table = Table(show_header=True, header_style="bold magenta")
             table.add_column("Port")
             table.add_column("State")
             table.add_column("Service")
-            table.add_column("Version")
+            table.add_column("Info")
 
-            for p in host["ports"]:
-                version_info = f"{p['product']} {p['version']}".strip()
-                table.add_row(str(p['port']), p['state'], p['service'], version_info)
+            for p in ports_list:
+                port_num = p.get("port", "")
+                state = p.get("state", "")
+                service = p.get("service", "")
+                product = p.get("product", "")
+                version = p.get("version", "")
+                protocol = p.get("protocol", "")
+                details = " ".join(filter(None, [product, version, protocol])).strip()
+                table.add_row(str(port_num), state, service, details)
             
             console.print(table)
         else:

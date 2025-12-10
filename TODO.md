@@ -39,9 +39,10 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
     - [x] Implement robust error handling and output decoding.
 - [ ] **Recon Module Wrappers**
     - [x] **Nmap:** Parse XML/Greppable output into JSON.
-    - [ ] **Masscan/Rustscan:** Wrapper for high-speed port discovery.
+    - [x] **Masscan/Rustscan:** Wrapper for high-speed port discovery.
         - [x] Masscan wrapper with list-output parser.
-        - [ ] Rustscan wrapper.
+        - [x] Rustscan wrapper with greppable parser.
+    - [x] **CLI Integration:** Allow selecting Nmap/Masscan/Rustscan via `--scanner`.
     - [ ] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
 - [ ] **Web Module Wrappers**
     - [x] **Nikto:** Wrapper for server config scanning.
