@@ -11,6 +11,8 @@ from supabash.tools import (
     SqlmapScanner,
     TrivyScanner,
 )
+from supabash.llm import LLMClient
+from supabash import prompts
 
 logger = setup_logger(__name__)
 
@@ -23,6 +25,7 @@ class AuditOrchestrator:
     def __init__(
         self,
         scanners: Optional[Dict[str, Any]] = None,
+        llm_client: Optional[LLMClient] = None,
     ):
         # Allow dependency injection for testing
         self.scanners = scanners or {
@@ -33,6 +36,7 @@ class AuditOrchestrator:
             "sqlmap": SqlmapScanner(),
             "trivy": TrivyScanner(),
         }
+        self.llm = llm_client or LLMClient()
 
     def _run_tool(self, name: str, func) -> Dict[str, Any]:
         try:
@@ -42,6 +46,18 @@ class AuditOrchestrator:
         except Exception as e:
             logger.error(f"{name} execution failed: {e}")
             return {"tool": name, "success": False, "error": str(e)}
+
+    def _summarize_with_llm(self, agg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        try:
+            messages = [
+                {"role": "system", "content": prompts.ANALYZER_PROMPT},
+                {"role": "user", "content": json.dumps(agg)},
+            ]
+            content = self.llm.chat(messages)
+            return json.loads(content)
+        except Exception as e:
+            logger.error(f"LLM summary failed: {e}")
+            return None
 
     def run(self, target: str, output: Path, container_image: Optional[str] = None) -> Dict[str, Any]:
         agg: Dict[str, Any] = {
@@ -72,6 +88,10 @@ class AuditOrchestrator:
             agg["results"].append(
                 self._run_tool("trivy", lambda: self.scanners["trivy"].scan(container_image))
             )
+
+        summary = self._summarize_with_llm(agg)
+        if summary:
+            agg["summary"] = summary
 
         try:
             output.parent.mkdir(parents=True, exist_ok=True)

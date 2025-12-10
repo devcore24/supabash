@@ -37,7 +37,11 @@ class TestAuditOrchestrator(unittest.TestCase):
             "sqlmap": FakeScanner("sqlmap"),
             "trivy": FakeScanner("trivy"),
         }
-        orchestrator = AuditOrchestrator(scanners=scanners)
+        class FakeLLM:
+            def chat(self, messages, temperature=0.2):
+                return '{"summary":"ok","findings":[]}'
+
+        orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
         output = Path("/tmp/audit_test.json")
         report = orchestrator.run("example.com", output, container_image="alpine:latest")
         self.assertTrue(output.exists())
@@ -58,7 +62,11 @@ class TestAuditOrchestrator(unittest.TestCase):
             "sqlmap": FakeScanner("sqlmap"),
             "trivy": FakeScanner("trivy"),
         }
-        orchestrator = AuditOrchestrator(scanners=scanners)
+        class FakeLLM:
+            def chat(self, messages, temperature=0.2):
+                return '{"summary":"ok","findings":[]}'
+
+        orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
         output = Path("/tmp/audit_fail.json")
         report = orchestrator.run("example.com", output)
         failures = [r for r in report["results"] if not r["success"]]

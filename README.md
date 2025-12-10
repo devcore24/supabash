@@ -140,10 +140,14 @@ supabash docker my-app:latest
 ```
 
 ### 4. Interactive Mode
-Talk to the agent directly to plan a custom engagement.
+Talk to the agent directly to plan a custom engagement (slash commands supported).
 ```bash
 supabash chat
-> "Scan the target for SQL injection and tell me how to patch the code."
+# inside chat:
+/scan 192.168.1.10 --profile fast --scanner nmap
+/details      # show last scan
+/report out.json
+/test         # run unit tests
 ```
 
 ### Scanner Engine Selection
@@ -176,6 +180,7 @@ supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
 - Hydra (credential brute-forcing)
 - Trivy (container image vulnerability scanning)
 - Supabase RLS checker (public access detection)
+- LLM client wrapper (litellm-based) with config-driven provider/model selection
 
 ---
 

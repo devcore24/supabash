@@ -1,4 +1,6 @@
 import typer
+import shlex
+from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -8,6 +10,7 @@ from supabash.config import config_manager
 from supabash.tools.nmap import NmapScanner
 from supabash.tools.masscan import MasscanScanner
 from supabash.tools.rustscan import RustscanScanner
+from supabash.chat import ChatSession
 from supabash.audit import AuditOrchestrator
 
 app = typer.Typer(
@@ -316,10 +319,101 @@ def chat():
     Enter interactive chat mode with the Security Agent.
     """
     logger.info("Command 'chat' triggered")
-    console.print("[bold magenta][*] Entering Interactive Chat Mode...[/bold magenta]")
-    console.print("[dim]Type 'exit' to quit.[/dim]")
-    # Placeholder for Phase 3 implementation
-    console.print("[yellow][!] This is a placeholder. Logic coming in Phase 3.[/yellow]")
+    console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
+    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /details, /report, /test[/dim]")
+    session = ChatSession()
+
+    def show_scan(result):
+        if not result.get("success"):
+            console.print(f"[red]Scan failed:[/red] {result.get('error','')}")
+            return
+        data = result.get("scan_data", {})
+        hosts = data.get("hosts", [])
+        if not hosts:
+            console.print("[yellow]No hosts found.[/yellow]")
+            return
+        for host in hosts:
+            ip = host.get("ip", "unknown")
+            hostnames = ", ".join(host.get("hostnames", []))
+            os_matches = host.get("os", [])
+            os_name = os_matches[0]["name"] if os_matches else "Unknown"
+            console.print(Panel(f"[bold]Target:[/bold] {ip} ({hostnames})\n[bold]OS:[/bold] {os_name}", title="Scan Results", border_style="green"))
+            ports_list = host.get("ports", [])
+            if ports_list:
+                table = Table(show_header=True, header_style="bold magenta")
+                table.add_column("Port")
+                table.add_column("State")
+                table.add_column("Service")
+                table.add_column("Info")
+                for p in ports_list:
+                    details = " ".join(filter(None, [p.get("product",""), p.get("version",""), p.get("protocol","")])).strip()
+                    table.add_row(str(p.get("port","")), p.get("state",""), p.get("service",""), details)
+                console.print(table)
+
+    while True:
+        user_input = typer.prompt("chat> ")
+        if not user_input.strip():
+            continue
+        if user_input.strip().lower() in ("exit", "quit"):
+            break
+
+        if user_input.startswith("/scan"):
+            try:
+                parts = shlex.split(user_input)
+            except ValueError as e:
+                console.print(f"[red]Parse error:[/red] {e}")
+                continue
+            target = None
+            profile = "fast"
+            scanner_name = "nmap"
+            for i, token in enumerate(parts[1:], start=1):
+                if token in ("--profile", "-p") and i + 1 < len(parts):
+                    profile = parts[i + 1]
+                elif token in ("--scanner", "-s") and i + 1 < len(parts):
+                    scanner_name = parts[i + 1]
+                elif not token.startswith("-") and target is None:
+                    target = token
+            if not target:
+                console.print("[red]Usage:[/red] /scan <target> [--profile fast|full|stealth] [--scanner nmap|masscan|rustscan]")
+                continue
+            console.print(f"[cyan]Starting scan ({profile}) with {scanner_name} against {target}...[/cyan]")
+            with console.status("[green]Running scan...[/green]"):
+                res = session.run_scan(target, profile=profile, scanner_name=scanner_name)
+            show_scan(res)
+            continue
+
+        if user_input.startswith("/details"):
+            if not session.last_scan_result:
+                console.print("[yellow]No scan results yet.[/yellow]")
+            else:
+                console.print(f"[dim]Last scan via {session.last_scan_tool}[/dim]")
+                show_scan(session.last_scan_result)
+            continue
+
+        if user_input.startswith("/report"):
+            parts = shlex.split(user_input)
+            path = Path(parts[1]) if len(parts) > 1 else Path("chat_report.json")
+            res = session.save_report(path)
+            if res.get("success"):
+                console.print(f"[green]Saved report to {res['path']}[/green]")
+            else:
+                console.print(f"[red]Failed to save report:[/red] {res.get('error','')}")
+            continue
+
+        if user_input.startswith("/test"):
+            console.print("[cyan]Running unit tests...[/cyan]")
+            res = session.run_tests(workdir=Path(__file__).resolve().parents[2])
+            if res.get("success"):
+                console.print("[green]Tests passed[/green]")
+            else:
+                console.print(f"[red]Tests failed (rc={res.get('return_code')})[/red]")
+            if res.get("stdout"):
+                console.print(Panel(res["stdout"][-4000:], title="stdout", border_style="blue"))
+            if res.get("stderr"):
+                console.print(Panel(res["stderr"][-2000:], title="stderr", border_style="red"))
+            continue
+
+        console.print("[yellow]Freeform chat not implemented yet. Use slash commands: /scan, /details, /report, /test[/yellow]")
 
 if __name__ == "__main__":
     app()

@@ -65,20 +65,26 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 *Goal: Connect the tools to the LLM so it can reason about the results.*
 
 - [ ] **LLM Client Setup**
-    - [ ] Integrate OpenAI API client.
+    - [x] Integrate litellm client with provider/model selection from config.
     - [ ] (Optional) Add support for local models (Ollama/Mistral) for offline privacy.
 - [ ] **Prompt Engineering**
-    - [ ] Design the "Analyzer" prompt: Input = Tool Output -> Output = Vulnerability Summary.
-    - [ ] Design the "Planner" prompt: Input = Current State -> Output = Next Tool to run.
+    - [x] Design the "Analyzer" prompt: Input = Tool Output -> Output = Vulnerability Summary.
+    - [x] Design the "Planner" prompt: Input = Current State -> Output = Next Tool to run.
     - [ ] Design the "Remediator" prompt: Input = Vulnerability -> Output = Code Fix.
 - [ ] **Interactive Chat Interface**
-    - [ ] Implement `supabash chat` command for conversational planning.
+    - [x] Implement `supabash chat` command with slash commands (/scan, /details, /report, /test).
     - [ ] Enable the agent to ask clarifying questions to the user.
-- [ ] **The "ReAct" Loop (Reason + Act)**
-    - [ ] Implement the main agent loop:
-        1.  Analyze Goal.
-        2.  Select Tool.
-        3.  Execute Tool.
+    - [ ] Chat workflow:
+        - Single session as control plane; acknowledge and confirm scope before running tools.
+        - Stream progress for long-running tools (checkpoints/heartbeats) and short summaries per tool; offer `/details <tool>` for full output.
+        - Support slash commands (e.g., `/scan`, `/stop`, `/details`, `/report`, `/test`) without leaving chat.
+        - Keep safety checks in-line: enforce allowed-hosts/rate limits; block out-of-scope requests.
+        - Run tools/tests in background workers and stream output so chat stays responsive; allow resume if disconnected.
+    - [ ] **The "ReAct" Loop (Reason + Act)**
+        - [ ] Implement the main agent loop:
+            1.  Analyze Goal.
+            2.  Select Tool.
+            3.  Execute Tool.
         4.  Read Output.
         5.  Decide next step or Finish.
 - [ ] **Context & Cost Management**
