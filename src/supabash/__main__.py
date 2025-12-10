@@ -67,26 +67,120 @@ def audit(
     console.print("[yellow][!] This is a placeholder. Logic coming in Phase 2.[/yellow]")
 
 @app.command()
-def config():
+def config(
+    provider: str = typer.Option(None, "--provider", "-p", help="Set active AI Provider (openai, anthropic, gemini)"),
+    key: str = typer.Option(None, "--key", "-k", help="Set API Key for the selected/active provider"),
+    model: str = typer.Option(None, "--model", "-m", help="Set Model name for the selected/active provider")
+):
     """
-    Interactive configuration (API keys, settings).
+    View or update configuration settings.
     """
     logger.info("Command 'config' triggered")
     console.print(Panel("[bold green]Configuration Manager[/bold green]", expand=False))
     
-    current_key = config_manager.get("openai_api_key")
-    masked_key = f"{current_key[:6]}...{current_key[-4:]}" if current_key and len(current_key) > 10 else "Not Set"
+    # 1. Handle Flags (Non-Interactive Mode)
+    if provider or key or model:
+        current_llm = config_manager.get_llm_config()
+        # Determine which provider we are editing (defaults to active if not specified)
+        target_provider = provider if provider else current_llm["provider"]
+        
+        # Validate provider
+        if target_provider not in ["openai", "anthropic", "gemini"]:
+             # If user wants to add a custom one, we allow it, but warn
+             console.print(f"[yellow]Warning: '{target_provider}' is not a standard provider.[/yellow]")
+
+        if provider:
+            config_manager.set_active_provider(provider)
+            console.print(f"Active provider set to: [cyan]{provider}[/cyan]")
+        
+        if key:
+            config_manager.set_llm_key(target_provider, key)
+            console.print(f"API Key updated for: [cyan]{target_provider}[/cyan]")
+            
+        if model:
+            config_manager.set_model(target_provider, model)
+            console.print(f"Model updated for [cyan]{target_provider}[/cyan] to: [green]{model}[/green]")
+            
+        console.print(f"[bold green]Configuration saved to {config_manager.config_file}[/bold green]")
+        return
+
+    # 2. Interactive Mode (Default)
+    llm_config = config_manager.config.get("llm", {})
+    current_provider = llm_config.get("provider", "openai")
     
-    console.print(f"Current OpenAI API Key: [cyan]{masked_key}[/cyan]")
+    available_providers = [k for k in llm_config.keys() if k != "provider"]
     
-    if typer.confirm("Do you want to update the OpenAI API Key?"):
-        new_key = typer.prompt("Enter new OpenAI API Key", hide_input=True)
-        config_manager.set("openai_api_key", new_key)
-        console.print("[green]API Key updated successfully![/green]")
-    else:
-        console.print("[dim]No changes made.[/dim]")
+    console.print(f"Current Active Provider: [bold cyan]{current_provider.upper()}[/bold cyan]")
+    console.print(f"Config File: [dim]{config_manager.config_file}[/dim]")
+    console.print("\n[bold]Available Providers:[/bold]")
     
-    console.print(f"\n[bold]Current Config File:[/bold] {config_manager.config_file}")
+    for i, prov in enumerate(available_providers, 1):
+        is_active = " (Active)" if prov == current_provider else ""
+        details = llm_config[prov]
+        model_name = details.get("model", "unknown")
+        key_status = "OK" if details.get("api_key") and details.get("api_key") != "YOUR_KEY_HERE" else "MISSING"
+        
+        console.print(f"{i}. [green]{prov}[/green] [dim]({model_name})[/dim] - Key: {key_status}{is_active}")
+
+    console.print(f"\n[bold]Options:[/bold]")
+    console.print("1. Switch/Edit existing provider")
+    console.print("2. [bold yellow]Add New Custom Provider[/bold yellow]")
+    console.print("3. Exit")
+
+    option = typer.prompt("Select option", default="1")
+
+    if option == "3":
+        return
+
+    if option == "2":
+        # Create New Provider Flow
+        new_name = typer.prompt("Enter name for new provider (e.g. 'local-mistral', 'azure-gpt')").lower()
+        if new_name in available_providers:
+            console.print(f"[red]Error: Provider '{new_name}' already exists. Use edit mode.[/red]")
+            return
+            
+        new_key = typer.prompt("Enter API Key (or 'None' for local)", hide_input=True)
+        new_model = typer.prompt("Enter Model Name (e.g. 'mistral', 'gpt-4')")
+        new_base = typer.prompt("Enter API Base URL (Optional, press Enter to skip)", default="")
+        
+        # Save new provider
+        config_manager.config["llm"][new_name] = {
+            "api_key": new_key,
+            "model": new_model
+        }
+        if new_base:
+            config_manager.config["llm"][new_name]["api_base"] = new_base
+            
+        config_manager.set_active_provider(new_name)
+        console.print(f"[bold green]Successfully added and switched to custom provider '{new_name}'![/bold green]")
+        return
+
+    # Option 1: Switch/Edit Logic
+    choice = typer.prompt(f"Enter provider name to switch/edit (e.g. {available_providers[0]})")
+    
+    if choice not in available_providers:
+        console.print(f"[red]Provider '{choice}' not found.[/red]")
+        return
+        
+    config_manager.set_active_provider(choice)
+    current_provider = choice
+        
+    console.print(f"[green]Active provider is now: {current_provider}[/green]")
+    
+    # Ask to update key/model
+    if typer.confirm(f"Do you want to edit settings for {current_provider}?"):
+        current_data = llm_config.get(current_provider, {})
+        new_key = typer.prompt("API Key", default=current_data.get("api_key", ""), hide_input=True)
+        new_model = typer.prompt("Model Name", default=current_data.get("model", ""))
+        new_base = typer.prompt("API Base URL (Optional)", default=current_data.get("api_base", ""))
+        
+        config_manager.set_llm_key(current_provider, new_key)
+        config_manager.set_model(current_provider, new_model)
+        if new_base:
+             config_manager.config["llm"][current_provider]["api_base"] = new_base
+             config_manager.save_config(config_manager.config)
+             
+        console.print("[bold green]Settings updated![/bold green]")
 
 @app.command()
 def chat():
