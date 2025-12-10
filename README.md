@@ -126,9 +126,11 @@ supabash scan 192.168.1.10
 ```
 
 ### 2. Full Application Audit
-Run a comprehensive audit including container security and web vulnerabilities, then generate a fix report.
+Run a comprehensive audit including recon, web scanning, and optional container scanning, then generate a report.
 ```bash
 supabash audit --target 192.168.1.10 --output report.json
+# include container image scan
+supabash audit --target 192.168.1.10 --container-image my-app:latest --output report.json
 ```
 
 ### 3. Container Mode

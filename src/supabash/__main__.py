@@ -8,6 +8,7 @@ from supabash.config import config_manager
 from supabash.tools.nmap import NmapScanner
 from supabash.tools.masscan import MasscanScanner
 from supabash.tools.rustscan import RustscanScanner
+from supabash.audit import AuditOrchestrator
 
 app = typer.Typer(
     name="supabash",
@@ -162,15 +163,28 @@ def scan(
 def audit(
     target: str = typer.Argument(..., help="Target IP, URL, or Container ID"),
     output: str = typer.Option("report.json", "--output", "-o", help="Output file path"),
+    container_image: str = typer.Option(None, "--container-image", "-c", help="Optional container image to scan with Trivy"),
 ):
     """
     Run a full security audit (Infrastructure + Web + Container).
     """
     logger.info(f"Command 'audit' triggered for target: {target}")
     console.print(f"[bold red][*] initializing full audit protocol for {target}...[/bold red]")
+    if container_image:
+        console.print(f"[dim]Including container image: {container_image}[/dim]")
     console.print(f"[dim]Results will be saved to {output}[/dim]")
-    # Placeholder for Phase 2 implementation
-    console.print("[yellow][!] This is a placeholder. Logic coming in Phase 2.[/yellow]")
+
+    orchestrator = AuditOrchestrator()
+    with console.status("[bold green]Running audit steps...[/bold green]"):
+        report = orchestrator.run(target, Path(output), container_image=container_image)
+
+    saved_path = report.get("saved_to")
+    if saved_path:
+        console.print(f"[bold green]Audit complete.[/bold green] Report saved to [cyan]{saved_path}[/cyan]")
+    else:
+        console.print("[yellow]Audit completed but failed to write report file.[/yellow]")
+        if "write_error" in report:
+            console.print(f"[red]{report['write_error']}[/red]")
 
 @app.command()
 def config(

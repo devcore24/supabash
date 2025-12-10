@@ -55,6 +55,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] **Trivy:** Wrapper to scan local Docker images.
 - [ ] **Supabase Specific Module**
     - [x] Implement the RLS (Row Level Security) checker for Supabase URLs.
+    - [x] Wire into audit aggregation (report.json output).
 - [ ] **Wireless Module (Experimental)**
     - [ ] **Aircrack-ng:** Basic wrapper for monitoring and capturing (requires hardware access).
 
