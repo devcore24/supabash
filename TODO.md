@@ -36,11 +36,11 @@ This document outlines the step-by-step tasks required to build **SupaBash**, th
     - [x] Implement timeout handling (so Nmap doesn't hang forever).
     - [x] Implement robust error handling and output decoding.
 - [ ] **Recon Module Wrappers**
-    - [ ] **Nmap:** Parse XML/Greppable output into JSON.
+    - [x] **Nmap:** Parse XML/Greppable output into JSON.
     - [ ] **Masscan/Rustscan:** Wrapper for high-speed port discovery.
     - [ ] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
 - [ ] **Web Module Wrappers**
-    - [ ] **Nikto:** Wrapper for server config scanning.
+    - [x] **Nikto:** Wrapper for server config scanning.
     - [ ] **Nuclei:** Wrapper for template-based scanning (Crucial for modern CVEs).
     - [ ] **Gobuster:** Wrapper for directory brute-forcing.
 - [ ] **SQL & Auth Wrappers**
