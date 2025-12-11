@@ -320,7 +320,7 @@ def chat():
     """
     logger.info("Command 'chat' triggered")
     console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
-    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /details, /report, /test, /summary, /fix[/dim]")
+    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /details, /report, /test, /summary, /fix, /plan[/dim]")
     session = ChatSession()
 
     def show_scan(result):
@@ -412,6 +412,11 @@ def chat():
                 console.print("[yellow]No fix available (LLM error).[/yellow]")
             continue
 
+        if user_input.startswith("/plan"):
+            plan = session.plan_next()
+            console.print(Panel(json.dumps(plan, indent=2), title="Next Steps", border_style="cyan"))
+            continue
+
         if user_input.startswith("/report"):
             parts = shlex.split(user_input)
             path = Path(parts[1]) if len(parts) > 1 else Path("chat_report.json")
@@ -435,7 +440,7 @@ def chat():
                 console.print(Panel(res["stderr"][-2000:], title="stderr", border_style="red"))
             continue
 
-        console.print("[yellow]Freeform chat not implemented yet. Use slash commands: /scan, /details, /report, /test, /summary, /fix[/yellow]")
+        console.print("[yellow]Freeform chat not implemented yet. Use slash commands: /scan, /details, /report, /test, /summary, /fix, /plan[/yellow]")
 
 if __name__ == "__main__":
     app()

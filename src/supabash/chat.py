@@ -13,6 +13,7 @@ from supabash.tools import (
 )
 from supabash.llm import LLMClient
 from supabash import prompts
+from supabash.agent import AgentState, MethodologyPlanner
 
 logger = setup_logger(__name__)
 
@@ -27,6 +28,7 @@ class ChatSession:
     last_scan_result: Optional[Dict[str, Any]] = None
     last_scan_tool: Optional[str] = None
     llm: LLMClient = field(default_factory=LLMClient)
+    planner: MethodologyPlanner = field(default_factory=MethodologyPlanner)
 
     def run_scan(self, target: str, profile: str = "fast", scanner_name: str = "nmap") -> Dict[str, Any]:
         scanner_name = scanner_name.lower()
@@ -138,3 +140,18 @@ class ChatSession:
         except Exception as e:
             logger.error(f"LLM remediation failed: {e}")
             return None
+
+    def plan_next(self) -> Dict[str, Any]:
+        if not self.last_scan_result:
+            return {"next_steps": [], "notes": "No scan results yet."}
+        hosts = self.last_scan_result.get("scan_data", {}).get("hosts", [])
+        ports = []
+        for h in hosts:
+            ports.extend(h.get("ports", []))
+        state = AgentState(
+            target="",
+            ports=ports,
+            findings=[],
+            actions_run=[self.last_scan_tool] if self.last_scan_tool else [],
+        )
+        return self.planner.suggest(state)

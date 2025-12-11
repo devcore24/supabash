@@ -70,7 +70,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [ ] **Prompt Engineering**
     - [x] Design the "Analyzer" prompt: Input = Tool Output -> Output = Vulnerability Summary.
     - [x] Design the "Planner" prompt: Input = Current State -> Output = Next Tool to run.
-    - [ ] Design the "Remediator" prompt: Input = Vulnerability -> Output = Code Fix.
+    - [x] Design the "Remediator" prompt: Input = Vulnerability -> Output = Code Fix.
 - [ ] **Interactive Chat Interface**
     - [x] Implement `supabash chat` command with slash commands (/scan, /details, /report, /test).
     - [x] Add LLM-backed summary and remediation commands (/summary, /fix).
@@ -81,13 +81,15 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
         - Support slash commands (e.g., `/scan`, `/stop`, `/details`, `/report`, `/test`) without leaving chat.
         - Keep safety checks in-line: enforce allowed-hosts/rate limits; block out-of-scope requests.
         - Run tools/tests in background workers and stream output so chat stays responsive; allow resume if disconnected.
-    - [ ] **The "ReAct" Loop (Reason + Act)**
-        - [ ] Implement the main agent loop:
-            1.  Analyze Goal.
-            2.  Select Tool.
-            3.  Execute Tool.
+- [ ] **The "ReAct" Loop (Reason + Act)**
+    - [ ] Implement the main agent loop:
+        1.  Analyze Goal.
+        2.  Select Tool.
+        3.  Execute Tool.
         4.  Read Output.
         5.  Decide next step or Finish.
+    - [x] Add methodology map (recon → web/app → auth → container) and heuristic/LLM planner to pick next tools from findings.
+    - [x] Maintain agent state (targets, ports, tech stack, findings, actions run) and expose `/plan` to show next steps.
 - [ ] **Context & Cost Management**
     - [ ] Implement a token limiter to ensure tool output doesn't crash the LLM context window (truncate large Nmap results).
     - [ ] Implement token usage tracking and cost estimation.
