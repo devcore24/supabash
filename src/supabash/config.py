@@ -32,7 +32,7 @@ DEFAULT_CONFIG = {
         "cache_enabled": False,
         "cache_ttl_seconds": 3600,
         "cache_max_entries": 500,
-        "provider": "openai",  # active provider: openai, anthropic, gemini
+        "provider": "openai",  # active provider: openai, anthropic, gemini, ollama, lmstudio
         "openai": {
             "api_key": "YOUR_KEY_HERE",
             "model": "gpt-4-turbo"
@@ -44,6 +44,19 @@ DEFAULT_CONFIG = {
         "gemini": {
             "api_key": "YOUR_KEY_HERE",
             "model": "gemini-1.5-pro-latest"
+        },
+        # Local models via Ollama (no API key required)
+        "ollama": {
+            "api_key": None,
+            "model": "ollama/llama3.1",
+            "api_base": "http://localhost:11434",
+        }
+        ,
+        # Local models via LM Studio (OpenAI-compatible; no API key required)
+        "lmstudio": {
+            "api_key": None,
+            "model": "local-model",
+            "api_base": "http://localhost:1234/v1",
         }
     }
 }
@@ -99,9 +112,10 @@ class ConfigManager:
                     loaded["llm"] = DEFAULT_CONFIG["llm"]
                 else:
                     for k, v in DEFAULT_CONFIG["llm"].items():
-                        if k in ("openai", "anthropic", "gemini"):
-                            continue
-                        loaded["llm"].setdefault(k, v)
+                        if isinstance(v, dict):
+                            loaded["llm"].setdefault(k, v)
+                        else:
+                            loaded["llm"].setdefault(k, v)
                 if use_fallback:
                     # Migrate legacy user config into project-local config.yaml
                     self.config_file = CONFIG_FILE
@@ -152,6 +166,15 @@ class ConfigManager:
         if provider not in self.config["llm"]:
             self.config["llm"][provider] = {}
         self.config["llm"][provider]["model"] = model
+        self.save_config(self.config)
+
+    def set_api_base(self, provider: str, api_base: str):
+        if provider not in self.config["llm"]:
+            self.config["llm"][provider] = {}
+        if api_base is None or str(api_base).strip() == "":
+            self.config["llm"][provider].pop("api_base", None)
+        else:
+            self.config["llm"][provider]["api_base"] = str(api_base).strip()
         self.save_config(self.config)
 
     def get_allowed_hosts(self) -> List[str]:

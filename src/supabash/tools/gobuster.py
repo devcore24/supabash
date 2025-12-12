@@ -1,4 +1,5 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
+from pathlib import Path
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
 
@@ -15,8 +16,9 @@ class GobusterScanner:
     def scan(
         self,
         target: str,
-        wordlist: str = "/usr/share/wordlists/dirb/common.txt",
+        wordlist: Optional[str] = None,
         threads: int = 10,
+        cancel_event=None,
     ) -> Dict[str, Any]:
         """
         Executes a Gobuster scan against the target.
@@ -30,6 +32,14 @@ class GobusterScanner:
             Dict: Parsed scan results.
         """
         logger.info(f"Starting Gobuster scan on {target}")
+
+        if not wordlist:
+            system = Path("/usr/share/wordlists/dirb/common.txt")
+            if system.exists():
+                wordlist = str(system)
+            else:
+                fallback = Path(__file__).resolve().parents[1] / "data" / "wordlists" / "common.txt"
+                wordlist = str(fallback)
         
         # Command: gobuster dir -u <target> -w <wordlist> -q -z --no-error
         # -q: Quiet mode (only findings)
@@ -46,13 +56,17 @@ class GobusterScanner:
         ]
 
         # 30 minute timeout
-        result: CommandResult = self.runner.run(command, timeout=1800)
+        kwargs = {"timeout": 1800}
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Gobuster scan failed: {result.stderr}")
             return {
                 "success": False,
                 "error": result.stderr,
+                "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout
             }
 

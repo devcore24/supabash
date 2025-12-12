@@ -1,6 +1,7 @@
 import json
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
@@ -17,6 +18,8 @@ from supabash import prompts
 from supabash.agent import AgentState, MethodologyPlanner
 from supabash.safety import is_allowed_target, ensure_consent, is_public_ip_target
 from supabash.llm_context import prepare_json_payload
+from supabash.jobs import JobManager, JobStatus
+from supabash.session_state import save_state as save_session_state, load_state as load_session_state
 
 logger = setup_logger(__name__)
 
@@ -39,6 +42,7 @@ class ChatSession:
     last_llm_meta: Optional[Dict[str, Any]] = None
     last_clarifier: Optional[Dict[str, Any]] = None
     audit_orchestrator_factory: Any = None
+    jobs: JobManager = field(default_factory=JobManager)
 
     def run_scan(
         self,
@@ -46,6 +50,7 @@ class ChatSession:
         profile: str = "fast",
         scanner_name: str = "nmap",
         allow_public: bool = False,
+        cancel_event: Any = None,
     ) -> Dict[str, Any]:
         scanner_name = scanner_name.lower()
         if scanner_name not in self.scanners:
@@ -80,7 +85,7 @@ class ChatSession:
                 args += " -T4"
             elif profile == "stealth":
                 args = "-sS -T2"
-            result = scanner.scan(target, ports=ports, arguments=args)
+            result = scanner.scan(target, ports=ports, arguments=args, cancel_event=cancel_event)
         elif scanner_name == "masscan":
             ports = "1-1000"
             rate = 1000
@@ -89,7 +94,7 @@ class ChatSession:
                 rate = 5000
             elif profile == "stealth":
                 rate = 100
-            result = scanner.scan(target, ports=ports, rate=rate, arguments=args)
+            result = scanner.scan(target, ports=ports, rate=rate, arguments=args, cancel_event=cancel_event)
         else:  # rustscan
             ports = "1-1000"
             batch = 2000
@@ -98,7 +103,7 @@ class ChatSession:
                 batch = 5000
             elif profile == "stealth":
                 batch = 1000
-            result = scanner.scan(target, ports=ports, batch=batch, arguments=args)
+            result = scanner.scan(target, ports=ports, batch=batch, arguments=args, cancel_event=cancel_event)
 
         self.last_scan_result = result
         self.last_scan_tool = scanner_name
@@ -114,12 +119,16 @@ class ChatSession:
         nuclei_rate_limit: int = 0,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
+        parallel_web: bool = False,
+        max_workers: int = 3,
         remediate: bool = False,
         max_remediations: int = 5,
         min_remediation_severity: str = "MEDIUM",
         allow_public: bool = False,
         output: Optional[Path] = None,
         markdown: Optional[Path] = None,
+        cancel_event: Any = None,
+        progress_cb: Any = None,
     ) -> Dict[str, Any]:
         if self.allowed_hosts and not is_allowed_target(target, self.allowed_hosts):
             return {"success": False, "error": f"Target '{target}' not in allowed_hosts. Edit config.yaml to permit."}
@@ -148,9 +157,13 @@ class ChatSession:
             nuclei_rate_limit=nuclei_rate_limit,
             gobuster_threads=gobuster_threads,
             gobuster_wordlist=gobuster_wordlist,
+            parallel_web=parallel_web,
+            max_workers=max_workers,
             remediate=remediate,
             max_remediations=max_remediations,
             min_remediation_severity=min_remediation_severity,
+            cancel_event=cancel_event,
+            progress_cb=progress_cb,
         )
         self.last_audit_report = report
         self.last_result_kind = "audit"
@@ -176,6 +189,101 @@ class ChatSession:
                 return entry
         return None
 
+    def start_audit_job(
+        self,
+        target: str,
+        *,
+        container_image: Optional[str] = None,
+        mode: str = "normal",
+        nuclei_rate_limit: int = 0,
+        gobuster_threads: int = 10,
+        gobuster_wordlist: Optional[str] = None,
+        parallel_web: bool = False,
+        max_workers: int = 3,
+        remediate: bool = False,
+        max_remediations: int = 5,
+        min_remediation_severity: str = "MEDIUM",
+        allow_public: bool = False,
+        output: Optional[Path] = None,
+        markdown: Optional[Path] = None,
+    ):
+        job_ref = {"job": None}
+
+        def progress_cb(event: str, tool: str, message: str, agg: Dict[str, Any]):
+            job = job_ref.get("job")
+            if not job:
+                return
+            step = f"{event}:{tool}".strip(":")
+            job.status.current_step = step
+            job.status.message = message or step
+            try:
+                line = f"{event} {tool}".strip()
+                if message:
+                    line = f"{line}: {message}"
+                job.status.events.append(line)
+                if len(job.status.events) > 25:
+                    del job.status.events[: len(job.status.events) - 25]
+            except Exception:
+                pass
+
+        def fn():
+            job = job_ref.get("job")
+            cancel_event = job.cancel_event if job else None
+            return self.run_audit(
+                target,
+                container_image=container_image,
+                mode=mode,
+                nuclei_rate_limit=nuclei_rate_limit,
+                gobuster_threads=gobuster_threads,
+                gobuster_wordlist=gobuster_wordlist,
+                parallel_web=parallel_web,
+                max_workers=max_workers,
+                remediate=remediate,
+                max_remediations=max_remediations,
+                min_remediation_severity=min_remediation_severity,
+                allow_public=allow_public,
+                output=output,
+                markdown=markdown,
+                cancel_event=cancel_event,
+                progress_cb=progress_cb,
+            )
+
+        job = self.jobs.start_job("audit", target, fn)
+        job_ref["job"] = job
+        job.status.message = "Audit started"
+        try:
+            job.status.events.append("start: audit started")
+        except Exception:
+            pass
+        return job
+
+    def start_scan_job(self, target: str, profile: str = "fast", scanner_name: str = "nmap", allow_public: bool = False):
+        job_ref = {"job": None}
+        def fn():
+            job = job_ref.get("job")
+            cancel_event = job.cancel_event if job else None
+            if cancel_event is not None and cancel_event.is_set():
+                return {"success": False, "error": "Canceled before start", "canceled": True}
+            return self.run_scan(target, profile=profile, scanner_name=scanner_name, allow_public=allow_public, cancel_event=cancel_event)
+
+        job = self.jobs.start_job("scan", target, fn)
+        job_ref["job"] = job
+        job.status.message = "Scan started"
+        try:
+            job.status.events.append("start: scan started")
+        except Exception:
+            pass
+        return job
+
+    def job_status(self) -> Optional[JobStatus]:
+        return self.jobs.get_status()
+
+    def stop_job(self) -> bool:
+        return self.jobs.cancel_active()
+
+    def finalize_job_if_done(self) -> Optional[Dict[str, Any]]:
+        return self.jobs.take_result_if_done()
+
     def save_report(self, path: Path, kind: Optional[str] = None) -> Dict[str, Any]:
         kind = (kind or self.last_result_kind or "").lower()
         if kind == "audit":
@@ -192,6 +300,38 @@ class ChatSession:
         except Exception as e:
             logger.error(f"Failed to save report: {e}")
             return {"success": False, "error": str(e)}
+
+    def export_state(self) -> Dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "last_result_kind": self.last_result_kind,
+            "last_scan_tool": self.last_scan_tool,
+            "last_scan_result": self.last_scan_result,
+            "last_audit_report": self.last_audit_report,
+            "last_llm_meta": self.last_llm_meta,
+            "last_clarifier": self.last_clarifier,
+        }
+
+    def import_state(self, state: Dict[str, Any]) -> bool:
+        if not isinstance(state, dict):
+            return False
+        self.last_result_kind = state.get("last_result_kind") if isinstance(state.get("last_result_kind"), str) else None
+        self.last_scan_tool = state.get("last_scan_tool") if isinstance(state.get("last_scan_tool"), str) else None
+        self.last_scan_result = state.get("last_scan_result") if isinstance(state.get("last_scan_result"), dict) else None
+        self.last_audit_report = state.get("last_audit_report") if isinstance(state.get("last_audit_report"), dict) else None
+        self.last_llm_meta = state.get("last_llm_meta") if isinstance(state.get("last_llm_meta"), dict) else None
+        self.last_clarifier = state.get("last_clarifier") if isinstance(state.get("last_clarifier"), dict) else None
+        return True
+
+    def save_state(self, path: Path) -> Dict[str, Any]:
+        ok, truncated = save_session_state(path, self.export_state())
+        return {"success": ok, "truncated": truncated, "path": str(path)}
+
+    def load_state(self, path: Path) -> Dict[str, Any]:
+        state = load_session_state(path)
+        if not state:
+            return {"success": False, "path": str(path)}
+        return {"success": self.import_state(state), "path": str(path)}
 
     def run_tests(self, workdir: Optional[Path] = None) -> Dict[str, Any]:
         cmd = [self._python_executable(), "-m", "unittest", "discover", "-s", "tests"]
@@ -214,11 +354,7 @@ class ChatSession:
             return {"success": False, "error": str(e)}
 
     def _python_executable(self) -> str:
-        return subprocess.run(
-            ["which", "python"],
-            capture_output=True,
-            text=True,
-        ).stdout.strip() or "python"
+        return sys.executable or "python3"
 
     def summarize_findings(self) -> Optional[str]:
         if not self.last_scan_result:

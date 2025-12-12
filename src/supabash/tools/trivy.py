@@ -14,7 +14,7 @@ class TrivyScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, image: str, severity: str = "HIGH,CRITICAL", arguments: str = None) -> Dict[str, Any]:
+    def scan(self, image: str, severity: str = "HIGH,CRITICAL", arguments: str = None, cancel_event=None) -> Dict[str, Any]:
         """
         Run Trivy against a container image and return parsed JSON results.
 
@@ -38,11 +38,14 @@ class TrivyScanner:
         if arguments:
             command.extend(arguments.split())
 
-        result: CommandResult = self.runner.run(command, timeout=1800)
+        kwargs = {"timeout": 1800}
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Trivy scan failed: {result.stderr}")
-            return {"success": False, "error": result.stderr, "raw_output": result.stdout}
+            return {"success": False, "error": result.stderr, "canceled": bool(getattr(result, "canceled", False)), "raw_output": result.stdout}
 
         parsed = self._parse_json(result.stdout)
         return {"success": True, "findings": parsed, "command": result.command}

@@ -17,7 +17,7 @@
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 3)**. The CLI, tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; the full autonomous ReAct loop and deeper safety/reporting polish are still in progress.  
-> Progress: `[████████████████----]` **82%**
+> Progress: `[██████████████████--]` **88%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -107,11 +107,18 @@ sudo ./install.sh
 ```
 
 ### Manual Installation
-1.  Install system dependencies (see `requirements_system.txt`).
+1.  Install system dependencies:
+    - Quick list: `requirements_system.txt`
+    - Full manual guide (APT): `docs/system-requirements.md`
 2.  Install Python libraries:
     ```bash
     pip3 install -r requirements.txt
-    ```
+```
+
+## 🧪 Integration Testing (Optional)
+
+- Docker-based harness: `docker-compose.integration.yml`
+- Guide: `docs/integration-testing.md`
 
 ---
 
@@ -137,10 +144,19 @@ supabash audit 192.168.1.10 --output report.json --yes
 supabash audit 192.168.1.10 --container-image my-app:latest --output report.json --yes
 # write markdown report too
 supabash audit 192.168.1.10 --markdown report.md --yes
+# run web tools in parallel (and overlap with recon when a URL is provided)
+supabash audit "http://192.168.1.10" --output report.json --yes --parallel-web --max-workers 3
 # run sqlmap only when providing a parameterized URL
 supabash audit "http://192.168.1.10/?id=1" --output report.json --yes
 # generate LLM remediation steps + code samples (costs tokens)
 supabash audit 192.168.1.10 --output report.json --yes --remediate --max-remediations 5 --min-remediation-severity HIGH
+```
+
+### 2b. ReAct Loop (Plan → Act)
+Run an iterative ReAct loop that plans next tools based on recon results.
+```bash
+supabash react 192.168.1.10 --output react_report.json --yes --max-actions 10
+supabash react "http://192.168.1.10" --output react_report.json --yes --remediate
 ```
 
 ### 3. Container Image Scan
@@ -155,7 +171,14 @@ Talk to the agent directly to plan a custom engagement (slash commands supported
 supabash chat
 # inside chat:
 /scan 192.168.1.10 --profile fast --scanner nmap  # add --allow-public only if authorized
+/scan 192.168.1.10 --profile fast --scanner nmap --bg
 /audit 192.168.1.10 --mode normal --output report.json --markdown report.md --remediate
+/audit 192.168.1.10 --mode normal --remediate --bg
+/audit "http://192.168.1.10" --mode normal --parallel-web --max-workers 3 --bg
+/status
+/status --watch --interval 1 --verbose
+/stop   # sends a cancel request; running tool processes are terminated (best-effort)
+/clear-state
 /details      # show last scan
 /details nuclei  # show per-tool output from last audit
 /report out.json
@@ -188,10 +211,13 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
 - Edit allowed hosts via CLI: `supabash config --allow-host 10.0.0.0/24`, `supabash config --remove-host 10.0.0.0/24`, `supabash config --list-allowed-hosts`.
 - Manage providers, API keys, and models with `supabash config`.
+- Local models (Ollama): `supabash config --provider ollama --model ollama/llama3.1 --api-base http://localhost:11434` (no API key required).
+- Local models (LM Studio): `supabash config --provider lmstudio --model local-model --api-base http://localhost:1234/v1` (no API key required; uses OpenAI-compatible API).
 - Manage scan safety: consent prompts are remembered in `core.consent_accepted` after the first interactive acceptance (use `supabash config --reset-consent` to re-prompt); `--yes` skips prompting for a single run.
 - LLM context/cost controls: set `llm.max_input_chars` to cap tool output sent to the LLM; LLM token usage + estimated USD cost are recorded in audit reports.
 - LLM caching (optional): enable with `llm.cache_enabled=true` (and optionally set `llm.cache_ttl_seconds`, `llm.cache_max_entries`, `llm.cache_dir`) to reuse identical LLM responses and reduce cost.
 - Tune web tooling: `supabash audit ... --nuclei-rate 10 --gobuster-threads 20` (and optionally `--gobuster-wordlist /path/to/list`).
+- Parallelize web tools: `supabash audit ... --parallel-web --max-workers 3` (URL targets can overlap recon with web tooling).
 
 ---
 

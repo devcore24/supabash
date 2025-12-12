@@ -13,7 +13,7 @@ class NiktoScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, port: int = 80) -> Dict[str, Any]:
+    def scan(self, target: str, port: int = 80, cancel_event=None) -> Dict[str, Any]:
         """
         Executes a Nikto scan against the target.
         
@@ -36,13 +36,17 @@ class NiktoScanner:
         ]
 
         # Nikto can take a while, 20 min timeout
-        result: CommandResult = self.runner.run(command, timeout=1200)
+        kwargs = {"timeout": 1200}
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Nikto scan failed: {result.stderr}")
             return {
                 "success": False,
                 "error": result.stderr,
+                "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout
             }
 

@@ -42,7 +42,26 @@ class LLMClient:
         model = provider_cfg.get("model")
         api_base = provider_cfg.get("api_base")
 
-        if not api_key or api_key == "YOUR_KEY_HERE":
+        # Local/OpenAI-compatible backends that don't require an API key.
+        keyless_providers = {"ollama", "lmstudio"}
+
+        def normalize_key(value: Any) -> Optional[str]:
+            if value is None:
+                return None
+            if isinstance(value, str):
+                v = value.strip()
+                if not v:
+                    return None
+                if v.lower() in ("none", "null"):
+                    return None
+                if v == "YOUR_KEY_HERE":
+                    return None
+                return v
+            return None
+
+        api_key = normalize_key(api_key)
+
+        if provider not in keyless_providers and not api_key:
             raise ValueError(f"Missing API key for provider '{provider}'. Set it via config.")
         if not model:
             raise ValueError(f"Missing model for provider '{provider}'. Set it via config.")
@@ -85,8 +104,9 @@ class LLMClient:
             "model": settings["model"],
             "messages": messages,
             "temperature": temperature,
-            "api_key": settings["api_key"],
         }
+        if settings.get("api_key"):
+            kwargs["api_key"] = settings["api_key"]
         if settings.get("api_base"):
             kwargs["api_base"] = settings["api_base"]
 

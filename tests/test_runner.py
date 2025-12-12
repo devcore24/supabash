@@ -2,6 +2,8 @@ import unittest
 import sys
 import os
 import shutil
+import threading
+import time
 
 # Add src to python path to import supabash modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
@@ -43,6 +45,18 @@ class TestCommandRunner(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.return_code, 127)
         self.assertIn("Executable not found", result.error_message)
+
+    def test_cancel_event_stops_command(self):
+        cancel = threading.Event()
+        def cancel_soon():
+            time.sleep(0.1)
+            cancel.set()
+        t = threading.Thread(target=cancel_soon, daemon=True)
+        t.start()
+        result = self.runner.run(["sleep", "5"], cancel_event=cancel)
+        self.assertFalse(result.success)
+        self.assertTrue(getattr(result, "canceled", False))
+        self.assertEqual(result.return_code, -2)
 
 if __name__ == '__main__':
     unittest.main()

@@ -61,6 +61,34 @@ class TestLLMClient(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.chat([{"role": "user", "content": "hi"}])
 
+    def test_ollama_provider_allows_missing_key_and_omits_api_key_param(self):
+        cfg = DummyConfig(provider="ollama", model="ollama/llama3.1", api_key=None, api_base="http://localhost:11434")
+        client = LLMClient(config=cfg)
+        messages = [{"role": "user", "content": "hello"}]
+
+        with patch("supabash.llm.litellm.completion") as mock_completion:
+            mock_completion.return_value = {"choices": [{"message": {"content": "hi"}}]}
+            content = client.chat(messages)
+            self.assertEqual(content, "hi")
+            _, kwargs = mock_completion.call_args
+            self.assertEqual(kwargs["model"], "ollama/llama3.1")
+            self.assertEqual(kwargs["api_base"], "http://localhost:11434")
+            self.assertNotIn("api_key", kwargs)
+
+    def test_lmstudio_provider_allows_missing_key_and_omits_api_key_param(self):
+        cfg = DummyConfig(provider="lmstudio", model="local-model", api_key=None, api_base="http://localhost:1234/v1")
+        client = LLMClient(config=cfg)
+        messages = [{"role": "user", "content": "hello"}]
+
+        with patch("supabash.llm.litellm.completion") as mock_completion:
+            mock_completion.return_value = {"choices": [{"message": {"content": "hi"}}]}
+            content = client.chat(messages)
+            self.assertEqual(content, "hi")
+            _, kwargs = mock_completion.call_args
+            self.assertEqual(kwargs["model"], "local-model")
+            self.assertEqual(kwargs["api_base"], "http://localhost:1234/v1")
+            self.assertNotIn("api_key", kwargs)
+
     def test_missing_model_raises(self):
         cfg = DummyConfig(model=None)
         client = LLMClient(config=cfg)

@@ -14,6 +14,8 @@ from supabash.tools.rustscan import RustscanScanner
 from supabash.chat import ChatSession
 from supabash.safety import is_allowed_target, is_public_ip_target
 from supabash.audit import AuditOrchestrator
+from supabash.session_state import default_chat_state_path, clear_state as clear_session_state
+from supabash.react import ReActOrchestrator
 
 app = typer.Typer(
     name="supabash",
@@ -199,6 +201,8 @@ def audit(
     nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
     gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
     gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
+    parallel_web: bool = typer.Option(False, "--parallel-web", help="Run web tools in parallel (URL targets can overlap with recon)"),
+    max_workers: int = typer.Option(3, "--max-workers", help="Max concurrent workers when --parallel-web is enabled"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
     min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
@@ -241,6 +245,8 @@ def audit(
             nuclei_rate_limit=nuclei_rate_limit,
             gobuster_threads=gobuster_threads,
             gobuster_wordlist=gobuster_wordlist,
+            parallel_web=parallel_web,
+            max_workers=max_workers,
             remediate=remediate,
             max_remediations=max_remediations,
             min_remediation_severity=min_remediation_severity,
@@ -260,10 +266,82 @@ def audit(
         console.print(f"[green]Markdown report written to {md_path}[/green]")
 
 @app.command()
+def react(
+    target: str = typer.Argument(..., help="Target IP or URL"),
+    output: str = typer.Option("react_report.json", "--output", "-o", help="Output JSON report path"),
+    markdown: str = typer.Option(None, "--markdown", "-m", help="Optional markdown report path"),
+    allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
+    allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
+    consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
+    mode: str = typer.Option("normal", "--mode", help="Scan mode: normal|stealth|aggressive"),
+    nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
+    gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
+    gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
+    remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate remediation steps + code snippets"),
+    max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
+    min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
+    max_actions: int = typer.Option(10, "--max-actions", help="Maximum planned actions to execute in the loop"),
+):
+    """
+    ReAct loop (plan → execute → summarize) driven by scan results.
+    """
+    allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
+    if not allow_unsafe and not is_allowed_target(target, allowed):
+        console.print(f"[red]Target '{target}' not in allowed_hosts. Edit config.yaml or use --force to proceed.[/red]")
+        raise typer.Exit(code=1)
+
+    allow_public_cfg = bool(config_manager.config.get("core", {}).get("allow_public_ips", False))
+    if is_public_ip_target(target) and not (allow_public_cfg or allow_public):
+        console.print(
+            "[red]Refusing to scan public IP targets by default.[/red] "
+            "Set `core.allow_public_ips=true` in `config.yaml` or pass `--allow-public` (only if you are authorized)."
+        )
+        raise typer.Exit(code=1)
+
+    if mode not in ("normal", "stealth", "aggressive"):
+        console.print("[red]Invalid mode. Choose: normal, stealth, aggressive[/red]")
+        raise typer.Exit(code=1)
+
+    from supabash.safety import ensure_consent
+    if not ensure_consent(config_manager, assume_yes=consent):
+        console.print("[yellow]Consent not confirmed. Aborting.[/yellow]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold red][*] Starting ReAct loop for {target}...[/bold red]")
+    orchestrator = ReActOrchestrator()
+    with console.status("[bold green]Running ReAct loop...[/bold green]"):
+        report = orchestrator.run(
+            target,
+            Path(output) if output else None,
+            mode=mode,
+            nuclei_rate_limit=nuclei_rate_limit,
+            gobuster_threads=gobuster_threads,
+            gobuster_wordlist=gobuster_wordlist,
+            remediate=remediate,
+            max_remediations=max_remediations,
+            min_remediation_severity=min_remediation_severity,
+            max_actions=max_actions,
+        )
+
+    saved_path = report.get("saved_to")
+    if saved_path:
+        console.print(f"[bold green]ReAct complete.[/bold green] Report saved to [cyan]{saved_path}[/cyan]")
+    else:
+        console.print("[yellow]ReAct completed but did not write a report file.[/yellow]")
+        if "write_error" in report:
+            console.print(f"[red]{report['write_error']}[/red]")
+
+    if markdown:
+        from supabash.report import write_markdown
+        md_path = write_markdown(report, Path(markdown))
+        console.print(f"[green]Markdown report written to {md_path}[/green]")
+
+@app.command()
 def config(
-    provider: str = typer.Option(None, "--provider", "-p", help="Set active AI Provider (openai, anthropic, gemini)"),
+    provider: str = typer.Option(None, "--provider", "-p", help="Set active LLM provider (openai, anthropic, gemini, ollama, lmstudio, or custom)"),
     key: str = typer.Option(None, "--key", "-k", help="Set API Key for the selected/active provider"),
     model: str = typer.Option(None, "--model", "-m", help="Set Model name for the selected/active provider"),
+    api_base: str = typer.Option(None, "--api-base", help="Set API base URL for the selected/active provider"),
     allow_host: str = typer.Option(None, "--allow-host", help="Add an allowed host/IP/CIDR entry"),
     remove_host: str = typer.Option(None, "--remove-host", help="Remove an allowed host/IP/CIDR entry"),
     list_allowed_hosts: bool = typer.Option(False, "--list-allowed-hosts", help="List allowed hosts"),
@@ -282,7 +360,7 @@ def config(
     console.print(Panel("[bold green]Configuration Manager[/bold green]", expand=False))
     
     # 1. Handle Flags (Non-Interactive Mode)
-    if provider or key or model or allow_host or remove_host or list_allowed_hosts or accept_consent or reset_consent or allow_public_ips is not None:
+    if provider or key or model or api_base or allow_host or remove_host or list_allowed_hosts or accept_consent or reset_consent or allow_public_ips is not None:
         any_changes = False
 
         if list_allowed_hosts:
@@ -317,15 +395,13 @@ def config(
             console.print(f"[yellow]Public IP scanning {state}[/yellow] (core.allow_public_ips={bool(allow_public_ips)})")
             any_changes = True
 
-        if provider or key or model:
+        if provider or key or model or api_base:
             current_llm = config_manager.get_llm_config()
             # Determine which provider we are editing (defaults to active if not specified)
             target_provider = provider if provider else current_llm["provider"]
             
-            # Validate provider
-            if target_provider not in ["openai", "anthropic", "gemini"]:
-                 # If user wants to add a custom one, we allow it, but warn
-                 console.print(f"[yellow]Warning: '{target_provider}' is not a standard provider.[/yellow]")
+            if target_provider not in ["openai", "anthropic", "gemini", "ollama", "lmstudio"]:
+                console.print(f"[yellow]Warning: '{target_provider}' is not a standard provider.[/yellow]")
 
             if provider:
                 config_manager.set_active_provider(provider)
@@ -341,6 +417,12 @@ def config(
                 config_manager.set_model(target_provider, model)
                 console.print(f"Model updated for [cyan]{target_provider}[/cyan] to: [green]{model}[/green]")
                 any_changes = True
+
+            if api_base is not None:
+                config_manager.set_api_base(target_provider, api_base)
+                shown = api_base if api_base else "(cleared)"
+                console.print(f"API base updated for [cyan]{target_provider}[/cyan] to: [green]{shown}[/green]")
+                any_changes = True
             
         if any_changes:
             console.print(f"[bold green]Configuration saved to {config_manager.config_file}[/bold green]")
@@ -350,7 +432,7 @@ def config(
     llm_config = config_manager.config.get("llm", {})
     current_provider = llm_config.get("provider", "openai")
     
-    available_providers = [k for k in llm_config.keys() if k != "provider"]
+    available_providers = [k for k, v in llm_config.items() if k != "provider" and isinstance(v, dict)]
     
     console.print(f"Current Active Provider: [bold cyan]{current_provider.upper()}[/bold cyan]")
     console.print(f"Config File: [dim]{config_manager.config_file}[/dim]")
@@ -364,7 +446,12 @@ def config(
             is_active = " (Active)" if prov == current_provider else ""
             details = llm_config[prov]
             model_name = details.get("model", "unknown")
-            key_status = "OK" if details.get("api_key") and details.get("api_key") != "YOUR_KEY_HERE" else "MISSING"
+            key_val = details.get("api_key")
+            if prov in ("ollama", "lmstudio"):
+                key_status = "N/A"
+            else:
+                key_ok = bool(key_val) and str(key_val).strip() not in ("YOUR_KEY_HERE", "None", "none", "null")
+                key_status = "OK" if key_ok else "MISSING"
             
             console.print(f"{i}. [green]{prov}[/green] [dim]({model_name})[/dim] - Key: {key_status}{is_active}")
 
@@ -385,7 +472,7 @@ def config(
             console.print(f"[red]Error: Provider '{new_name}' already exists. Use edit mode.[/red]")
             return
             
-        new_key = typer.prompt("Enter API Key (or 'None' for local)", hide_input=True)
+        new_key = typer.prompt("Enter API Key (press Enter for none/local)", default="", hide_input=True)
         new_model = typer.prompt("Enter Model Name (e.g. 'mistral', 'gpt-4')")
         new_base = typer.prompt("Enter API Base URL (Optional, press Enter to skip)", default="")
         
@@ -440,9 +527,13 @@ def chat():
     """
     logger.info("Command 'chat' triggered")
     console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
-    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /audit, /details [tool], /report, /test, /summary, /fix, /plan[/dim]")
+    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /audit, /status, /stop, /details [tool], /report, /test, /summary, /fix, /plan, /clear-state[/dim]")
     allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
     session = ChatSession(allowed_hosts=allowed, config_manager=config_manager)
+    state_path = default_chat_state_path()
+    loaded = session.load_state(state_path)
+    if loaded.get("success"):
+        console.print(f"[dim]Resumed last session state from {loaded.get('path')}[/dim]")
 
     def show_scan(result):
         if not result.get("success"):
@@ -503,6 +594,85 @@ def chat():
             continue
         if user_input.strip().lower() in ("exit", "quit"):
             break
+        if user_input.startswith("/clear-state"):
+            if clear_session_state(state_path):
+                session.last_scan_result = None
+                session.last_scan_tool = None
+                session.last_audit_report = None
+                session.last_result_kind = None
+                session.last_llm_meta = None
+                session.last_clarifier = None
+                console.print("[green]Cleared chat state.[/green]")
+            else:
+                console.print("[yellow]Failed to clear state.[/yellow]")
+            continue
+        if user_input.startswith("/status"):
+            try:
+                parts = shlex.split(user_input)
+            except ValueError as e:
+                console.print(f"[red]Parse error:[/red] {e}")
+                continue
+            watch = "--watch" in parts
+            verbose = "--verbose" in parts
+            interval = 1.0
+            if "--interval" in parts:
+                try:
+                    idx = parts.index("--interval")
+                    interval = float(parts[idx + 1])
+                except Exception:
+                    interval = 1.0
+            interval = max(0.2, min(interval, 10.0))
+
+            def render_once():
+                done = session.finalize_job_if_done()
+                status = session.job_status()
+                if done and done.get("status") is not None:
+                    status_obj = done["status"]
+                    result = done.get("result")
+                    console.print(f"[green]Job {status_obj.job_id} finished ({status_obj.state}) in {status_obj.elapsed_seconds():.1f}s[/green]")
+                    if status_obj.kind == "scan" and isinstance(result, dict):
+                        show_scan(result)
+                    elif status_obj.kind == "audit" and isinstance(result, dict):
+                        show_audit(result)
+                    session.save_state(state_path)
+                    return True
+                if status:
+                    console.print(
+                        f"[cyan]Job {status.job_id} ({status.kind})[/cyan] target={status.target} "
+                        f"state={status.state} elapsed={status.elapsed_seconds():.1f}s step={status.current_step or '-'}"
+                    )
+                    if status.message:
+                        console.print(f"[dim]{status.message}[/dim]")
+                    if verbose and getattr(status, "events", None):
+                        events = list(status.events)[-8:]
+                        if events:
+                            console.print("[dim]Recent:[/dim]")
+                            for ev in events:
+                                console.print(f"[dim]- {ev}[/dim]")
+                else:
+                    console.print("[dim]No active job.[/dim]")
+                return False
+
+            if watch:
+                try:
+                    while True:
+                        finished = render_once()
+                        if finished:
+                            break
+                        import time as _time
+                        _time.sleep(interval)
+                except KeyboardInterrupt:
+                    console.print("[yellow]Stopped watching.[/yellow]")
+            else:
+                render_once()
+            continue
+
+        if user_input.startswith("/stop"):
+            if session.stop_job():
+                console.print("[yellow]Stop requested. Use /status to see when it stops.[/yellow]")
+            else:
+                console.print("[dim]No active job to stop.[/dim]")
+            continue
 
         if user_input.startswith("/scan"):
             try:
@@ -514,6 +684,7 @@ def chat():
             profile = "fast"
             scanner_name = "nmap"
             allow_public = False
+            bg = False
             for i, token in enumerate(parts[1:], start=1):
                 if token in ("--profile", "-p") and i + 1 < len(parts):
                     profile = parts[i + 1]
@@ -521,15 +692,25 @@ def chat():
                     scanner_name = parts[i + 1]
                 elif token == "--allow-public":
                     allow_public = True
+                elif token == "--bg":
+                    bg = True
                 elif not token.startswith("-") and target is None:
                     target = token
             if not target:
-                console.print("[red]Usage:[/red] /scan <target> [--profile fast|full|stealth] [--scanner nmap|masscan|rustscan] [--allow-public]")
+                console.print("[red]Usage:[/red] /scan <target> [--profile fast|full|stealth] [--scanner nmap|masscan|rustscan] [--allow-public] [--bg]")
                 continue
-            console.print(f"[cyan]Starting scan ({profile}) with {scanner_name} against {target}...[/cyan]")
-            with console.status("[green]Running scan...[/green]"):
-                res = session.run_scan(target, profile=profile, scanner_name=scanner_name, allow_public=allow_public)
-            show_scan(res)
+            if bg:
+                try:
+                    job = session.start_scan_job(target, profile=profile, scanner_name=scanner_name, allow_public=allow_public)
+                    console.print(f"[cyan]Scan job started (id={job.job_id}). Use /status or /stop.[/cyan]")
+                except Exception as e:
+                    console.print(f"[red]Failed to start job:[/red] {e}")
+            else:
+                console.print(f"[cyan]Starting scan ({profile}) with {scanner_name} against {target}...[/cyan]")
+                with console.status("[green]Running scan...[/green]"):
+                    res = session.run_scan(target, profile=profile, scanner_name=scanner_name, allow_public=allow_public)
+                show_scan(res)
+                session.save_state(state_path)
             continue
 
         if user_input.startswith("/audit"):
@@ -551,6 +732,9 @@ def chat():
             max_remediations = 5
             min_remediation_severity = "MEDIUM"
             allow_public = False
+            parallel_web = False
+            max_workers = 3
+            bg = False
 
             i = 1
             while i < len(parts):
@@ -569,6 +753,14 @@ def chat():
                     continue
                 if token == "--gobuster-wordlist" and i + 1 < len(parts):
                     gobuster_wordlist = parts[i + 1]
+                    i += 2
+                    continue
+                if token == "--parallel-web":
+                    parallel_web = True
+                    i += 1
+                    continue
+                if token == "--max-workers" and i + 1 < len(parts):
+                    max_workers = int(parts[i + 1])
                     i += 2
                     continue
                 if token == "--container-image" and i + 1 < len(parts):
@@ -599,6 +791,10 @@ def chat():
                     allow_public = True
                     i += 1
                     continue
+                if token == "--bg":
+                    bg = True
+                    i += 1
+                    continue
                 if not token.startswith("-") and target is None:
                     target = token
                     i += 1
@@ -609,28 +805,54 @@ def chat():
                 console.print(
                     "[red]Usage:[/red] /audit <target> [--mode normal|stealth|aggressive] "
                     "[--nuclei-rate N] [--gobuster-threads N] [--gobuster-wordlist PATH] "
+                    "[--parallel-web] [--max-workers N] "
                     "[--container-image IMG] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
-                    "[--output report.json] [--markdown report.md] [--allow-public]"
+                    "[--output report.json] [--markdown report.md] [--allow-public] [--bg]"
                 )
                 continue
 
-            console.print(f"[cyan]Starting audit ({mode}) against {target}...[/cyan]")
-            with console.status("[green]Running audit...[/green]"):
-                rep = session.run_audit(
-                    target,
-                    mode=mode,
-                    nuclei_rate_limit=nuclei_rate,
-                    gobuster_threads=gobuster_threads,
-                    gobuster_wordlist=gobuster_wordlist,
-                    container_image=container_image,
-                    remediate=remediate,
-                    max_remediations=max_remediations,
-                    min_remediation_severity=min_remediation_severity,
-                    allow_public=allow_public,
-                    output=Path(output) if output else None,
-                    markdown=Path(markdown) if markdown else None,
-                )
-            show_audit(rep)
+            if bg:
+                try:
+                    job = session.start_audit_job(
+                        target,
+                        mode=mode,
+                        nuclei_rate_limit=nuclei_rate,
+                        gobuster_threads=gobuster_threads,
+                        gobuster_wordlist=gobuster_wordlist,
+                        parallel_web=parallel_web,
+                        max_workers=max_workers,
+                        container_image=container_image,
+                        remediate=remediate,
+                        max_remediations=max_remediations,
+                        min_remediation_severity=min_remediation_severity,
+                        allow_public=allow_public,
+                        output=Path(output) if output else None,
+                        markdown=Path(markdown) if markdown else None,
+                    )
+                    console.print(f"[cyan]Audit job started (id={job.job_id}). Use /status or /stop.[/cyan]")
+                except Exception as e:
+                    console.print(f"[red]Failed to start job:[/red] {e}")
+            else:
+                console.print(f"[cyan]Starting audit ({mode}) against {target}...[/cyan]")
+                with console.status("[green]Running audit...[/green]"):
+                    rep = session.run_audit(
+                        target,
+                        mode=mode,
+                        nuclei_rate_limit=nuclei_rate,
+                        gobuster_threads=gobuster_threads,
+                        gobuster_wordlist=gobuster_wordlist,
+                        parallel_web=parallel_web,
+                        max_workers=max_workers,
+                        container_image=container_image,
+                        remediate=remediate,
+                        max_remediations=max_remediations,
+                        min_remediation_severity=min_remediation_severity,
+                        allow_public=allow_public,
+                        output=Path(output) if output else None,
+                        markdown=Path(markdown) if markdown else None,
+                    )
+                show_audit(rep)
+                session.save_state(state_path)
             continue
 
         if user_input.startswith("/details"):

@@ -13,7 +13,7 @@ class NucleiScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, templates: str = None, rate_limit: int = None) -> Dict[str, Any]:
+    def scan(self, target: str, templates: str = None, rate_limit: int = None, cancel_event=None) -> Dict[str, Any]:
         """
         Executes a Nuclei scan against the target.
         
@@ -41,13 +41,17 @@ class NucleiScanner:
             command.extend(["-rate-limit", str(rate_limit)])
 
         # Nuclei can take a while depending on templates, default 30 min
-        result: CommandResult = self.runner.run(command, timeout=1800)
+        kwargs = {"timeout": 1800}
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Nuclei scan failed: {result.stderr}")
             return {
                 "success": False,
                 "error": result.stderr,
+                "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout
             }
 

@@ -50,3 +50,4 @@ coverage.xml
 config.yaml
 secrets.json
 openai_key.txt
+.supabash/

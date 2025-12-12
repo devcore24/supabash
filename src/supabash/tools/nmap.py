@@ -13,7 +13,7 @@ class NmapScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, ports: str = None, arguments: str = "-sV -O") -> Dict[str, Any]:
+    def scan(self, target: str, ports: str = None, arguments: str = "-sV -O", cancel_event=None) -> Dict[str, Any]:
         """
         Executes an Nmap scan against the target.
         
@@ -38,13 +38,17 @@ class NmapScanner:
             # simple split, might need more robust shlex split if args contain quotes
             command.extend(arguments.split())
 
-        result: CommandResult = self.runner.run(command, timeout=600) # 10 min timeout default
+        kwargs = {"timeout": 600}  # 10 min timeout default
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Nmap scan failed: {result.stderr}")
             return {
                 "success": False,
                 "error": result.stderr,
+                "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout
             }
 

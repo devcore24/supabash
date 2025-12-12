@@ -1,0 +1,6 @@
+admin
+login
+robots.txt
+.git
+api
+health

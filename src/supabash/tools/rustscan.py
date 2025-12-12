@@ -13,7 +13,7 @@ class RustscanScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, ports: str = "1-1000", batch: int = 2000, arguments: str = None) -> Dict[str, Any]:
+    def scan(self, target: str, ports: str = "1-1000", batch: int = 2000, arguments: str = None, cancel_event=None) -> Dict[str, Any]:
         """
         Executes a Rustscan scan against the target.
 
@@ -40,13 +40,17 @@ class RustscanScanner:
         if arguments:
             command.extend(arguments.split())
 
-        result: CommandResult = self.runner.run(command, timeout=600)
+        kwargs = {"timeout": 600}
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Rustscan failed: {result.stderr}")
             return {
                 "success": False,
                 "error": result.stderr,
+                "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout
             }
 

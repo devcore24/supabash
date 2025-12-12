@@ -14,7 +14,7 @@ class WhatWebScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, arguments: str = None) -> Dict[str, Any]:
+    def scan(self, target: str, arguments: str = None, cancel_event=None) -> Dict[str, Any]:
         """
         Executes a WhatWeb scan against the target.
 
@@ -31,13 +31,17 @@ class WhatWebScanner:
         if arguments:
             command.extend(arguments.split())
 
-        result: CommandResult = self.runner.run(command, timeout=300)
+        kwargs = {"timeout": 300}
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"WhatWeb scan failed: {result.stderr}")
             return {
                 "success": False,
                 "error": result.stderr,
+                "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout
             }
 

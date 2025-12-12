@@ -15,6 +15,10 @@ class FakeAuditOrchestrator:
 
     def run(self, target, output, **kwargs):
         self.calls.append((target, output, kwargs))
+        progress_cb = kwargs.get("progress_cb")
+        if callable(progress_cb):
+            progress_cb(event="tool_start", tool="nmap", message="Running nmap", agg={"target": target})
+            progress_cb(event="tool_end", tool="nmap", message="Finished nmap", agg={"target": target})
         return {
             "target": target,
             "results": [{"tool": "nmap", "success": True, "data": {"scan_data": {"hosts": []}}}],
@@ -39,6 +43,22 @@ class TestChatAudit(unittest.TestCase):
         self.assertIsNotNone(entry)
         self.assertEqual(entry.get("tool"), "nmap")
 
+    def test_audit_bg_job_records_events(self):
+        fake = FakeAuditOrchestrator()
+        session = ChatSession(scanners={}, llm=None, config_manager=DummyConfigManager())
+        session.audit_orchestrator_factory = lambda: fake
+        job = session.start_audit_job("10.0.0.3")
+        # wait until done
+        for _ in range(50):
+            done = session.finalize_job_if_done()
+            if done:
+                break
+            import time
+            time.sleep(0.01)
+        self.assertIsNotNone(done)
+        status = done["status"]
+        self.assertTrue(status.events)
+
     def test_run_audit_allows_optional_output(self):
         fake = FakeAuditOrchestrator()
         session = ChatSession(scanners={}, llm=None, config_manager=DummyConfigManager())
@@ -50,4 +70,3 @@ class TestChatAudit(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

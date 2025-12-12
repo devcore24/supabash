@@ -39,6 +39,9 @@ class TestGobusterScanner(unittest.TestCase):
         self.assertIn("-u", command)
         self.assertIn("http://example.com", command)
         self.assertIn("-w", command)
+        # should choose a default wordlist (system or bundled)
+        w_index = command.index("-w")
+        self.assertTrue(command[w_index + 1])
         self.assertIn("-t", command)
 
     def test_scan_threads_override(self):

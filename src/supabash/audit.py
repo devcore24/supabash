@@ -2,6 +2,9 @@ import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse
+import time
+from threading import Event
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from supabash.logger import setup_logger
 from supabash.tools import (
@@ -334,6 +337,10 @@ class AuditOrchestrator:
         remediate: bool = False,
         max_remediations: int = 5,
         min_remediation_severity: str = "MEDIUM",
+        cancel_event: Optional[Event] = None,
+        progress_cb: Optional[Any] = None,
+        parallel_web: bool = False,
+        max_workers: int = 3,
     ) -> Dict[str, Any]:
         normalized = self._normalize_target(target)
         scan_host = normalized["scan_host"]
@@ -343,6 +350,7 @@ class AuditOrchestrator:
             "scan_host": scan_host,
             "results": [],
             "mode": mode,
+            "started_at": time.time(),
             "tuning": {
                 "nuclei_rate_limit": nuclei_rate_limit or None,
                 "gobuster_threads": gobuster_threads,
@@ -352,32 +360,182 @@ class AuditOrchestrator:
         if container_image:
             agg["container_image"] = container_image
 
-        # Recon & web scans
-        nmap_entry = self._run_tool("nmap", lambda: self.scanners["nmap"].scan(scan_host, arguments=self._nmap_args_for_mode(mode)))
-        agg["results"].append(nmap_entry)
+        def canceled() -> bool:
+            return bool(cancel_event and cancel_event.is_set())
 
+        def note(event: str, tool: str = "", message: str = "") -> None:
+            if callable(progress_cb):
+                try:
+                    progress_cb(event=event, tool=tool, message=message, agg=agg)
+                except Exception:
+                    pass
+
+        def run_nmap() -> Dict[str, Any]:
+            return self._run_tool(
+                "nmap",
+                lambda: self.scanners["nmap"].scan(
+                    scan_host,
+                    arguments=self._nmap_args_for_mode(mode),
+                    cancel_event=cancel_event,
+                ),
+            )
+
+        def run_web_tools(web_target: str) -> List[Dict[str, Any]]:
+            if not parallel_web:
+                # Sequential (default)
+                results: List[Dict[str, Any]] = []
+                note("tool_start", "whatweb", "Running whatweb")
+                whatweb_entry = self._run_tool("whatweb", lambda: self.scanners["whatweb"].scan(web_target, cancel_event=cancel_event))
+                note("tool_end", "whatweb", "Finished whatweb")
+                results.append(whatweb_entry)
+                if canceled() or (isinstance(whatweb_entry.get("data"), dict) and whatweb_entry["data"].get("canceled")):
+                    return results
+
+                note("tool_start", "nuclei", "Running nuclei")
+                nuclei_entry = self._run_tool(
+                    "nuclei",
+                    lambda: self.scanners["nuclei"].scan(web_target, rate_limit=nuclei_rate_limit or None, cancel_event=cancel_event),
+                )
+                note("tool_end", "nuclei", "Finished nuclei")
+                results.append(nuclei_entry)
+                if canceled() or (isinstance(nuclei_entry.get("data"), dict) and nuclei_entry["data"].get("canceled")):
+                    return results
+
+                note("tool_start", "gobuster", "Running gobuster")
+                if gobuster_wordlist:
+                    gobuster_entry = self._run_tool(
+                        "gobuster",
+                        lambda: self.scanners["gobuster"].scan(
+                            web_target,
+                            wordlist=gobuster_wordlist,
+                            threads=gobuster_threads,
+                            cancel_event=cancel_event,
+                        ),
+                    )
+                else:
+                    gobuster_entry = self._run_tool(
+                        "gobuster",
+                        lambda: self.scanners["gobuster"].scan(
+                            web_target,
+                            threads=gobuster_threads,
+                            cancel_event=cancel_event,
+                        ),
+                    )
+                note("tool_end", "gobuster", "Finished gobuster")
+                results.append(gobuster_entry)
+                return results
+
+            # Parallel web tooling
+            futures = {}
+            results: List[Dict[str, Any]] = []
+            max_w = max(1, min(int(max_workers), 8))
+            with ThreadPoolExecutor(max_workers=max_w) as ex:
+                note("tool_start", "whatweb", "Running whatweb")
+                futures[ex.submit(self._run_tool, "whatweb", lambda: self.scanners["whatweb"].scan(web_target, cancel_event=cancel_event))] = "whatweb"
+                note("tool_start", "nuclei", "Running nuclei")
+                futures[ex.submit(self._run_tool, "nuclei", lambda: self.scanners["nuclei"].scan(web_target, rate_limit=nuclei_rate_limit or None, cancel_event=cancel_event))] = "nuclei"
+                note("tool_start", "gobuster", "Running gobuster")
+                if gobuster_wordlist:
+                    futures[
+                        ex.submit(
+                            self._run_tool,
+                            "gobuster",
+                            lambda: self.scanners["gobuster"].scan(
+                                web_target,
+                                wordlist=gobuster_wordlist,
+                                threads=gobuster_threads,
+                                cancel_event=cancel_event,
+                            ),
+                        )
+                    ] = "gobuster"
+                else:
+                    futures[
+                        ex.submit(
+                            self._run_tool,
+                            "gobuster",
+                            lambda: self.scanners["gobuster"].scan(
+                                web_target,
+                                threads=gobuster_threads,
+                                cancel_event=cancel_event,
+                            ),
+                        )
+                    ] = "gobuster"
+
+                for fut in as_completed(futures):
+                    tool = futures.get(fut, "tool")
+                    try:
+                        entry = fut.result()
+                    except Exception as e:
+                        entry = {"tool": tool, "success": False, "error": str(e)}
+                    results.append(entry)
+                    note("tool_end", tool, f"Finished {tool}")
+            return results
+
+        # Recon & web scans (optional parallel overlap)
+        nmap_entry: Optional[Dict[str, Any]] = None
         web_targets: List[str] = []
         if normalized["base_url"]:
             web_targets = [normalized["base_url"]]
-        elif nmap_entry.get("success"):
-            web_targets = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
         agg["web_targets"] = web_targets
 
-        if web_targets:
+        if canceled():
+            agg["canceled"] = True
+            agg["finished_at"] = time.time()
+            return agg
+
+        if parallel_web and web_targets:
+            # Overlap nmap with web tools when URL is provided
             web_target = web_targets[0]
-            agg["results"].append(self._run_tool("whatweb", lambda: self.scanners["whatweb"].scan(web_target)))
-            agg["results"].append(self._run_tool("nuclei", lambda: self.scanners["nuclei"].scan(web_target, rate_limit=nuclei_rate_limit or None)))
-            if gobuster_wordlist:
-                agg["results"].append(self._run_tool("gobuster", lambda: self.scanners["gobuster"].scan(web_target, wordlist=gobuster_wordlist, threads=gobuster_threads)))
-            else:
-                agg["results"].append(self._run_tool("gobuster", lambda: self.scanners["gobuster"].scan(web_target, threads=gobuster_threads)))
+            max_w = max(1, min(int(max_workers), 8))
+            with ThreadPoolExecutor(max_workers=max_w) as ex:
+                note("tool_start", "nmap", f"Running nmap ({mode})")
+                nmap_future = ex.submit(run_nmap)
+                web_future = ex.submit(run_web_tools, web_target)
+
+                nmap_entry = nmap_future.result()
+                agg["results"].append(nmap_entry)
+                note("tool_end", "nmap", "Finished nmap")
+
+                for entry in web_future.result():
+                    agg["results"].append(entry)
+
         else:
-            agg["results"].append(self._skip_tool("whatweb", "No web ports detected (80/443/8080/8443)"))
-            agg["results"].append(self._skip_tool("nuclei", "No web ports detected (80/443/8080/8443)"))
-            agg["results"].append(self._skip_tool("gobuster", "No web ports detected (80/443/8080/8443)"))
+            # Run nmap first (required to discover web targets)
+            note("tool_start", "nmap", f"Running nmap ({mode})")
+            nmap_entry = run_nmap()
+            agg["results"].append(nmap_entry)
+            note("tool_end", "nmap", "Finished nmap")
+
+            if canceled() or (isinstance(nmap_entry.get("data"), dict) and nmap_entry["data"].get("canceled")):
+                agg["canceled"] = True
+                agg["finished_at"] = time.time()
+                return agg
+
+            if not web_targets and nmap_entry.get("success"):
+                web_targets = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
+                agg["web_targets"] = web_targets
+
+            if web_targets:
+                for entry in run_web_tools(web_targets[0]):
+                    agg["results"].append(entry)
+            else:
+                agg["results"].append(self._skip_tool("whatweb", "No web ports detected (80/443/8080/8443)"))
+                agg["results"].append(self._skip_tool("nuclei", "No web ports detected (80/443/8080/8443)"))
+                agg["results"].append(self._skip_tool("gobuster", "No web ports detected (80/443/8080/8443)"))
 
         if normalized["sqlmap_url"]:
-            agg["results"].append(self._run_tool("sqlmap", lambda: self.scanners["sqlmap"].scan(normalized["sqlmap_url"])))
+            if canceled():
+                agg["canceled"] = True
+                agg["finished_at"] = time.time()
+                return agg
+            note("tool_start", "sqlmap", "Running sqlmap")
+            sqlmap_entry = self._run_tool("sqlmap", lambda: self.scanners["sqlmap"].scan(normalized["sqlmap_url"], cancel_event=cancel_event))
+            agg["results"].append(sqlmap_entry)
+            note("tool_end", "sqlmap", "Finished sqlmap")
+            if canceled() or (isinstance(sqlmap_entry.get("data"), dict) and sqlmap_entry["data"].get("canceled")):
+                agg["canceled"] = True
+                agg["finished_at"] = time.time()
+                return agg
         else:
             agg["results"].append(self._skip_tool("sqlmap", "No parameterized URL provided (include '?' in target URL)"))
 
@@ -388,13 +546,33 @@ class AuditOrchestrator:
                 supabase_url = u
                 break
         if supabase_url:
+            if canceled():
+                agg["canceled"] = True
+                agg["finished_at"] = time.time()
+                return agg
+            note("tool_start", "supabase_rls", "Running supabase RLS check")
             agg["results"].append(self._run_tool("supabase_rls", lambda: self.scanners["supabase_rls"].check(supabase_url)))
+            note("tool_end", "supabase_rls", "Finished supabase RLS check")
 
         if container_image:
-            agg["results"].append(
-                self._run_tool("trivy", lambda: self.scanners["trivy"].scan(container_image))
-            )
+            if canceled():
+                agg["canceled"] = True
+                agg["finished_at"] = time.time()
+                return agg
+            note("tool_start", "trivy", "Running trivy")
+            trivy_entry = self._run_tool("trivy", lambda: self.scanners["trivy"].scan(container_image, cancel_event=cancel_event))
+            agg["results"].append(trivy_entry)
+            note("tool_end", "trivy", "Finished trivy")
+            if canceled() or (isinstance(trivy_entry.get("data"), dict) and trivy_entry["data"].get("canceled")):
+                agg["canceled"] = True
+                agg["finished_at"] = time.time()
+                return agg
 
+        if canceled():
+            agg["canceled"] = True
+            agg["finished_at"] = time.time()
+            return agg
+        note("llm_start", "summary", "Summarizing with LLM")
         summary, llm_meta = self._summarize_with_llm(agg)
         if llm_meta:
             self._append_llm_call(agg, llm_meta)
@@ -410,6 +588,7 @@ class AuditOrchestrator:
             min_severity=min_remediation_severity,
         )
         agg["findings"] = findings
+        agg["finished_at"] = time.time()
 
         if output is not None:
             try:

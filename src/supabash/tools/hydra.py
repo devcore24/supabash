@@ -21,6 +21,7 @@ class HydraRunner:
         usernames: str,
         passwords: str,
         options: str = None,
+        cancel_event=None,
     ) -> Dict[str, Any]:
         """
         Executes a Hydra brute-force attempt.
@@ -54,10 +55,13 @@ class HydraRunner:
         if options:
             command[1:1] = options.split()
 
-        result: CommandResult = self.runner.run(command, timeout=3600)
+        kwargs = {"timeout": 3600}
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
+        result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Hydra failed: {result.stderr}")
-            return {"success": False, "error": result.stderr, "raw_output": result.stdout}
+            return {"success": False, "error": result.stderr, "canceled": bool(getattr(result, "canceled", False)), "raw_output": result.stdout}
 
         return {"success": True, "raw_output": result.stdout, "command": result.command}

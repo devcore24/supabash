@@ -33,3 +33,13 @@ llm:
     api_key: YOUR_MISTRAL_KEY
     model: mistral-large-latest
     api_base: https://api.mistral.ai/v1
+  # Local models via Ollama (no API key required)
+  ollama:
+    api_key: null
+    model: ollama/llama3.1
+    api_base: http://localhost:11434
+  # Local models via LM Studio (OpenAI-compatible; no API key required)
+  lmstudio:
+    api_key: null
+    model: local-model
+    api_base: http://localhost:1234/v1
