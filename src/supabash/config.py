@@ -3,7 +3,7 @@ import yaml
 import typer
 from pathlib import Path
 from rich.console import Console
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 console = Console()
 
@@ -21,7 +21,11 @@ FALLBACK_CONFIG_FILE = FALLBACK_CONFIG_DIR / "config.yaml"
 DEFAULT_CONFIG = {
     "core": {
         "log_level": "INFO",
-        "save_reports": True
+        "save_reports": True,
+        "allowed_hosts": ["localhost", "127.0.0.1"],
+        "consent_accepted": False,
+        # Safety: require explicit opt-in for public IP targets
+        "allow_public_ips": False,
     },
     "llm": {
         "provider": "openai",  # active provider: openai, anthropic, gemini
@@ -82,6 +86,11 @@ class ConfigManager:
                 if not loaded:
                     return DEFAULT_CONFIG
                 # Basic merge to ensure structure
+                if "core" not in loaded:
+                    loaded["core"] = DEFAULT_CONFIG["core"]
+                else:
+                    for k, v in DEFAULT_CONFIG["core"].items():
+                        loaded["core"].setdefault(k, v)
                 if "llm" not in loaded:
                     loaded["llm"] = DEFAULT_CONFIG["llm"]
                 if use_fallback:
@@ -134,6 +143,37 @@ class ConfigManager:
         if provider not in self.config["llm"]:
             self.config["llm"][provider] = {}
         self.config["llm"][provider]["model"] = model
+        self.save_config(self.config)
+
+    def get_allowed_hosts(self) -> List[str]:
+        core = self.config.setdefault("core", {})
+        return list(core.get("allowed_hosts", []))
+
+    def add_allowed_host(self, entry: str):
+        core = self.config.setdefault("core", {})
+        allowed = core.setdefault("allowed_hosts", [])
+        if entry not in allowed:
+            allowed.append(entry)
+        self.save_config(self.config)
+
+    def remove_allowed_host(self, entry: str):
+        core = self.config.setdefault("core", {})
+        allowed = core.setdefault("allowed_hosts", [])
+        core["allowed_hosts"] = [x for x in allowed if x != entry]
+        self.save_config(self.config)
+
+    def set_consent_accepted(self, accepted: bool):
+        core = self.config.setdefault("core", {})
+        core["consent_accepted"] = bool(accepted)
+        self.save_config(self.config)
+
+    def get_allow_public_ips(self) -> bool:
+        core = self.config.setdefault("core", {})
+        return bool(core.get("allow_public_ips", False))
+
+    def set_allow_public_ips(self, allowed: bool):
+        core = self.config.setdefault("core", {})
+        core["allow_public_ips"] = bool(allowed)
         self.save_config(self.config)
 
 # Singleton instance

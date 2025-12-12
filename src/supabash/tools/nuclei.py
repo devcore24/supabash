@@ -13,13 +13,14 @@ class NucleiScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, templates: str = None) -> Dict[str, Any]:
+    def scan(self, target: str, templates: str = None, rate_limit: int = None) -> Dict[str, Any]:
         """
         Executes a Nuclei scan against the target.
         
         Args:
             target (str): IP or hostname.
             templates (str, optional): Specific templates to run (e.g., "cves", "technologies").
+            rate_limit (int, optional): Requests per second limit.
             
         Returns:
             Dict: Parsed scan results.
@@ -36,6 +37,8 @@ class NucleiScanner:
 
         if templates:
             command.extend(["-t", templates])
+        if rate_limit:
+            command.extend(["-rate-limit", str(rate_limit)])
 
         # Nuclei can take a while depending on templates, default 30 min
         result: CommandResult = self.runner.run(command, timeout=1800)

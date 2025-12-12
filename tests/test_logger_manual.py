@@ -1,33 +1,58 @@
+import unittest
 import sys
 import os
+import logging
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # Add src to python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
-from supabash.logger import setup_logger, LOG_FILE
+import supabash.logger as logger_mod
 
-def test_logging():
-    print(f"Setting up logger...")
-    logger = setup_logger("test_logger")
-    
-    logger.debug("This is a debug message.")
-    logger.info("This is an info message.")
-    logger.warning("This is a warning message.")
-    
-    print(f"Log file expected at: {LOG_FILE}")
-    
-    if os.path.exists(LOG_FILE):
-        print("Log file successfully created.")
-        with open(LOG_FILE, 'r') as f:
-            content = f.read()
-            print("Log content preview:")
-            print(content)
-            if "This is a debug message." in content:
-                print("SUCCESS: Debug message found in log.")
-            else:
-                print("FAILURE: Debug message NOT found in log.")
-    else:
-        print("FAILURE: Log file was not created.")
+
+class TestLogger(unittest.TestCase):
+    def test_logging_writes_to_file(self):
+        with TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            log_file = tmp_path / "debug.log"
+
+            # Reset shared handler and base logger handlers
+            base_logger = logging.getLogger(logger_mod.APP_NAME)
+            for h in list(base_logger.handlers):
+                base_logger.removeHandler(h)
+                try:
+                    h.close()
+                except Exception:
+                    pass
+
+            old_log_dir = logger_mod.LOG_DIR
+            old_log_file = logger_mod.LOG_FILE
+            old_handler = getattr(logger_mod, "_file_handler", None)
+
+            try:
+                logger_mod.LOG_DIR = tmp_path
+                logger_mod.LOG_FILE = log_file
+                logger_mod._file_handler = None
+
+                logger = logger_mod.setup_logger("supabash.test", log_level="DEBUG")
+                logger.debug("test debug message")
+
+                # Flush handlers
+                for h in logging.getLogger(logger_mod.APP_NAME).handlers:
+                    try:
+                        h.flush()
+                    except Exception:
+                        pass
+
+                self.assertTrue(log_file.exists())
+                content = log_file.read_text()
+                self.assertIn("test debug message", content)
+            finally:
+                logger_mod.LOG_DIR = old_log_dir
+                logger_mod.LOG_FILE = old_log_file
+                logger_mod._file_handler = old_handler
+
 
 if __name__ == "__main__":
-    test_logging()
+    unittest.main()

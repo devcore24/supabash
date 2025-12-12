@@ -39,6 +39,18 @@ class TestGobusterScanner(unittest.TestCase):
         self.assertIn("-u", command)
         self.assertIn("http://example.com", command)
         self.assertIn("-w", command)
+        self.assertIn("-t", command)
+
+    def test_scan_threads_override(self):
+        self.mock_runner.run.return_value = CommandResult(
+            command="", return_code=0, stdout="", stderr="", success=True
+        )
+        self.scanner.scan("http://example.com", threads=25)
+        args, _ = self.mock_runner.run.call_args
+        command = args[0]
+        self.assertIn("-t", command)
+        t_index = command.index("-t")
+        self.assertEqual(command[t_index + 1], "25")
 
 if __name__ == '__main__':
     unittest.main()

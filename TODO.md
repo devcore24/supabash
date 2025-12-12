@@ -27,6 +27,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] **Configuration Manager**
     - [x] Create a config handler (YAML/JSON) to store API Keys and default settings.
     - [x] Implement `supabash config` command to set keys interactively.
+    - [x] Allow managing `core.allowed_hosts` and `core.consent_accepted` via CLI flags.
 
 ---
 
@@ -37,23 +38,23 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Create a `CommandRunner` class to handle `subprocess` calls safely.
     - [x] Implement timeout handling (so Nmap doesn't hang forever).
     - [x] Implement robust error handling and output decoding.
-- [ ] **Recon Module Wrappers**
+- [x] **Recon Module Wrappers**
     - [x] **Nmap:** Parse XML/Greppable output into JSON.
     - [x] **Masscan/Rustscan:** Wrapper for high-speed port discovery.
         - [x] Masscan wrapper with list-output parser.
         - [x] Rustscan wrapper with greppable parser.
     - [x] **CLI Integration:** Allow selecting Nmap/Masscan/Rustscan via `--scanner`.
     - [x] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
-- [ ] **Web Module Wrappers**
+- [x] **Web Module Wrappers**
     - [x] **Nikto:** Wrapper for server config scanning.
     - [x] **Nuclei:** Wrapper for template-based scanning (Crucial for modern CVEs).
     - [x] **Gobuster:** Wrapper for directory brute-forcing.
-- [ ] **SQL & Auth Wrappers**
+- [x] **SQL & Auth Wrappers**
     - [x] **Sqlmap:** Wrapper for automated SQL injection detection.
     - [x] **Hydra:** Wrapper for service authentication brute-forcing.
-- [ ] **Container Module**
+- [x] **Container Module**
     - [x] **Trivy:** Wrapper to scan local Docker images.
-- [ ] **Supabase Specific Module**
+- [x] **Supabase Specific Module**
     - [x] Implement the RLS (Row Level Security) checker for Supabase URLs.
     - [x] Wire into audit aggregation (report.json output).
 - [ ] **Wireless Module (Experimental)**
@@ -67,7 +68,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [ ] **LLM Client Setup**
     - [x] Integrate litellm client with provider/model selection from config.
     - [ ] (Optional) Add support for local models (Ollama/Mistral) for offline privacy.
-- [ ] **Prompt Engineering**
+- [x] **Prompt Engineering**
     - [x] Design the "Analyzer" prompt: Input = Tool Output -> Output = Vulnerability Summary.
     - [x] Design the "Planner" prompt: Input = Current State -> Output = Next Tool to run.
     - [x] Design the "Remediator" prompt: Input = Vulnerability -> Output = Code Fix.
@@ -101,24 +102,28 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 *Goal: Ensure the agent behaves ethically and doesn't break things.*
 
 - [ ] **Scope Control (CRITICAL)**
-    - [ ] Implement a strict "Allowed Hosts" check.
-    - [ ] Prevent the agent from scanning unverified public IPs.
-- [ ] **Legal & Consent**
-    - [ ] Implement mandatory disclaimer/consent prompt on first run.
-- [ ] **Traffic Control**
-    - [ ] Add flags for "Stealth Mode" vs "Aggressive Mode".
-    - [ ] Implement rate limiting options.
+    - [x] Implement a strict "Allowed Hosts" check.
+        - [x] Support CIDR and wildcard host patterns; accept URL inputs (hostname extraction).
+    - [x] Prevent the agent from scanning unverified public IPs.
+        - [x] Block IP-literal targets by default when they are public/global.
+        - [x] Opt-in via `core.allow_public_ips` or `--allow-public`.
+- [x] **Legal & Consent**
+    - [x] Implement consent prompt for scan/audit (with override flag).
+    - [x] Persist consent acceptance in config (`core.consent_accepted`).
+- [x] **Traffic Control**
+    - [x] Add flags for "Stealth Mode" vs "Aggressive Mode".
+    - [x] Implement rate limiting options (masscan/rustscan/nuclei/gobuster tuning flags).
 
 ---
 
 ## 📊 Phase 5: Reporting & Audit
 *Goal: Turn scan data into a valuable document for developers.*
 
-- [ ] **Data Aggregation**
-    - [ ] Create a standard JSON schema for findings (Severity, Description, Evidence, Fix).
-- [ ] **Report Generators**
-    - [ ] **JSON Report:** For machine integration.
-    - [ ] **Markdown Report:** A pretty, readable audit file with sections.
+- [x] **Data Aggregation**
+    - [x] Create a standard JSON schema for findings (Severity, Description, Evidence, Fix).
+- [x] **Report Generators**
+    - [x] **JSON Report:** For machine integration.
+    - [x] **Markdown Report:** A pretty, readable audit file with sections.
 - [ ] **Code Fix Generator**
     - [ ] Ensure the AI provides specific code snippets (e.g., "Change line 40 in Dockerfile to...").
 
@@ -127,9 +132,9 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 ## 🧪 Phase 6: Testing & Polish
 *Goal: Quality assurance.*
 
-- [ ] **Unit Testing**
-    - [ ] Test the parsers (Does the Nmap parser actually catch open ports?).
-    - [ ] Test the argument builders.
+- [x] **Unit Testing**
+    - [x] Test the parsers (Does the Nmap parser actually catch open ports?).
+    - [x] Test the argument builders.
 - [ ] **Integration Testing**
     - [ ] Spin up a deliberately vulnerable container (e.g., `dvwa` or `juiceshop`).
     - [ ] Run Supabash against it to verify it finds known issues.
@@ -139,6 +144,6 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 ---
 
 ## 📚 Phase 7: Documentation
-- [ ] Write `README.md` (Done).
+- [x] Write `README.md` (Done).
 - [ ] Create a `CONTRIBUTING.md`.
 - [ ] Document the tool requirements for users who don't use the installer.

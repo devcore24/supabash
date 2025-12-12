@@ -16,6 +16,15 @@ class FakeScanner:
 
     def scan(self, *args, **kwargs):
         self.called = True
+        if self.name == "nmap":
+            return {
+                "success": True,
+                "scan_data": {
+                    "hosts": [
+                        {"ports": [{"port": 80, "protocol": "tcp", "service": "http", "product": "nginx", "version": "1.0", "state": "open"}]}
+                    ]
+                }
+            }
         return {"success": True, "data": self.name}
 
 
@@ -51,6 +60,8 @@ class TestAuditOrchestrator(unittest.TestCase):
         # ensure all tools ran
         tool_names = [r["tool"] for r in data["results"]]
         self.assertIn("trivy", tool_names)
+        self.assertIn("findings", data)
+        self.assertGreaterEqual(len(data["findings"]), 1)
         output.unlink()
 
     def test_handles_failure(self):

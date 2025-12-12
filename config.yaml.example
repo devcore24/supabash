@@ -1,6 +1,15 @@
 core:
   log_level: INFO
   save_reports: true
+  # Restrict scope to your own infrastructure (hosts/IPs/CIDRs)
+  allowed_hosts:
+    - localhost
+    - 127.0.0.1
+    - 10.0.0.0/24
+  # Safety: block public IP scanning by default (enable only if authorized)
+  allow_public_ips: false
+  # Persist your consent decision after first run
+  consent_accepted: false
 llm:
   provider: anthropic
   anthropic:

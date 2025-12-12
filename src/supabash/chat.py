@@ -3,7 +3,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from supabash.logger import setup_logger
 from supabash.tools import (
@@ -14,6 +14,7 @@ from supabash.tools import (
 from supabash.llm import LLMClient
 from supabash import prompts
 from supabash.agent import AgentState, MethodologyPlanner
+from supabash.safety import is_allowed_target, ensure_consent, is_public_ip_target
 
 logger = setup_logger(__name__)
 
@@ -29,11 +30,34 @@ class ChatSession:
     last_scan_tool: Optional[str] = None
     llm: LLMClient = field(default_factory=LLMClient)
     planner: MethodologyPlanner = field(default_factory=MethodologyPlanner)
+    allowed_hosts: List[str] = field(default_factory=list)
+    config_manager: Any = None
 
-    def run_scan(self, target: str, profile: str = "fast", scanner_name: str = "nmap") -> Dict[str, Any]:
+    def run_scan(
+        self,
+        target: str,
+        profile: str = "fast",
+        scanner_name: str = "nmap",
+        allow_public: bool = False,
+    ) -> Dict[str, Any]:
         scanner_name = scanner_name.lower()
         if scanner_name not in self.scanners:
             return {"success": False, "error": f"Unknown scanner '{scanner_name}'"}
+
+        if self.allowed_hosts and not is_allowed_target(target, self.allowed_hosts):
+            return {"success": False, "error": f"Target '{target}' not in allowed_hosts. Edit config.yaml to permit."}
+
+        allow_public_cfg = False
+        if self.config_manager is not None:
+            allow_public_cfg = bool(self.config_manager.config.get("core", {}).get("allow_public_ips", False))
+        if is_public_ip_target(target) and not (allow_public_cfg or allow_public):
+            return {
+                "success": False,
+                "error": "Refusing to scan public IP targets by default. Set core.allow_public_ips=true in config.yaml or pass --allow-public.",
+            }
+
+        if not ensure_consent(self.config_manager):
+            return {"success": False, "error": "Consent not confirmed"}
 
         scanner = self.scanners[scanner_name]
         ports = None

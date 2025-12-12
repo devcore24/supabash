@@ -12,13 +12,19 @@ class GobusterScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, wordlist: str = "/usr/share/wordlists/dirb/common.txt") -> Dict[str, Any]:
+    def scan(
+        self,
+        target: str,
+        wordlist: str = "/usr/share/wordlists/dirb/common.txt",
+        threads: int = 10,
+    ) -> Dict[str, Any]:
         """
         Executes a Gobuster scan against the target.
         
         Args:
             target (str): Target URL (must include http/https).
             wordlist (str): Path to wordlist.
+            threads (int): Number of concurrent threads.
             
         Returns:
             Dict: Parsed scan results.
@@ -33,6 +39,7 @@ class GobusterScanner:
             "gobuster", "dir",
             "-u", target,
             "-w", wordlist,
+            "-t", str(threads),
             "-q",
             "-z",
             "--no-error"

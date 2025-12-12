@@ -1,6 +1,7 @@
 import typer
 import shlex
 from pathlib import Path
+from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -11,11 +12,12 @@ from supabash.tools.nmap import NmapScanner
 from supabash.tools.masscan import MasscanScanner
 from supabash.tools.rustscan import RustscanScanner
 from supabash.chat import ChatSession
+from supabash.safety import is_allowed_target, is_public_ip_target
 from supabash.audit import AuditOrchestrator
 
 app = typer.Typer(
     name="supabash",
-    help="SupaBash: The Autonomous AI Security Audit Agent",
+    help="Supabash: The Autonomous AI Security Audit Agent",
     add_completion=False,
 )
 console = Console()
@@ -48,11 +50,11 @@ def print_banner():
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
     """
-    SupaBash Entry Point.
+    Supabash Entry Point.
     """
     if ctx.invoked_subcommand is None:
         print_banner()
-        console.print("[bold green]Welcome to SupaBash![/bold green]")
+        console.print("[bold green]Welcome to Supabash![/bold green]")
         console.print("Use [bold cyan]--help[/bold cyan] to see available commands.")
 
 @app.command()
@@ -60,10 +62,32 @@ def scan(
     target: str = typer.Argument(..., help="Target IP or Domain to scan"),
     profile: str = typer.Option("fast", "--profile", "-p", help="Scan profile: fast, full, stealth"),
     scanner_name: str = typer.Option("nmap", "--scanner", "-s", help="Scanner engine: nmap, masscan, rustscan"),
+    allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
+    allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
+    consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
+    masscan_rate: int = typer.Option(0, "--masscan-rate", help="Override masscan rate (pps)"),
+    rustscan_batch: int = typer.Option(0, "--rustscan-batch", help="Override rustscan batch size"),
 ):
     """
     Launch a basic reconnaissance scan against a target.
     """
+    allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
+    if not allow_unsafe and not is_allowed_target(target, allowed):
+        console.print(f"[red]Target '{target}' not in allowed_hosts. Edit config.yaml or use --force to proceed.[/red]")
+        raise typer.Exit(code=1)
+
+    allow_public_cfg = bool(config_manager.config.get("core", {}).get("allow_public_ips", False))
+    if is_public_ip_target(target) and not (allow_public_cfg or allow_public):
+        console.print(
+            "[red]Refusing to scan public IP targets by default.[/red] "
+            "Set `core.allow_public_ips=true` in `config.yaml` or pass `--allow-public` (only if you are authorized)."
+        )
+        raise typer.Exit(code=1)
+    from supabash.safety import ensure_consent
+    if not ensure_consent(config_manager, assume_yes=consent):
+        console.print("[yellow]Consent not confirmed. Aborting.[/yellow]")
+        raise typer.Exit(code=1)
+
     scanner_name = scanner_name.lower()
     if scanner_name not in SCANNERS:
         console.print(f"[red]Unknown scanner '{scanner_name}'. Choose from: {', '.join(SCANNERS.keys())}[/red]")
@@ -91,21 +115,21 @@ def scan(
             args = "-sS -T2"  # Syn scan, slower timing
     elif scanner_name == "masscan":
         ports = "1-1000"
-        rate = 1000
+        rate = masscan_rate if masscan_rate > 0 else 1000
         if profile == "full":
             ports = "1-65535"
-            rate = 5000
+            rate = masscan_rate if masscan_rate > 0 else 5000
         elif profile == "stealth":
-            rate = 100
+            rate = masscan_rate if masscan_rate > 0 else 100
         extra_kwargs["rate"] = rate
     elif scanner_name == "rustscan":
         ports = "1-1000"
-        batch = 2000
+        batch = rustscan_batch if rustscan_batch > 0 else 2000
         if profile == "full":
             ports = "1-65535"
-            batch = 5000
+            batch = rustscan_batch if rustscan_batch > 0 else 5000
         elif profile == "stealth":
-            batch = 1000
+            batch = rustscan_batch if rustscan_batch > 0 else 1000
         extra_kwargs["batch"] = batch
 
     status_msg = f"[bold green]Running {scanner_name} ({profile})... This may take a moment.[/bold green]"
@@ -167,10 +191,37 @@ def audit(
     target: str = typer.Argument(..., help="Target IP, URL, or Container ID"),
     output: str = typer.Option("report.json", "--output", "-o", help="Output file path"),
     container_image: str = typer.Option(None, "--container-image", "-c", help="Optional container image to scan with Trivy"),
+    markdown: str = typer.Option(None, "--markdown", "-m", help="Optional markdown report path"),
+    allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
+    allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
+    consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
+    mode: str = typer.Option("normal", "--mode", help="Scan mode: normal|stealth|aggressive"),
+    nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
+    gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
+    gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
 ):
     """
     Run a full security audit (Infrastructure + Web + Container).
     """
+    allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
+    if not allow_unsafe and not is_allowed_target(target, allowed):
+        console.print(f"[red]Target '{target}' not in allowed_hosts. Edit config.yaml or use --force to proceed.[/red]")
+        raise typer.Exit(code=1)
+
+    allow_public_cfg = bool(config_manager.config.get("core", {}).get("allow_public_ips", False))
+    if is_public_ip_target(target) and not (allow_public_cfg or allow_public):
+        console.print(
+            "[red]Refusing to scan public IP targets by default.[/red] "
+            "Set `core.allow_public_ips=true` in `config.yaml` or pass `--allow-public` (only if you are authorized)."
+        )
+        raise typer.Exit(code=1)
+    if mode not in ("normal", "stealth", "aggressive"):
+        console.print("[red]Invalid mode. Choose: normal, stealth, aggressive[/red]")
+        raise typer.Exit(code=1)
+    from supabash.safety import ensure_consent
+    if not ensure_consent(config_manager, assume_yes=consent):
+        console.print("[yellow]Consent not confirmed. Aborting.[/yellow]")
+        raise typer.Exit(code=1)
     logger.info(f"Command 'audit' triggered for target: {target}")
     console.print(f"[bold red][*] initializing full audit protocol for {target}...[/bold red]")
     if container_image:
@@ -179,7 +230,15 @@ def audit(
 
     orchestrator = AuditOrchestrator()
     with console.status("[bold green]Running audit steps...[/bold green]"):
-        report = orchestrator.run(target, Path(output), container_image=container_image)
+        report = orchestrator.run(
+            target,
+            Path(output),
+            container_image=container_image,
+            mode=mode,
+            nuclei_rate_limit=nuclei_rate_limit,
+            gobuster_threads=gobuster_threads,
+            gobuster_wordlist=gobuster_wordlist,
+        )
 
     saved_path = report.get("saved_to")
     if saved_path:
@@ -189,11 +248,26 @@ def audit(
         if "write_error" in report:
             console.print(f"[red]{report['write_error']}[/red]")
 
+    if markdown:
+        from supabash.report import write_markdown
+        md_path = write_markdown(report, Path(markdown))
+        console.print(f"[green]Markdown report written to {md_path}[/green]")
+
 @app.command()
 def config(
     provider: str = typer.Option(None, "--provider", "-p", help="Set active AI Provider (openai, anthropic, gemini)"),
     key: str = typer.Option(None, "--key", "-k", help="Set API Key for the selected/active provider"),
-    model: str = typer.Option(None, "--model", "-m", help="Set Model name for the selected/active provider")
+    model: str = typer.Option(None, "--model", "-m", help="Set Model name for the selected/active provider"),
+    allow_host: str = typer.Option(None, "--allow-host", help="Add an allowed host/IP/CIDR entry"),
+    remove_host: str = typer.Option(None, "--remove-host", help="Remove an allowed host/IP/CIDR entry"),
+    list_allowed_hosts: bool = typer.Option(False, "--list-allowed-hosts", help="List allowed hosts"),
+    accept_consent: bool = typer.Option(False, "--accept-consent", help="Persist consent_accepted=true"),
+    reset_consent: bool = typer.Option(False, "--reset-consent", help="Set consent_accepted=false"),
+    allow_public_ips: Optional[bool] = typer.Option(
+        None,
+        "--allow-public-ips/--no-allow-public-ips",
+        help="Allow scanning public IP targets (still requires authorization)",
+    ),
 ):
     """
     View or update configuration settings.
@@ -202,29 +276,68 @@ def config(
     console.print(Panel("[bold green]Configuration Manager[/bold green]", expand=False))
     
     # 1. Handle Flags (Non-Interactive Mode)
-    if provider or key or model:
-        current_llm = config_manager.get_llm_config()
-        # Determine which provider we are editing (defaults to active if not specified)
-        target_provider = provider if provider else current_llm["provider"]
-        
-        # Validate provider
-        if target_provider not in ["openai", "anthropic", "gemini"]:
-             # If user wants to add a custom one, we allow it, but warn
-             console.print(f"[yellow]Warning: '{target_provider}' is not a standard provider.[/yellow]")
+    if provider or key or model or allow_host or remove_host or list_allowed_hosts or accept_consent or reset_consent or allow_public_ips is not None:
+        any_changes = False
 
-        if provider:
-            config_manager.set_active_provider(provider)
-            console.print(f"Active provider set to: [cyan]{provider}[/cyan]")
-        
-        if key:
-            config_manager.set_llm_key(target_provider, key)
-            console.print(f"API Key updated for: [cyan]{target_provider}[/cyan]")
+        if list_allowed_hosts:
+            allowed_hosts = config_manager.get_allowed_hosts()
+            console.print("[bold]Allowed Hosts:[/bold]")
+            for h in allowed_hosts:
+                console.print(f"- {h}")
+
+        if allow_host:
+            config_manager.add_allowed_host(allow_host)
+            console.print(f"Added allowed host: [cyan]{allow_host}[/cyan]")
+            any_changes = True
+
+        if remove_host:
+            config_manager.remove_allowed_host(remove_host)
+            console.print(f"Removed allowed host: [cyan]{remove_host}[/cyan]")
+            any_changes = True
+
+        if accept_consent:
+            config_manager.set_consent_accepted(True)
+            console.print("[green]Consent persisted (consent_accepted=true).[/green]")
+            any_changes = True
+
+        if reset_consent:
+            config_manager.set_consent_accepted(False)
+            console.print("[yellow]Consent reset (consent_accepted=false).[/yellow]")
+            any_changes = True
+
+        if allow_public_ips is not None:
+            config_manager.set_allow_public_ips(allow_public_ips)
+            state = "enabled" if allow_public_ips else "disabled"
+            console.print(f"[yellow]Public IP scanning {state}[/yellow] (core.allow_public_ips={bool(allow_public_ips)})")
+            any_changes = True
+
+        if provider or key or model:
+            current_llm = config_manager.get_llm_config()
+            # Determine which provider we are editing (defaults to active if not specified)
+            target_provider = provider if provider else current_llm["provider"]
             
-        if model:
-            config_manager.set_model(target_provider, model)
-            console.print(f"Model updated for [cyan]{target_provider}[/cyan] to: [green]{model}[/green]")
+            # Validate provider
+            if target_provider not in ["openai", "anthropic", "gemini"]:
+                 # If user wants to add a custom one, we allow it, but warn
+                 console.print(f"[yellow]Warning: '{target_provider}' is not a standard provider.[/yellow]")
+
+            if provider:
+                config_manager.set_active_provider(provider)
+                console.print(f"Active provider set to: [cyan]{provider}[/cyan]")
+                any_changes = True
             
-        console.print(f"[bold green]Configuration saved to {config_manager.config_file}[/bold green]")
+            if key:
+                config_manager.set_llm_key(target_provider, key)
+                console.print(f"API Key updated for: [cyan]{target_provider}[/cyan]")
+                any_changes = True
+                
+            if model:
+                config_manager.set_model(target_provider, model)
+                console.print(f"Model updated for [cyan]{target_provider}[/cyan] to: [green]{model}[/green]")
+                any_changes = True
+            
+        if any_changes:
+            console.print(f"[bold green]Configuration saved to {config_manager.config_file}[/bold green]")
         return
 
     # 2. Interactive Mode (Default)
@@ -235,6 +348,7 @@ def config(
     
     console.print(f"Current Active Provider: [bold cyan]{current_provider.upper()}[/bold cyan]")
     console.print(f"Config File: [dim]{config_manager.config_file}[/dim]")
+    console.print(f"Public IP scanning: [bold]{'enabled' if config_manager.get_allow_public_ips() else 'disabled'}[/bold]")
     console.print("\n[bold]Available Providers:[/bold]")
     
     if not available_providers:
@@ -321,7 +435,8 @@ def chat():
     logger.info("Command 'chat' triggered")
     console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
     console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /details, /report, /test, /summary, /fix, /plan[/dim]")
-    session = ChatSession()
+    allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
+    session = ChatSession(allowed_hosts=allowed, config_manager=config_manager)
 
     def show_scan(result):
         if not result.get("success"):
@@ -366,19 +481,22 @@ def chat():
             target = None
             profile = "fast"
             scanner_name = "nmap"
+            allow_public = False
             for i, token in enumerate(parts[1:], start=1):
                 if token in ("--profile", "-p") and i + 1 < len(parts):
                     profile = parts[i + 1]
                 elif token in ("--scanner", "-s") and i + 1 < len(parts):
                     scanner_name = parts[i + 1]
+                elif token == "--allow-public":
+                    allow_public = True
                 elif not token.startswith("-") and target is None:
                     target = token
             if not target:
-                console.print("[red]Usage:[/red] /scan <target> [--profile fast|full|stealth] [--scanner nmap|masscan|rustscan]")
+                console.print("[red]Usage:[/red] /scan <target> [--profile fast|full|stealth] [--scanner nmap|masscan|rustscan] [--allow-public]")
                 continue
             console.print(f"[cyan]Starting scan ({profile}) with {scanner_name} against {target}...[/cyan]")
             with console.status("[green]Running scan...[/green]"):
-                res = session.run_scan(target, profile=profile, scanner_name=scanner_name)
+                res = session.run_scan(target, profile=profile, scanner_name=scanner_name, allow_public=allow_public)
             show_scan(res)
             continue
 

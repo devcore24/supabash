@@ -49,5 +49,15 @@ class TestNucleiScanner(unittest.TestCase):
         self.assertIn("cves", command)
         self.assertIn("-json", command)
 
+    def test_scan_command_rate_limit(self):
+        self.mock_runner.run.return_value = CommandResult(
+            command="", return_code=0, stdout="", stderr="", success=True
+        )
+        self.scanner.scan("example.com", rate_limit=5)
+        args, _ = self.mock_runner.run.call_args
+        command = args[0]
+        self.assertIn("-rate-limit", command)
+        self.assertIn("5", command)
+
 if __name__ == '__main__':
     unittest.main()

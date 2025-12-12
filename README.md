@@ -16,8 +16,8 @@
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
-> **⚠️ Development Status:** This project is currently in **Active Development (Phase 2)**. The Core Architecture and CLI are ready, but the AI orchestration and tool wrappers are being implemented. Usage commands are currently placeholders.  
-> Progress: `[█████████-----------]` **45%**
+> **⚠️ Development Status:** This project is currently in **Active Development (Phase 3)**. The CLI, tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; the full autonomous ReAct loop and deeper safety/reporting polish are still in progress.  
+> Progress: `[███████████████-----]` **76%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -120,23 +120,31 @@ sudo ./install.sh
 Once installed, the `supabash` command is available globally.
 
 ### 1. Basic Recon Scan
-Launch a smart scan against a target. The agent will start with Nmap and escalate to Web scanners if ports 80/443 are open.
+Launch a basic recon scan against a target.
 ```bash
-supabash scan 192.168.1.10
+# Ensure the target is listed in core.allowed_hosts in config.yaml (recommended),
+# or pass --force to bypass the scope check.
+supabash scan 192.168.1.10 --yes
 ```
 
 ### 2. Full Application Audit
 Run a comprehensive audit including recon, web scanning, and optional container scanning, then generate a report.
 ```bash
-supabash audit --target 192.168.1.10 --output report.json
+# Ensure the target is listed in core.allowed_hosts in config.yaml (recommended),
+# or pass --force to bypass the scope check.
+supabash audit 192.168.1.10 --output report.json --yes
 # include container image scan
-supabash audit --target 192.168.1.10 --container-image my-app:latest --output report.json
+supabash audit 192.168.1.10 --container-image my-app:latest --output report.json --yes
+# write markdown report too
+supabash audit 192.168.1.10 --markdown report.md --yes
+# run sqlmap only when providing a parameterized URL
+supabash audit "http://192.168.1.10/?id=1" --output report.json --yes
 ```
 
-### 3. Container Mode
-Scan a local Docker image for CVEs and configuration issues.
+### 3. Container Image Scan
+Scan a local Docker image for CVEs and configuration issues (via Trivy).
 ```bash
-supabash docker my-app:latest
+supabash audit 127.0.0.1 --container-image my-app:latest --output report.json --yes
 ```
 
 ### 4. Interactive Mode
@@ -144,10 +152,13 @@ Talk to the agent directly to plan a custom engagement (slash commands supported
 ```bash
 supabash chat
 # inside chat:
-/scan 192.168.1.10 --profile fast --scanner nmap
+/scan 192.168.1.10 --profile fast --scanner nmap  # add --allow-public only if authorized
 /details      # show last scan
 /report out.json
 /test         # run unit tests
+/summary      # LLM summary (requires configured provider/key)
+/fix "SQL Injection" "param id injectable"  # LLM remediation
+/plan         # heuristic next steps
 ```
 
 ### Scanner Engine Selection
@@ -156,6 +167,9 @@ Choose your recon engine with `--scanner`:
 supabash scan 192.168.1.10 --scanner nmap     # default
 supabash scan 192.168.1.10 --scanner masscan # fast sweep
 supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
+# tuning for speed/stealth (masscan/rustscan)
+supabash scan 192.168.1.10 --scanner masscan --profile full --masscan-rate 2000
+supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch 500
 ```
 
 ---
@@ -164,7 +178,12 @@ supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
 
 - Default config lives in the project root as `config.yaml` (falls back to `~/.supabash/config.yaml`).
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `~/.supabash/logs/debug.log`.
+- Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
+- Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
+- Edit allowed hosts via CLI: `supabash config --allow-host 10.0.0.0/24`, `supabash config --remove-host 10.0.0.0/24`, `supabash config --list-allowed-hosts`.
 - Manage providers, API keys, and models with `supabash config`.
+- Manage scan safety: consent prompts are remembered in `core.consent_accepted` after the first interactive acceptance (use `supabash config --reset-consent` to re-prompt); `--yes` skips prompting for a single run.
+- Tune web tooling: `supabash audit ... --nuclei-rate 10 --gobuster-threads 20` (and optionally `--gobuster-wordlist /path/to/list`).
 
 ---
 
@@ -182,6 +201,7 @@ supabash scan 192.168.1.10 --scanner rustscan # rustscan+nmap greppable output
 - Supabase RLS checker (public access detection)
 - LLM client wrapper (litellm-based) with config-driven provider/model selection
 - Chat session with slash commands (/scan, /details, /report, /test, /summary, /fix, /plan)
+- Markdown report generator (`--markdown`) with findings aggregation
 
 ---
 
