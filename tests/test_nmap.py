@@ -80,6 +80,19 @@ class TestNmapScanner(unittest.TestCase):
         self.assertIn("-p", command_list)
         self.assertIn("80,443", command_list)
 
+    def test_scan_strips_root_only_flags_when_not_root(self):
+        self.mock_runner.run.return_value = CommandResult(
+            command="", return_code=0, stdout=SAMPLE_NMAP_XML, stderr="", success=True
+        )
+        self.scanner._is_root = lambda: False
+        self.scanner.scan("localhost", arguments="-sV -O -sS")
+
+        args, kwargs = self.mock_runner.run.call_args
+        command_list = args[0]
+        self.assertNotIn("-O", command_list)
+        self.assertNotIn("-sS", command_list)
+        self.assertIn("-sT", command_list)
+
     def test_scan_failure(self):
         """Test handling of nmap failure."""
         self.mock_runner.run.return_value = CommandResult(

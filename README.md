@@ -133,6 +133,7 @@ Launch a basic recon scan against a target.
 # or pass --force to bypass the scope check.
 supabash scan 192.168.1.10 --yes
 ```
+Note: when running without `sudo`, Supabash will automatically skip Nmap root-only flags (like `-O` OS detection) and fall back to non-root-safe scans.
 
 ### 2. Full Application Audit
 Run a comprehensive audit including recon, web scanning, and optional container scanning, then generate a report.

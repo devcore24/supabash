@@ -151,6 +151,10 @@ def scan(
             console.print("\n[yellow][bulb] Hint: Nmap OS detection (-O) and SYN scans (-sS) require root privileges.[/yellow]")
             console.print("[yellow]       Try running: [bold]sudo supabash scan ...[/bold][/yellow]")
         return
+    warnings = result.get("warnings")
+    if scanner_name == "nmap" and isinstance(warnings, list) and warnings:
+        for w in warnings:
+            console.print(f"[yellow][!] {w}[/yellow]")
 
     data = result["scan_data"]
     if not data["hosts"]:

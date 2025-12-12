@@ -1,5 +1,7 @@
 import xml.etree.ElementTree as ET
 from typing import Dict, List, Any, Optional
+import os
+import shlex
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
 
@@ -12,6 +14,12 @@ class NmapScanner:
 
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
+
+    def _is_root(self) -> bool:
+        try:
+            return os.geteuid() == 0
+        except Exception:
+            return False
 
     def scan(self, target: str, ports: str = None, arguments: str = "-sV -O", cancel_event=None) -> Dict[str, Any]:
         """
@@ -26,17 +34,37 @@ class NmapScanner:
             Dict: Parsed scan results.
         """
         logger.info(f"Starting Nmap scan on {target}")
-        
+
+        warnings: List[str] = []
+        args_list: List[str] = []
+        if arguments:
+            try:
+                args_list = shlex.split(arguments)
+            except Exception:
+                args_list = arguments.split()
+
+        # Root-required flags: degrade gracefully when not root.
+        if not self._is_root():
+            if "-O" in args_list:
+                args_list = [a for a in args_list if a != "-O"]
+                warnings.append("Nmap OS detection (-O) requires root; running without -O.")
+            if "-sS" in args_list:
+                args_list = ["-sT" if a == "-sS" else a for a in args_list]
+                warnings.append("Nmap SYN scan (-sS) requires root; using TCP connect scan (-sT).")
+
+        if warnings:
+            for w in warnings:
+                logger.warning(w)
+
         # Construct command
         # We always use -oX - to output XML to stdout for parsing
         command = ["nmap", target, "-oX", "-"]
-        
+
         if ports:
             command.extend(["-p", ports])
-            
-        if arguments:
-            # simple split, might need more robust shlex split if args contain quotes
-            command.extend(arguments.split())
+
+        if args_list:
+            command.extend(args_list)
 
         kwargs = {"timeout": 600}  # 10 min timeout default
         if cancel_event is not None:
@@ -49,14 +77,24 @@ class NmapScanner:
                 "success": False,
                 "error": result.stderr,
                 "canceled": bool(getattr(result, "canceled", False)),
-                "raw_output": result.stdout
+                "raw_output": result.stdout,
+                "warnings": warnings,
             }
 
         parsed_data = self._parse_xml(result.stdout)
+        if not isinstance(parsed_data, dict) or "hosts" not in parsed_data:
+            return {
+                "success": False,
+                "error": "Failed to parse Nmap XML output",
+                "canceled": bool(getattr(result, "canceled", False)),
+                "raw_output": result.stdout,
+                "warnings": warnings,
+            }
         return {
             "success": True,
             "scan_data": parsed_data,
-            "command": result.command
+            "command": result.command,
+            "warnings": warnings,
         }
 
     def _parse_xml(self, xml_content: str) -> Dict[str, Any]:

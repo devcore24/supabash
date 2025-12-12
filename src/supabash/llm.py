@@ -73,6 +73,48 @@ class LLMClient:
             "api_base": api_base,
         }
 
+    def _normalize_usage(self, usage: Any) -> Dict[str, Any]:
+        if usage is None:
+            return {}
+        if isinstance(usage, dict):
+            return usage
+        # Pydantic v2
+        model_dump = getattr(usage, "model_dump", None)
+        if callable(model_dump):
+            try:
+                out = model_dump()
+                return out if isinstance(out, dict) else {"raw": str(usage)}
+            except Exception:
+                pass
+        # Pydantic v1
+        dict_fn = getattr(usage, "dict", None)
+        if callable(dict_fn):
+            try:
+                out = dict_fn()
+                return out if isinstance(out, dict) else {"raw": str(usage)}
+            except Exception:
+                pass
+        # Common litellm Usage-like object
+        keys = ("prompt_tokens", "completion_tokens", "total_tokens")
+        if all(hasattr(usage, k) for k in keys):
+            try:
+                return {k: int(getattr(usage, k)) for k in keys}
+            except Exception:
+                pass
+        try:
+            d = getattr(usage, "__dict__", None)
+            if isinstance(d, dict) and d:
+                safe = {}
+                for k, v in d.items():
+                    if isinstance(v, (int, float, str, bool)) or v is None:
+                        safe[str(k)] = v
+                    else:
+                        safe[str(k)] = str(v)
+                return safe
+        except Exception:
+            pass
+        return {"raw": str(usage)}
+
     def completion(self, messages: List[Dict[str, str]], temperature: float = 0.2) -> Dict[str, Any]:
         """
         Send a completion request to the configured LLM and return the raw response.
@@ -92,10 +134,10 @@ class LLMClient:
             cached = cache.get(cache_key)
             if cached is not None:
                 content, meta = cached
-                usage = meta.get("usage")
+                usage = self._normalize_usage(meta.get("usage"))
                 return {
                     "choices": [{"message": {"content": content}}],
-                    "usage": usage if isinstance(usage, dict) else None,
+                    "usage": usage if usage else None,
                     "_cached": True,
                     "_cache_key": cache_key,
                     "_cached_meta": meta,
@@ -116,7 +158,11 @@ class LLMClient:
             if cache is not None and cache.settings.enabled and cache_key:
                 try:
                     content = resp["choices"][0]["message"]["content"]
-                    meta = {"usage": resp.get("usage"), "provider": settings["provider"], "model": settings["model"]}
+                    meta = {
+                        "usage": self._normalize_usage(resp.get("usage")),
+                        "provider": settings["provider"],
+                        "model": settings["model"],
+                    }
                     completion_cost = getattr(litellm, "completion_cost", None)
                     if callable(completion_cost):
                         try:
@@ -126,6 +172,12 @@ class LLMClient:
                     cache.set(cache_key, content, meta)
                 except Exception:
                     pass
+            try:
+                resp_usage = self._normalize_usage(resp.get("usage"))
+                if resp_usage:
+                    resp["usage"] = resp_usage
+            except Exception:
+                pass
             return resp
         except Exception as e:
             logger.error(f"LLM request failed: {e}")
@@ -149,13 +201,17 @@ class LLMClient:
         cached_meta = response.get("_cached_meta")
         if isinstance(cached_meta, dict):
             meta = dict(cached_meta)
+            try:
+                meta["usage"] = self._normalize_usage(meta.get("usage"))
+            except Exception:
+                pass
             meta.setdefault("provider", settings.get("provider"))
             meta.setdefault("model", settings.get("model"))
             meta["cached"] = True
             meta["cache_key"] = response.get("_cache_key")
             return content, meta
 
-        usage = response.get("usage") or {}
+        usage = self._normalize_usage(response.get("usage"))
         cost_usd = None
         completion_cost = getattr(litellm, "completion_cost", None)
         if callable(completion_cost):
@@ -167,7 +223,7 @@ class LLMClient:
         meta = {
             "provider": settings.get("provider"),
             "model": settings.get("model"),
-            "usage": usage if isinstance(usage, dict) else {"raw": usage},
+            "usage": usage,
         }
         if response.get("_cached"):
             meta["cached"] = True

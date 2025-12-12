@@ -22,6 +22,18 @@ class TestCommandRunner(unittest.TestCase):
         self.assertEqual(result.stdout, 'hello')
         self.assertEqual(result.stderr, '')
 
+    def test_run_accepts_bytes_command_items(self):
+        result = self.runner.run([b"/bin/echo", b"hello"])
+        self.assertTrue(result.success)
+        self.assertEqual(result.return_code, 0)
+        self.assertEqual(result.stdout, "hello")
+
+    def test_run_collects_output_across_timeouts(self):
+        result = self.runner.run(["bash", "-lc", "echo hi; sleep 0.2; echo bye"], timeout=5)
+        self.assertTrue(result.success)
+        self.assertIn("hi", result.stdout)
+        self.assertIn("bye", result.stdout)
+
     def test_run_command_failure(self):
         """Test a command that returns a non-zero exit code."""
         # 'ls' of a non-existent file usually returns 2 or 1

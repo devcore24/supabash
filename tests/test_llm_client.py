@@ -55,6 +55,27 @@ class TestLLMClient(unittest.TestCase):
             self.assertEqual(meta["usage"]["total_tokens"], 5)
             self.assertAlmostEqual(meta["cost_usd"], 0.000123, places=9)
 
+    def test_chat_with_meta_normalizes_usage_object(self):
+        class Usage:
+            def __init__(self):
+                self.prompt_tokens = 3
+                self.completion_tokens = 2
+                self.total_tokens = 5
+
+        cfg = DummyConfig()
+        client = LLMClient(config=cfg)
+        messages = [{"role": "user", "content": "hello"}]
+
+        with patch("supabash.llm.litellm.completion") as mock_completion:
+            mock_completion.return_value = {
+                "choices": [{"message": {"content": "hi"}}],
+                "usage": Usage(),
+            }
+            content, meta = client.chat_with_meta(messages)
+            self.assertEqual(content, "hi")
+            self.assertIsInstance(meta.get("usage"), dict)
+            self.assertEqual(meta["usage"]["total_tokens"], 5)
+
     def test_missing_key_raises(self):
         cfg = DummyConfig(api_key="YOUR_KEY_HERE")
         client = LLMClient(config=cfg)

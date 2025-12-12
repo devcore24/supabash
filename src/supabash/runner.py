@@ -27,6 +27,22 @@ class CommandRunner:
     Handles secure execution of system commands (subprocess wrapper).
     """
 
+    def _normalize_command(self, command: List[Any]) -> List[str]:
+        normalized: List[str] = []
+        for item in list(command or []):
+            if isinstance(item, (bytes, bytearray)):
+                normalized.append(item.decode("utf-8", errors="replace"))
+            else:
+                normalized.append(str(item))
+        return normalized
+
+    def _coerce_text(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, (bytes, bytearray)):
+            return value.decode("utf-8", errors="replace")
+        return str(value)
+
     def run(
         self,
         command: List[str],
@@ -48,6 +64,7 @@ class CommandRunner:
         Returns:
             CommandResult: Object containing output, error code, and status.
         """
+        command = self._normalize_command(command)
         cmd_str = shlex.join(command)
         logger.debug(f"Executing command: {cmd_str}")
 
@@ -66,6 +83,8 @@ class CommandRunner:
             start = time.time()
             stdout_chunks: List[str] = []
             stderr_chunks: List[str] = []
+            stdout_seen = 0
+            stderr_seen = 0
 
             def terminate(reason: str, *, rc: int, canceled: bool) -> CommandResult:
                 try:
@@ -93,9 +112,9 @@ class CommandRunner:
                 try:
                     out2, err2 = proc.communicate(timeout=0.2)
                     if out2:
-                        stdout_chunks.append(out2)
+                        stdout_chunks.append(self._coerce_text(out2))
                     if err2:
-                        stderr_chunks.append(err2)
+                        stderr_chunks.append(self._coerce_text(err2))
                 except Exception:
                     pass
                 out = "".join(stdout_chunks).strip()
@@ -127,15 +146,33 @@ class CommandRunner:
                 try:
                     out, err = proc.communicate(timeout=0.1)
                     if out:
-                        stdout_chunks.append(out)
+                        out_full = self._coerce_text(out)
+                        if len(out_full) > stdout_seen:
+                            stdout_chunks.append(out_full[stdout_seen:])
+                            stdout_seen = len(out_full)
+                        elif len(out_full) < stdout_seen:
+                            stdout_chunks.append(out_full)
                     if err:
-                        stderr_chunks.append(err)
+                        err_full = self._coerce_text(err)
+                        if len(err_full) > stderr_seen:
+                            stderr_chunks.append(err_full[stderr_seen:])
+                            stderr_seen = len(err_full)
+                        elif len(err_full) < stderr_seen:
+                            stderr_chunks.append(err_full)
                     break
                 except subprocess.TimeoutExpired as e:
+                    # Python's TimeoutExpired.{output,stderr} may include the full output-so-far
+                    # (cumulative). Only append the delta to avoid duplicating content.
                     if e.output:
-                        stdout_chunks.append(e.output)
+                        out_full = self._coerce_text(e.output)
+                        if len(out_full) > stdout_seen:
+                            stdout_chunks.append(out_full[stdout_seen:])
+                            stdout_seen = len(out_full)
                     if e.stderr:
-                        stderr_chunks.append(e.stderr)
+                        err_full = self._coerce_text(e.stderr)
+                        if len(err_full) > stderr_seen:
+                            stderr_chunks.append(err_full[stderr_seen:])
+                            stderr_seen = len(err_full)
                     continue
 
             out = "".join(stdout_chunks).strip()
