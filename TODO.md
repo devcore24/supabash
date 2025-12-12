@@ -74,8 +74,10 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Design the "Remediator" prompt: Input = Vulnerability -> Output = Code Fix.
 - [ ] **Interactive Chat Interface**
     - [x] Implement `supabash chat` command with slash commands (/scan, /details, /report, /test).
+    - [x] Add `/audit` slash command (runs the same audit pipeline as CLI).
+    - [x] Support `/details <tool>` to inspect per-tool audit output.
     - [x] Add LLM-backed summary and remediation commands (/summary, /fix).
-    - [ ] Enable the agent to ask clarifying questions to the user.
+    - [x] Enable the agent to ask clarifying questions to the user.
     - [ ] Chat workflow:
         - Single session as control plane; acknowledge and confirm scope before running tools.
         - Stream progress for long-running tools (checkpoints/heartbeats) and short summaries per tool; offer `/details <tool>` for full output.
@@ -92,9 +94,9 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Add methodology map (recon → web/app → auth → container) and heuristic/LLM planner to pick next tools from findings.
     - [x] Maintain agent state (targets, ports, tech stack, findings, actions run) and expose `/plan` to show next steps.
 - [ ] **Context & Cost Management**
-    - [ ] Implement a token limiter to ensure tool output doesn't crash the LLM context window (truncate large Nmap results).
-    - [ ] Implement token usage tracking and cost estimation.
-    - [ ] Implement basic prompt caching to save costs.
+    - [x] Implement a token limiter to ensure tool output doesn't crash the LLM context window (truncate large Nmap results).
+    - [x] Implement token usage tracking and cost estimation.
+    - [x] Implement basic prompt caching to save costs.
 
 ---
 
@@ -125,7 +127,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] **JSON Report:** For machine integration.
     - [x] **Markdown Report:** A pretty, readable audit file with sections.
 - [ ] **Code Fix Generator**
-    - [ ] Ensure the AI provides specific code snippets (e.g., "Change line 40 in Dockerfile to...").
+    - [x] Ensure the AI provides specific code snippets (e.g., "Change line 40 in Dockerfile to...").
 
 ---
 

@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from supabash.logger import setup_logger
@@ -15,6 +15,7 @@ from supabash.tools import (
 )
 from supabash.llm import LLMClient
 from supabash import prompts
+from supabash.llm_context import prepare_json_payload
 
 logger = setup_logger(__name__)
 
@@ -53,17 +54,147 @@ class AuditOrchestrator:
     def _skip_tool(self, name: str, reason: str) -> Dict[str, Any]:
         return {"tool": name, "success": False, "skipped": True, "reason": reason}
 
-    def _summarize_with_llm(self, agg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _llm_max_chars(self, default: int = 12000) -> int:
         try:
+            cfg = getattr(self.llm, "config", None)
+            if cfg is not None and hasattr(cfg, "config"):
+                return int(cfg.config.get("llm", {}).get("max_input_chars", default))
+        except Exception:
+            return default
+        return default
+
+    def _append_llm_call(self, agg: Dict[str, Any], meta: Optional[Dict[str, Any]]) -> None:
+        if not isinstance(meta, dict):
+            return
+        llm_obj = agg.setdefault("llm", {})
+        calls = llm_obj.setdefault("calls", [])
+        if isinstance(calls, list):
+            calls.append(meta)
+
+    def _summarize_with_llm(self, agg: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        try:
+            max_chars = self._llm_max_chars()
+            payload, truncated = prepare_json_payload(agg, max_chars=max_chars)
             messages = [
                 {"role": "system", "content": prompts.ANALYZER_PROMPT},
-                {"role": "user", "content": json.dumps(agg)},
+                {"role": "user", "content": payload},
             ]
-            content = self.llm.chat(messages)
-            return json.loads(content)
+            if truncated:
+                messages.insert(1, {"role": "system", "content": "Note: Tool output was truncated to fit context limits."})
+            meta = None
+            chat_with_meta = getattr(self.llm, "chat_with_meta", None)
+            if callable(chat_with_meta):
+                result = chat_with_meta(messages)
+                if isinstance(result, tuple) and len(result) == 2:
+                    content, meta = result
+                else:
+                    content = self.llm.chat(messages)
+            else:
+                content = self.llm.chat(messages)
+            if meta is not None:
+                meta = dict(meta)
+                meta.update(
+                    {
+                        "call_type": "summary",
+                        "input_truncated": bool(truncated),
+                        "input_chars": len(payload),
+                        "max_input_chars": int(max_chars),
+                    }
+                )
+            return json.loads(content), meta
         except Exception as e:
             logger.error(f"LLM summary failed: {e}")
-            return None
+            return None, None
+
+    def _severity_rank(self, severity: str) -> int:
+        sev = (severity or "").upper()
+        ranks = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+        return ranks.get(sev, 1)
+
+    def _remediate_finding(self, finding: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        try:
+            max_chars = self._llm_max_chars()
+            payload, truncated = prepare_json_payload(
+                {
+                    "title": finding.get("title", ""),
+                    "severity": finding.get("severity", ""),
+                    "evidence": finding.get("evidence", ""),
+                    "context": {"tool": finding.get("tool"), "type": finding.get("type")},
+                },
+                max_chars=max_chars,
+            )
+            messages = [
+                {"role": "system", "content": prompts.REMEDIATOR_PROMPT},
+                {"role": "user", "content": payload},
+            ]
+            if truncated:
+                messages.insert(1, {"role": "system", "content": "Note: Input was truncated to fit context limits."})
+
+            meta = None
+            chat_with_meta = getattr(self.llm, "chat_with_meta", None)
+            if callable(chat_with_meta):
+                result = chat_with_meta(messages)
+                if isinstance(result, tuple) and len(result) == 2:
+                    content, meta = result
+                else:
+                    content = self.llm.chat(messages)
+            else:
+                content = self.llm.chat(messages)
+
+            parsed = json.loads(content)
+            if isinstance(meta, dict):
+                meta = dict(meta)
+                meta.update(
+                    {
+                        "call_type": "remediation",
+                        "finding_title": finding.get("title", ""),
+                        "input_truncated": bool(truncated),
+                        "input_chars": len(payload),
+                        "max_input_chars": int(max_chars),
+                    }
+                )
+            return parsed if isinstance(parsed, dict) else {"raw": parsed}, meta
+        except Exception as e:
+            logger.error(f"LLM remediation failed: {e}")
+            return None, None
+
+    def _apply_remediations(
+        self,
+        agg: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+        *,
+        enabled: bool,
+        max_remediations: int,
+        min_severity: str,
+    ) -> List[Dict[str, Any]]:
+        if not enabled:
+            return findings
+
+        threshold = self._severity_rank(min_severity)
+        candidates = []
+        for idx, f in enumerate(findings):
+            rank = self._severity_rank(f.get("severity", "INFO"))
+            if rank < threshold:
+                continue
+            candidates.append((rank, 0 if not f.get("recommendation") else 1, idx))
+
+        candidates.sort(reverse=True)
+        for _, __, idx in candidates[: max(0, int(max_remediations))]:
+            f = findings[idx]
+            remediation, meta = self._remediate_finding(f)
+            if remediation:
+                f["remediation"] = remediation
+                if not f.get("recommendation") and isinstance(remediation, dict):
+                    summary = remediation.get("summary")
+                    if isinstance(summary, str) and summary.strip():
+                        f["recommendation"] = summary.strip()
+                if isinstance(remediation, dict):
+                    code_sample = remediation.get("code_sample")
+                    if isinstance(code_sample, str) and code_sample.strip():
+                        f["code_sample"] = code_sample.strip()
+            if meta:
+                self._append_llm_call(agg, meta)
+        return findings
 
     def _collect_findings(self, agg: Dict[str, Any]) -> List[Dict[str, Any]]:
         findings: List[Dict[str, Any]] = []
@@ -194,12 +325,15 @@ class AuditOrchestrator:
     def run(
         self,
         target: str,
-        output: Path,
+        output: Optional[Path],
         container_image: Optional[str] = None,
         mode: str = "normal",
         nuclei_rate_limit: int = 0,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
+        remediate: bool = False,
+        max_remediations: int = 5,
+        min_remediation_severity: str = "MEDIUM",
     ) -> Dict[str, Any]:
         normalized = self._normalize_target(target)
         scan_host = normalized["scan_host"]
@@ -261,20 +395,33 @@ class AuditOrchestrator:
                 self._run_tool("trivy", lambda: self.scanners["trivy"].scan(container_image))
             )
 
-        summary = self._summarize_with_llm(agg)
+        summary, llm_meta = self._summarize_with_llm(agg)
+        if llm_meta:
+            self._append_llm_call(agg, llm_meta)
         if summary:
             agg["summary"] = summary
 
-        agg["findings"] = self._collect_findings(agg)
+        findings = self._collect_findings(agg)
+        findings = self._apply_remediations(
+            agg,
+            findings,
+            enabled=remediate,
+            max_remediations=max_remediations,
+            min_severity=min_remediation_severity,
+        )
+        agg["findings"] = findings
 
-        try:
-            output.parent.mkdir(parents=True, exist_ok=True)
-            with open(output, "w") as f:
-                json.dump(agg, f, indent=2)
-            agg["saved_to"] = str(output)
-        except Exception as e:
-            logger.error(f"Failed to write audit report: {e}")
+        if output is not None:
+            try:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with open(output, "w") as f:
+                    json.dump(agg, f, indent=2)
+                agg["saved_to"] = str(output)
+            except Exception as e:
+                logger.error(f"Failed to write audit report: {e}")
+                agg["saved_to"] = None
+                agg["write_error"] = str(e)
+        else:
             agg["saved_to"] = None
-            agg["write_error"] = str(e)
 
         return agg

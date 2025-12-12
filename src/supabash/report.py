@@ -16,6 +16,53 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         if isinstance(summary, dict):
             lines.append("\n## Summary")
             lines.append(summary.get("summary", ""))
+            llm_meta = report.get("llm")
+            if isinstance(llm_meta, dict):
+                calls = llm_meta.get("calls")
+                if isinstance(calls, list) and calls:
+                    lines.append("\n### LLM Usage")
+                    total_tokens = 0
+                    total_cost = 0.0
+                    have_cost = False
+                    for c in calls:
+                        if not isinstance(c, dict):
+                            continue
+                        usage = c.get("usage")
+                        if isinstance(usage, dict):
+                            tt = usage.get("total_tokens")
+                            if isinstance(tt, int):
+                                total_tokens += tt
+                        cost = c.get("cost_usd")
+                        if isinstance(cost, (int, float)):
+                            total_cost += float(cost)
+                            have_cost = True
+                    if total_tokens:
+                        lines.append(f"- total_tokens={total_tokens}")
+                    if have_cost:
+                        lines.append(f"- cost_usd={total_cost:.6f}")
+                else:
+                    usage = llm_meta.get("usage")
+                    cost = llm_meta.get("cost_usd")
+                    if isinstance(usage, dict) or cost is not None:
+                        lines.append("\n### LLM Usage")
+                        if isinstance(usage, dict):
+                            pt = usage.get("prompt_tokens")
+                            ct = usage.get("completion_tokens")
+                            tt = usage.get("total_tokens")
+                            parts = []
+                            if tt is not None:
+                                parts.append(f"total_tokens={tt}")
+                            if pt is not None:
+                                parts.append(f"prompt_tokens={pt}")
+                            if ct is not None:
+                                parts.append(f"completion_tokens={ct}")
+                            if parts:
+                                lines.append(f"- {' | '.join(parts)}")
+                        if cost is not None:
+                            try:
+                                lines.append(f"- cost_usd={float(cost):.6f}")
+                            except Exception:
+                                lines.append(f"- cost_usd={cost}")
             findings = summary.get("findings", [])
             if findings:
                 lines.append("\n### Findings")
@@ -32,6 +79,39 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         else:
             lines.append("\n## Summary")
             lines.append(str(summary))
+
+    # Detailed Findings (aggregated)
+    agg_findings = report.get("findings", [])
+    if isinstance(agg_findings, list) and agg_findings:
+        lines.append("\n## Findings (Detailed)")
+        for f in agg_findings:
+            if not isinstance(f, dict):
+                continue
+            sev = str(f.get("severity", "INFO")).upper()
+            title = str(f.get("title", ""))
+            tool = f.get("tool")
+            suffix = f" ({tool})" if tool else ""
+            lines.append(f"- **{sev}** {title}{suffix}")
+            evidence = f.get("evidence")
+            if isinstance(evidence, str) and evidence.strip():
+                lines.append(f"  - Evidence: {evidence.strip()}")
+            rec = f.get("recommendation")
+            if isinstance(rec, str) and rec.strip():
+                lines.append(f"  - Fix: {rec.strip()}")
+            remediation = f.get("remediation")
+            if isinstance(remediation, dict):
+                steps = remediation.get("steps")
+                if isinstance(steps, list) and steps:
+                    lines.append("  - Steps:")
+                    for s in steps[:8]:
+                        if isinstance(s, str) and s.strip():
+                            lines.append(f"    - {s.strip()}")
+                code_sample = f.get("code_sample") or remediation.get("code_sample")
+                if isinstance(code_sample, str) and code_sample.strip():
+                    lines.append("  - Code sample:")
+                    lines.append("```")
+                    lines.append(code_sample.strip())
+                    lines.append("```")
 
     lines.append("\n## Tools Run")
     for entry in report.get("results", []):

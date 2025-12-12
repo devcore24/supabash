@@ -28,6 +28,10 @@ DEFAULT_CONFIG = {
         "allow_public_ips": False,
     },
     "llm": {
+        "max_input_chars": 12000,
+        "cache_enabled": False,
+        "cache_ttl_seconds": 3600,
+        "cache_max_entries": 500,
         "provider": "openai",  # active provider: openai, anthropic, gemini
         "openai": {
             "api_key": "YOUR_KEY_HERE",
@@ -93,6 +97,11 @@ class ConfigManager:
                         loaded["core"].setdefault(k, v)
                 if "llm" not in loaded:
                     loaded["llm"] = DEFAULT_CONFIG["llm"]
+                else:
+                    for k, v in DEFAULT_CONFIG["llm"].items():
+                        if k in ("openai", "anthropic", "gemini"):
+                            continue
+                        loaded["llm"].setdefault(k, v)
                 if use_fallback:
                     # Migrate legacy user config into project-local config.yaml
                     self.config_file = CONFIG_FILE

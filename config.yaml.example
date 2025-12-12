@@ -11,6 +11,13 @@ core:
   # Persist your consent decision after first run
   consent_accepted: false
 llm:
+  # Safety: truncate very large tool output before sending to the LLM
+  max_input_chars: 12000
+  # Cost control: cache identical requests (never stores API keys)
+  cache_enabled: false
+  cache_ttl_seconds: 3600
+  cache_max_entries: 500
+  # cache_dir: ~/.supabash/cache/llm
   provider: anthropic
   anthropic:
     api_key: YOUR_ANTHROPIC_KEY

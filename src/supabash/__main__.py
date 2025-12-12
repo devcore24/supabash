@@ -199,6 +199,9 @@ def audit(
     nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
     gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
     gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
+    remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
+    max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
+    min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
 ):
     """
     Run a full security audit (Infrastructure + Web + Container).
@@ -238,6 +241,9 @@ def audit(
             nuclei_rate_limit=nuclei_rate_limit,
             gobuster_threads=gobuster_threads,
             gobuster_wordlist=gobuster_wordlist,
+            remediate=remediate,
+            max_remediations=max_remediations,
+            min_remediation_severity=min_remediation_severity,
         )
 
     saved_path = report.get("saved_to")
@@ -434,7 +440,7 @@ def chat():
     """
     logger.info("Command 'chat' triggered")
     console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
-    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /details, /report, /test, /summary, /fix, /plan[/dim]")
+    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /audit, /details [tool], /report, /test, /summary, /fix, /plan[/dim]")
     allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
     session = ChatSession(allowed_hosts=allowed, config_manager=config_manager)
 
@@ -464,6 +470,32 @@ def chat():
                     details = " ".join(filter(None, [p.get("product",""), p.get("version",""), p.get("protocol","")])).strip()
                     table.add_row(str(p.get("port","")), p.get("state",""), p.get("service",""), details)
                 console.print(table)
+
+    def show_audit(report: dict):
+        if not isinstance(report, dict):
+            console.print("[red]Audit failed.[/red]")
+            return
+        if report.get("error") and not report.get("target"):
+            console.print(f"[red]Audit failed:[/red] {report.get('error','')}")
+            return
+        target = report.get("target", "unknown")
+        findings = report.get("findings", []) if isinstance(report.get("findings"), list) else []
+        high = sum(1 for f in findings if str(f.get("severity", "")).upper() in ("HIGH", "CRITICAL"))
+        med = sum(1 for f in findings if str(f.get("severity", "")).upper() == "MEDIUM")
+        low = sum(1 for f in findings if str(f.get("severity", "")).upper() == "LOW")
+        info = sum(1 for f in findings if str(f.get("severity", "")).upper() == "INFO")
+        console.print(
+            Panel(
+                f"[bold]Target:[/bold] {target}\n[bold]Findings:[/bold] HIGH/CRIT={high}  MED={med}  LOW={low}  INFO={info}",
+                title="Audit Results",
+                border_style="red",
+            )
+        )
+        if report.get("saved_to"):
+            console.print(f"[green]Saved JSON:[/green] {report.get('saved_to')}")
+        chat_meta = report.get("_chat", {}) if isinstance(report.get("_chat"), dict) else {}
+        if chat_meta.get("markdown_saved_to"):
+            console.print(f"[green]Saved Markdown:[/green] {chat_meta.get('markdown_saved_to')}")
 
     while True:
         user_input = typer.prompt("chat> ")
@@ -500,18 +532,152 @@ def chat():
             show_scan(res)
             continue
 
+        if user_input.startswith("/audit"):
+            try:
+                parts = shlex.split(user_input)
+            except ValueError as e:
+                console.print(f"[red]Parse error:[/red] {e}")
+                continue
+
+            target = None
+            mode = "normal"
+            nuclei_rate = 0
+            gobuster_threads = 10
+            gobuster_wordlist = None
+            container_image = None
+            markdown = None
+            output = None
+            remediate = False
+            max_remediations = 5
+            min_remediation_severity = "MEDIUM"
+            allow_public = False
+
+            i = 1
+            while i < len(parts):
+                token = parts[i]
+                if token == "--mode" and i + 1 < len(parts):
+                    mode = parts[i + 1]
+                    i += 2
+                    continue
+                if token == "--nuclei-rate" and i + 1 < len(parts):
+                    nuclei_rate = int(parts[i + 1])
+                    i += 2
+                    continue
+                if token == "--gobuster-threads" and i + 1 < len(parts):
+                    gobuster_threads = int(parts[i + 1])
+                    i += 2
+                    continue
+                if token == "--gobuster-wordlist" and i + 1 < len(parts):
+                    gobuster_wordlist = parts[i + 1]
+                    i += 2
+                    continue
+                if token == "--container-image" and i + 1 < len(parts):
+                    container_image = parts[i + 1]
+                    i += 2
+                    continue
+                if token == "--markdown" and i + 1 < len(parts):
+                    markdown = parts[i + 1]
+                    i += 2
+                    continue
+                if token == "--output" and i + 1 < len(parts):
+                    output = parts[i + 1]
+                    i += 2
+                    continue
+                if token == "--remediate":
+                    remediate = True
+                    i += 1
+                    continue
+                if token == "--max-remediations" and i + 1 < len(parts):
+                    max_remediations = int(parts[i + 1])
+                    i += 2
+                    continue
+                if token == "--min-remediation-severity" and i + 1 < len(parts):
+                    min_remediation_severity = parts[i + 1]
+                    i += 2
+                    continue
+                if token == "--allow-public":
+                    allow_public = True
+                    i += 1
+                    continue
+                if not token.startswith("-") and target is None:
+                    target = token
+                    i += 1
+                    continue
+                i += 1
+
+            if not target:
+                console.print(
+                    "[red]Usage:[/red] /audit <target> [--mode normal|stealth|aggressive] "
+                    "[--nuclei-rate N] [--gobuster-threads N] [--gobuster-wordlist PATH] "
+                    "[--container-image IMG] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
+                    "[--output report.json] [--markdown report.md] [--allow-public]"
+                )
+                continue
+
+            console.print(f"[cyan]Starting audit ({mode}) against {target}...[/cyan]")
+            with console.status("[green]Running audit...[/green]"):
+                rep = session.run_audit(
+                    target,
+                    mode=mode,
+                    nuclei_rate_limit=nuclei_rate,
+                    gobuster_threads=gobuster_threads,
+                    gobuster_wordlist=gobuster_wordlist,
+                    container_image=container_image,
+                    remediate=remediate,
+                    max_remediations=max_remediations,
+                    min_remediation_severity=min_remediation_severity,
+                    allow_public=allow_public,
+                    output=Path(output) if output else None,
+                    markdown=Path(markdown) if markdown else None,
+                )
+            show_audit(rep)
+            continue
+
         if user_input.startswith("/details"):
-            if not session.last_scan_result:
-                console.print("[yellow]No scan results yet.[/yellow]")
-            else:
+            try:
+                parts = shlex.split(user_input)
+            except ValueError as e:
+                console.print(f"[red]Parse error:[/red] {e}")
+                continue
+            tool = parts[1] if len(parts) > 1 else None
+            if tool:
+                entry = session.get_audit_tool_result(tool)
+                if entry is None:
+                    console.print(f"[yellow]No tool result found for '{tool}'.[/yellow]")
+                else:
+                    console.print(Panel(json.dumps(entry, indent=2)[:8000], title=f"Tool Details: {tool}", border_style="magenta"))
+                continue
+
+            if session.last_result_kind == "audit" and session.last_audit_report:
+                console.print("[dim]Last result: audit[/dim]")
+                show_audit(session.last_audit_report)
+            elif session.last_scan_result:
                 console.print(f"[dim]Last scan via {session.last_scan_tool}[/dim]")
                 show_scan(session.last_scan_result)
+            else:
+                console.print("[yellow]No results yet.[/yellow]")
             continue
 
         if user_input.startswith("/summary"):
             summary = session.summarize_findings()
             if summary:
                 console.print(Panel(summary, title="LLM Summary", border_style="cyan"))
+                meta = getattr(session, "last_llm_meta", None) or {}
+                usage = meta.get("usage") if isinstance(meta, dict) else None
+                if isinstance(usage, dict):
+                    total = usage.get("total_tokens")
+                    prompt = usage.get("prompt_tokens")
+                    completion = usage.get("completion_tokens")
+                    cost = meta.get("cost_usd")
+                    parts = []
+                    if total is not None:
+                        parts.append(f"tokens={total}")
+                    if prompt is not None and completion is not None:
+                        parts.append(f"prompt={prompt} completion={completion}")
+                    if cost is not None:
+                        parts.append(f"cost_usd={cost:.6f}" if isinstance(cost, (int, float)) else f"cost_usd={cost}")
+                    if parts:
+                        console.print(f"[dim]LLM usage: {' | '.join(parts)}[/dim]")
             else:
                 console.print("[yellow]No summary available (no data or LLM error).[/yellow]")
             continue
@@ -526,6 +692,22 @@ def chat():
             resp = session.remediate(title=title, evidence=evidence)
             if resp:
                 console.print(Panel(resp, title="LLM Fix", border_style="green"))
+                meta = getattr(session, "last_llm_meta", None) or {}
+                usage = meta.get("usage") if isinstance(meta, dict) else None
+                if isinstance(usage, dict):
+                    total = usage.get("total_tokens")
+                    prompt = usage.get("prompt_tokens")
+                    completion = usage.get("completion_tokens")
+                    cost = meta.get("cost_usd")
+                    parts = []
+                    if total is not None:
+                        parts.append(f"tokens={total}")
+                    if prompt is not None and completion is not None:
+                        parts.append(f"prompt={prompt} completion={completion}")
+                    if cost is not None:
+                        parts.append(f"cost_usd={cost:.6f}" if isinstance(cost, (int, float)) else f"cost_usd={cost}")
+                    if parts:
+                        console.print(f"[dim]LLM usage: {' | '.join(parts)}[/dim]")
             else:
                 console.print("[yellow]No fix available (LLM error).[/yellow]")
             continue
@@ -558,7 +740,33 @@ def chat():
                 console.print(Panel(res["stderr"][-2000:], title="stderr", border_style="red"))
             continue
 
-        console.print("[yellow]Freeform chat not implemented yet. Use slash commands: /scan, /details, /report, /test, /summary, /fix, /plan[/yellow]")
+        # Freeform: ask clarifying questions + propose next commands (no auto-execution)
+        result = session.clarify_goal(user_input)
+        questions = result.get("questions", [])
+        suggested = result.get("suggested_commands", [])
+        safety = result.get("safety", [])
+        notes = result.get("notes", "")
+
+        lines = []
+        if questions:
+            lines.append("[bold]Questions[/bold]")
+            for q in questions[:8]:
+                lines.append(f"- {q}")
+        if suggested:
+            lines.append("\n[bold]Suggested Commands[/bold]")
+            for cmd in suggested[:8]:
+                lines.append(f"- {cmd}")
+        if safety:
+            lines.append("\n[bold]Safety[/bold]")
+            for s in safety[:6]:
+                lines.append(f"- {s}")
+        if notes:
+            lines.append(f"\n[dim]{notes}[/dim]")
+
+        if not lines:
+            console.print("[yellow]No suggestions available. Use slash commands: /scan, /audit, /details, /report, /test, /summary, /fix, /plan[/yellow]")
+        else:
+            console.print(Panel("\n".join(lines), title="Engagement Planner", border_style="cyan"))
 
 if __name__ == "__main__":
     app()

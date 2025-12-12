@@ -17,7 +17,7 @@
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 3)**. The CLI, tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; the full autonomous ReAct loop and deeper safety/reporting polish are still in progress.  
-> Progress: `[███████████████-----]` **76%**
+> Progress: `[████████████████----]` **82%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -35,9 +35,9 @@
 
 ---
 
-## 🛠️ The Arsenal
+## 🛠️ The Arsenal (Planned Toolset)
 
-Supabash comes pre-configured to orchestrate the following tools. The agent manages the installation and execution of these dependencies.
+Supabash aims to orchestrate the following tools over time (not all wrappers are implemented yet). For what currently works today, see **Implemented Wrappers (Beta)** below.
 
 ### 🔍 Recon & Discovery
 *   **Nmap** (Network mapping & service detection)
@@ -139,6 +139,8 @@ supabash audit 192.168.1.10 --container-image my-app:latest --output report.json
 supabash audit 192.168.1.10 --markdown report.md --yes
 # run sqlmap only when providing a parameterized URL
 supabash audit "http://192.168.1.10/?id=1" --output report.json --yes
+# generate LLM remediation steps + code samples (costs tokens)
+supabash audit 192.168.1.10 --output report.json --yes --remediate --max-remediations 5 --min-remediation-severity HIGH
 ```
 
 ### 3. Container Image Scan
@@ -153,12 +155,16 @@ Talk to the agent directly to plan a custom engagement (slash commands supported
 supabash chat
 # inside chat:
 /scan 192.168.1.10 --profile fast --scanner nmap  # add --allow-public only if authorized
+/audit 192.168.1.10 --mode normal --output report.json --markdown report.md --remediate
 /details      # show last scan
+/details nuclei  # show per-tool output from last audit
 /report out.json
 /test         # run unit tests
 /summary      # LLM summary (requires configured provider/key)
 /fix "SQL Injection" "param id injectable"  # LLM remediation
 /plan         # heuristic next steps
+# freeform text (no auto-scans): the agent asks clarifying questions and suggests next commands
+I want to audit my staging app for common web vulns
 ```
 
 ### Scanner Engine Selection
@@ -183,6 +189,8 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Edit allowed hosts via CLI: `supabash config --allow-host 10.0.0.0/24`, `supabash config --remove-host 10.0.0.0/24`, `supabash config --list-allowed-hosts`.
 - Manage providers, API keys, and models with `supabash config`.
 - Manage scan safety: consent prompts are remembered in `core.consent_accepted` after the first interactive acceptance (use `supabash config --reset-consent` to re-prompt); `--yes` skips prompting for a single run.
+- LLM context/cost controls: set `llm.max_input_chars` to cap tool output sent to the LLM; LLM token usage + estimated USD cost are recorded in audit reports.
+- LLM caching (optional): enable with `llm.cache_enabled=true` (and optionally set `llm.cache_ttl_seconds`, `llm.cache_max_entries`, `llm.cache_dir`) to reuse identical LLM responses and reduce cost.
 - Tune web tooling: `supabash audit ... --nuclei-rate 10 --gobuster-threads 20` (and optionally `--gobuster-wordlist /path/to/list`).
 
 ---
