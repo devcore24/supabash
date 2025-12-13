@@ -63,9 +63,12 @@ class GobusterScanner:
 
         if not result.success:
             logger.error(f"Gobuster scan failed: {result.stderr}")
+            err = result.stderr
+            if not err:
+                err = f"Command failed (RC={result.return_code}): {result.command}"
             return {
                 "success": False,
-                "error": result.stderr,
+                "error": err,
                 "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout
             }

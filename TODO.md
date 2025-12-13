@@ -128,6 +128,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] **Report Generators**
     - [x] **JSON Report:** For machine integration.
     - [x] **Markdown Report:** A pretty, readable audit file with sections.
+    - [x] Auto-generate Markdown alongside JSON (same timestamped filename).
 - [x] **Code Fix Generator**
     - [x] Ensure the AI provides specific code snippets (e.g., "Change line 40 in Dockerfile to...").
 

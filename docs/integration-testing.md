@@ -19,8 +19,8 @@ docker compose -f docker-compose.integration.yml down
 
 Use a URL target so web tooling runs on the correct port:
 ```bash
-supabash audit "http://127.0.0.1:3000" --output report.json --yes
-supabash audit "http://127.0.0.1:3000" --output report.json --yes --remediate --max-remediations 5 --min-remediation-severity HIGH
+supabash audit "http://127.0.0.1:3000" --yes
+supabash audit "http://127.0.0.1:3000" --yes --remediate --max-remediations 5 --min-remediation-severity HIGH
 ```
 
 ## 3) Optional automated test
@@ -30,4 +30,3 @@ SUPABASH_INTEGRATION=1 PYTHONPATH=src venv/bin/python -m unittest tests.test_int
 ```
 
 The test is skipped unless `SUPABASH_INTEGRATION=1` and required binaries are present.
-

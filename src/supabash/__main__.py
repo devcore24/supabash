@@ -1,5 +1,6 @@
 import typer
 import shlex
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from rich.console import Console
@@ -195,9 +196,19 @@ def scan(
 @app.command()
 def audit(
     target: str = typer.Argument(..., help="Target IP, URL, or Container ID"),
-    output: str = typer.Option("report.json", "--output", "-o", help="Output file path"),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output JSON path (default: reports/report-YYYYmmdd-HHMMSS.json)",
+    ),
     container_image: str = typer.Option(None, "--container-image", "-c", help="Optional container image to scan with Trivy"),
-    markdown: str = typer.Option(None, "--markdown", "-m", help="Optional markdown report path"),
+    markdown: Optional[str] = typer.Option(
+        None,
+        "--markdown",
+        "-m",
+        help="Output Markdown path (default: derived from --output with .md)",
+    ),
     allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
     allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
     consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
@@ -237,13 +248,27 @@ def audit(
     console.print(f"[bold red][*] initializing full audit protocol for {target}...[/bold red]")
     if container_image:
         console.print(f"[dim]Including container image: {container_image}[/dim]")
-    console.print(f"[dim]Results will be saved to {output}[/dim]")
+
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_path = Path(output) if output else Path("reports") / f"report-{ts}.json"
+    if out_path.exists() and out_path.is_dir():
+        out_path = out_path / f"report-{ts}.json"
+    elif out_path.suffix == "":
+        out_path = out_path.with_suffix(".json")
+
+    md_path = Path(markdown) if markdown else out_path.with_suffix(".md")
+    if md_path.exists() and md_path.is_dir():
+        md_path = md_path / f"{out_path.stem}.md"
+    elif md_path.suffix == "":
+        md_path = md_path.with_suffix(".md")
+
+    console.print(f"[dim]Results will be saved to {out_path}[/dim]")
 
     orchestrator = AuditOrchestrator()
     with console.status("[bold green]Running audit steps...[/bold green]"):
         report = orchestrator.run(
             target,
-            Path(output),
+            out_path,
             container_image=container_image,
             mode=mode,
             nuclei_rate_limit=nuclei_rate_limit,
@@ -264,15 +289,18 @@ def audit(
         if "write_error" in report:
             console.print(f"[red]{report['write_error']}[/red]")
 
-    if markdown:
-        from supabash.report import write_markdown
-        md_path = write_markdown(report, Path(markdown))
-        console.print(f"[green]Markdown report written to {md_path}[/green]")
+    if saved_path:
+        try:
+            from supabash.report import write_markdown
+            md_written = write_markdown(report, md_path)
+            console.print(f"[green]Markdown report written to {md_written}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Failed to write Markdown report:[/yellow] {e}")
 
 @app.command()
 def react(
     target: str = typer.Argument(..., help="Target IP or URL"),
-    output: str = typer.Option("react_report.json", "--output", "-o", help="Output JSON report path"),
+    output: str = typer.Option("reports/react_report.json", "--output", "-o", help="Output JSON report path"),
     markdown: str = typer.Option(None, "--markdown", "-m", help="Optional markdown report path"),
     allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
     allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
@@ -811,7 +839,7 @@ def chat():
                     "[--nuclei-rate N] [--gobuster-threads N] [--gobuster-wordlist PATH] "
                     "[--parallel-web] [--max-workers N] "
                     "[--container-image IMG] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
-                    "[--output report.json] [--markdown report.md] [--allow-public] [--bg]"
+                    "[--output reports/report-YYYYmmdd-HHMMSS.json] [--markdown reports/report-YYYYmmdd-HHMMSS.md] [--allow-public] [--bg]"
                 )
                 continue
 

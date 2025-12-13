@@ -168,10 +168,14 @@ class ChatSession:
         self.last_audit_report = report
         self.last_result_kind = "audit"
 
-        if markdown is not None:
+        md_target = markdown
+        if md_target is None and output is not None:
+            md_target = output.with_suffix(".md")
+
+        if md_target is not None and report.get("saved_to"):
             try:
                 from supabash.report import write_markdown
-                md_path = write_markdown(report, markdown)
+                md_path = write_markdown(report, md_target)
                 report.setdefault("_chat", {})["markdown_saved_to"] = md_path
             except Exception as e:
                 report.setdefault("_chat", {})["markdown_error"] = str(e)
@@ -524,7 +528,7 @@ class ChatSession:
                     "supabash config --list-allowed-hosts",
                     "supabash config --allow-host <your-scope-entry>",
                     "supabash scan <target> --scanner nmap --profile fast --yes",
-                    "supabash audit <target> --output report.json --yes",
+                    "supabash audit <target> --yes",
                 ],
                 "notes": "Freeform planning is available, but tools run only via explicit commands.",
                 "safety": ["Confirm authorization and keep targets within core.allowed_hosts."],

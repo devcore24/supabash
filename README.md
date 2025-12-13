@@ -140,30 +140,32 @@ Run a comprehensive audit including recon, web scanning, and optional container 
 ```bash
 # Ensure the target is listed in core.allowed_hosts in config.yaml (recommended),
 # or pass --force to bypass the scope check.
-supabash audit 192.168.1.10 --output report.json --yes
+supabash audit 192.168.1.10 --yes
 # include container image scan
-supabash audit 192.168.1.10 --container-image my-app:latest --output report.json --yes
+supabash audit 192.168.1.10 --container-image my-app:latest --yes
 # write markdown report too
-supabash audit 192.168.1.10 --markdown report.md --yes
+supabash audit 192.168.1.10 --yes --output reports/my-audit.json   # also writes reports/my-audit.md
 # run web tools in parallel (and overlap with recon when a URL is provided)
-supabash audit "http://192.168.1.10" --output report.json --yes --parallel-web --max-workers 3
+supabash audit "http://192.168.1.10" --yes --parallel-web --max-workers 3
 # run sqlmap only when providing a parameterized URL
-supabash audit "http://192.168.1.10/?id=1" --output report.json --yes
+supabash audit "http://192.168.1.10/?id=1" --yes
 # generate LLM remediation steps + code samples (costs tokens)
-supabash audit 192.168.1.10 --output report.json --yes --remediate --max-remediations 5 --min-remediation-severity HIGH
+supabash audit 192.168.1.10 --yes --remediate --max-remediations 5 --min-remediation-severity HIGH
 ```
+Note: by default Supabash writes `reports/report-YYYYmmdd-HHMMSS.json` and `reports/report-YYYYmmdd-HHMMSS.md`. Avoid running `supabash audit` with `sudo` unless you need root-only scan modes; otherwise your report files may be owned by root.
+If web tools show `Executable not found`, install system requirements via `install.sh` or `docs/system-requirements.md`.
 
 ### 2b. ReAct Loop (Plan → Act)
 Run an iterative ReAct loop that plans next tools based on recon results.
 ```bash
-supabash react 192.168.1.10 --output react_report.json --yes --max-actions 10
-supabash react "http://192.168.1.10" --output react_report.json --yes --remediate
+supabash react 192.168.1.10 --output reports/react_report.json --yes --max-actions 10
+supabash react "http://192.168.1.10" --output reports/react_report.json --yes --remediate
 ```
 
 ### 3. Container Image Scan
 Scan a local Docker image for CVEs and configuration issues (via Trivy).
 ```bash
-supabash audit 127.0.0.1 --container-image my-app:latest --output report.json --yes
+supabash audit 127.0.0.1 --container-image my-app:latest --yes
 ```
 
 ### 4. Interactive Mode
@@ -173,7 +175,7 @@ supabash chat
 # inside chat:
 /scan 192.168.1.10 --profile fast --scanner nmap  # add --allow-public only if authorized
 /scan 192.168.1.10 --profile fast --scanner nmap --bg
-/audit 192.168.1.10 --mode normal --output report.json --markdown report.md --remediate
+/audit 192.168.1.10 --mode normal --output reports/report-YYYYmmdd-HHMMSS.json --remediate
 /audit 192.168.1.10 --mode normal --remediate --bg
 /audit "http://192.168.1.10" --mode normal --parallel-web --max-workers 3 --bg
 /status

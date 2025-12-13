@@ -16,6 +16,8 @@ sudo apt-get install -y \\
 ```
 
 Notes:
+- On Ubuntu, you may need to enable `universe` for some packages: `sudo add-apt-repository universe && sudo apt-get update -y`.
+- Ubuntu 24.04 may not ship `enum4linux` as an APT package; try `enum4linux-ng` instead.
 - `nuclei` and `trivy` can also be installed via their upstream installers; `install.sh` includes one working path.
 - Some tools are listed in README as a planned toolset but not all wrappers are implemented yet.
 
@@ -25,4 +27,3 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
-

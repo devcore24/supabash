@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SupaBash Installer
+# Supabash Installer
 # Installs dependencies, sets up the environment, and configures the CLI.
 
 set -e
@@ -10,6 +10,11 @@ BOLD="\033[1m"
 GREEN="\033[32m"
 RED="\033[31m"
 BLUE="\033[34m"
+
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    SUDO="sudo"
+fi
 
 info() {
     echo -e "${BLUE}[INFO]${RESET} $1"
@@ -24,6 +29,10 @@ error() {
     exit 1
 }
 
+warn() {
+    echo -e "\033[33m[WARN]${RESET} $1"
+}
+
 # 1. OS Detection
 detect_os() {
     if [ -f /etc/os-release ]; then
@@ -36,10 +45,29 @@ detect_os() {
     info "Detected OS: $OS $VER"
 }
 
+# Enable Ubuntu "universe" repo for common security tools
+enable_ubuntu_universe() {
+    if [[ "${OS,,}" == *"ubuntu"* ]]; then
+        if ! command -v add-apt-repository &> /dev/null; then
+            info "Installing software-properties-common (for add-apt-repository)..."
+            $SUDO apt-get update -y
+            $SUDO apt-get install -y software-properties-common
+        fi
+        info "Ensuring Ubuntu 'universe' repository is enabled..."
+        $SUDO add-apt-repository -y universe >/dev/null 2>&1 || true
+        $SUDO apt-get update -y
+    fi
+}
+
+apt_pkg_available() {
+    apt-cache show "$1" >/dev/null 2>&1
+}
+
 # 2. System Dependencies (APT)
 install_apt_deps() {
     info "Updating package lists..."
-    sudo apt-get update -y
+    $SUDO apt-get update -y
+    enable_ubuntu_universe
 
     DEPENDENCIES=(
         python3
@@ -49,6 +77,7 @@ install_apt_deps() {
         curl
         wget
         unzip
+        jq
         nmap
         masscan
         nikto
@@ -62,8 +91,29 @@ install_apt_deps() {
         # Add other standard tools here
     )
 
-    info "Installing system packages: ${DEPENDENCIES[*]}"
-    sudo apt-get install -y "${DEPENDENCIES[@]}"
+    INSTALL=()
+    MISSING=()
+    for pkg in "${DEPENDENCIES[@]}"; do
+        if apt_pkg_available "$pkg"; then
+            INSTALL+=("$pkg")
+            continue
+        fi
+        if [[ "$pkg" == "enum4linux" ]]; then
+            if apt_pkg_available "enum4linux-ng"; then
+                warn "Package 'enum4linux' not found; using 'enum4linux-ng' instead."
+                INSTALL+=("enum4linux-ng")
+                continue
+            fi
+        fi
+        MISSING+=("$pkg")
+    done
+
+    info "Installing system packages: ${INSTALL[*]}"
+    $SUDO apt-get install -y "${INSTALL[@]}"
+    if [ "${#MISSING[@]}" -gt 0 ]; then
+        warn "Some packages were not found in APT and were skipped: ${MISSING[*]}"
+        warn "See docs/system-requirements.md for manual alternatives."
+    fi
 }
 
 # 3. External Tools (Nuclei, Trivy)
@@ -84,11 +134,11 @@ install_external_tools() {
     # Install Trivy (Container Scanner)
     if ! command -v trivy &> /dev/null; then
         info "Installing Trivy..."
-        sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-        echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-        sudo apt-get update
-        sudo apt-get install -y trivy
+        $SUDO apt-get install -y wget apt-transport-https gnupg lsb-release
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | $SUDO apt-key add -
+        echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | $SUDO tee -a /etc/apt/sources.list.d/trivy.list
+        $SUDO apt-get update
+        $SUDO apt-get install -y trivy
         success "Trivy installed."
     else
         info "Trivy is already installed."
@@ -146,7 +196,7 @@ EOF
 
 # Main Execution
 main() {
-    echo -e "${BOLD}SupaBash Installer${RESET}"
+    echo -e "${BOLD}Supabash Installer${RESET}"
     echo "=================="
     
     detect_os

@@ -27,11 +27,11 @@ class NucleiScanner:
         """
         logger.info(f"Starting Nuclei scan on {target}")
         
-        # Command: nuclei -target <target> -json -silent
+        # Command: nuclei -u <target> -jsonl -silent
         command = [
             "nuclei",
-            "-target", target,
-            "-json",
+            "-u", target,
+            "-jsonl",
             "-silent"
         ]
 
@@ -48,9 +48,14 @@ class NucleiScanner:
 
         if not result.success:
             logger.error(f"Nuclei scan failed: {result.stderr}")
+            err = result.stderr
+            if not err:
+                err = result.stdout or ""
+            if not err:
+                err = f"Command failed (RC={result.return_code}): {result.command}"
             return {
                 "success": False,
-                "error": result.stderr,
+                "error": err,
                 "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout
             }

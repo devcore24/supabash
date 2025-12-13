@@ -43,11 +43,11 @@ class TestNucleiScanner(unittest.TestCase):
         command = args[0]
         
         self.assertEqual(command[0], "nuclei")
-        self.assertIn("-target", command)
+        self.assertIn("-u", command)
         self.assertIn("example.com", command)
         self.assertIn("-t", command)
         self.assertIn("cves", command)
-        self.assertIn("-json", command)
+        self.assertIn("-jsonl", command)
 
     def test_scan_command_rate_limit(self):
         self.mock_runner.run.return_value = CommandResult(
@@ -58,6 +58,14 @@ class TestNucleiScanner(unittest.TestCase):
         command = args[0]
         self.assertIn("-rate-limit", command)
         self.assertIn("5", command)
+
+    def test_failure_uses_stdout_when_stderr_empty(self):
+        self.mock_runner.run.return_value = CommandResult(
+            command="nuclei", return_code=2, stdout="bad flag", stderr="", success=False
+        )
+        res = self.scanner.scan("example.com")
+        self.assertFalse(res["success"])
+        self.assertEqual(res["error"], "bad flag")
 
 if __name__ == '__main__':
     unittest.main()

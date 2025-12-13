@@ -51,3 +51,10 @@ config.yaml
 secrets.json
 openai_key.txt
 .supabash/
+
+# Local reports/artifacts
+report.json
+react_report.json
+chat_report.json
+reports/*
+!reports/.gitkeep

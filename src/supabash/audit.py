@@ -49,7 +49,12 @@ class AuditOrchestrator:
         try:
             result = func()
             success = result.get("success", False)
-            return {"tool": name, "success": success, "data": result}
+            entry: Dict[str, Any] = {"tool": name, "success": success, "data": result}
+            if not success and isinstance(result, dict):
+                err = result.get("error")
+                if isinstance(err, str) and err.strip():
+                    entry["error"] = err.strip()
+            return entry
         except Exception as e:
             logger.error(f"{name} execution failed: {e}")
             return {"tool": name, "success": False, "error": str(e)}
@@ -310,11 +315,19 @@ class AuditOrchestrator:
             for p in host.get("ports", []):
                 port = p.get("port")
                 state = p.get("state")
+                service = str(p.get("service") or "").lower()
                 if state != "open":
                     continue
-                if port not in (80, 443, 8080, 8443):
+                if port is None:
                     continue
-                scheme = "https" if port in (443, 8443) else "http"
+
+                is_http = "http" in service
+                if not is_http and port not in (80, 443, 8080, 8443):
+                    continue
+
+                scheme = "http"
+                if "https" in service or "ssl" in service or port in (443, 8443):
+                    scheme = "https"
                 if port in (80, 443):
                     urls.append(f"{scheme}://{host_id}")
                 else:

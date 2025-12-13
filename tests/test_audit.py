@@ -64,6 +64,25 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertGreaterEqual(len(data["findings"]), 1)
         output.unlink()
 
+    def test_web_targets_include_http_service_on_nonstandard_port(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        urls = orch._web_targets_from_nmap(
+            "localhost",
+            {
+                "hosts": [
+                    {
+                        "ip": "127.0.0.1",
+                        "ports": [
+                            {"port": 6000, "protocol": "tcp", "service": "http", "state": "open"},
+                            {"port": 9100, "protocol": "tcp", "service": "jetdirect", "state": "open"},
+                        ],
+                    }
+                ]
+            },
+        )
+        self.assertIn("http://localhost:6000", urls)
+        self.assertNotIn("http://localhost:9100", urls)
+
     def test_handles_failure(self):
         scanners = {
             "nmap": FakeFailScanner("nmap"),
@@ -82,6 +101,9 @@ class TestAuditOrchestrator(unittest.TestCase):
         report = orchestrator.run("example.com", output)
         failures = [r for r in report["results"] if not r["success"]]
         self.assertTrue(failures)
+        nmap_entry = next((r for r in report["results"] if r.get("tool") == "nmap"), None)
+        self.assertIsNotNone(nmap_entry)
+        self.assertEqual(nmap_entry.get("error"), "fail")
         output.unlink()
 
 
