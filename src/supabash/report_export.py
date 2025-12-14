@@ -46,8 +46,10 @@ def markdown_to_html(markdown_text: str) -> str:
     fn = getattr(md, "markdown", None)
     if not callable(fn):
         raise RuntimeError("markdown module does not provide markdown()")
-    # tables/fenced_code are needed for our report format
-    return fn(markdown_text, extensions=["tables", "fenced_code"], output_format="html5")
+    # Enable heading IDs so in-document anchors (e.g. #summary) work in the exported HTML/PDF.
+    # - toc: generates stable id="" attributes for headings
+    # - attr_list: allows explicit heading IDs like "## Summary {#summary}" if we ever want them
+    return fn(markdown_text, extensions=["tables", "fenced_code", "toc", "attr_list"], output_format="html5")
 
 
 def export_from_markdown_file(
@@ -112,4 +114,3 @@ def export_from_markdown_file(
             out.pdf_error = f"Failed to write PDF: {e}"
 
     return out
-
