@@ -1,6 +1,7 @@
 # Core Recon & Scanning Tools (Install via apt/pacman/brew)
 nmap
 masscan
+rustscan
 nikto
 sqlmap
 hydra
@@ -8,7 +9,8 @@ gobuster
 whatweb
 sslscan
 dnsenum
-enum4linux
+# SMB enumeration (optional)
+enum4linux-ng
 
 # Wireless (Optional)
 aircrack-ng

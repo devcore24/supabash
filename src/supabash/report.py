@@ -10,6 +10,23 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     if report.get("container_image"):
         lines.append(f"**Container Image:** {report['container_image']}")
 
+    # Errors (if any)
+    errors = []
+    err = report.get("error")
+    if isinstance(err, str) and err.strip():
+        errors.append(err.strip())
+    react = report.get("react")
+    if isinstance(react, dict):
+        planner = react.get("planner")
+        if isinstance(planner, dict):
+            perr = planner.get("error")
+            if isinstance(perr, str) and perr.strip() and perr.strip() not in errors:
+                errors.append(perr.strip())
+    if errors:
+        lines.append("\n## Error")
+        for e in errors[:3]:
+            lines.append(f"- {e}")
+
     # Summary
     summary = report.get("summary")
     if summary:
@@ -126,6 +143,24 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             lines.append(f"  - Reason: {entry['reason']}")
         if not entry.get("skipped") and not entry.get("success") and entry.get("error"):
             lines.append(f"  - Error: {entry['error']}")
+
+    # Auditability: exact commands executed (when available)
+    commands = []
+    for entry in report.get("results", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        tool = entry.get("tool", "unknown")
+        cmd = entry.get("command")
+        if not isinstance(cmd, str) or not cmd.strip():
+            data = entry.get("data")
+            if isinstance(data, dict):
+                cmd = data.get("command")
+        if isinstance(cmd, str) and cmd.strip():
+            commands.append((str(tool), cmd.strip()))
+    if commands:
+        lines.append("\n## Commands Executed")
+        for tool, cmd in commands:
+            lines.append(f"- **{tool}**: `{cmd}`")
 
     return "\n".join(lines)
 

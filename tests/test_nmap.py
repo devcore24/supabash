@@ -80,6 +80,16 @@ class TestNmapScanner(unittest.TestCase):
         self.assertIn("-p", command_list)
         self.assertIn("80,443", command_list)
 
+    def test_scan_respects_timeout_override(self):
+        self.mock_runner.run.return_value = CommandResult(
+            command="", return_code=0, stdout=SAMPLE_NMAP_XML, stderr="", success=True
+        )
+
+        self.scanner.scan("localhost", arguments="-sV", timeout_seconds=5)
+
+        args, kwargs = self.mock_runner.run.call_args
+        self.assertEqual(kwargs.get("timeout"), 5)
+
     def test_scan_strips_root_only_flags_when_not_root(self):
         self.mock_runner.run.return_value = CommandResult(
             command="", return_code=0, stdout=SAMPLE_NMAP_XML, stderr="", success=True

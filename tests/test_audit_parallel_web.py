@@ -79,3 +79,46 @@ class TestAuditParallelWeb(unittest.TestCase):
         self.assertIn("nuclei", tools)
         self.assertIn("gobuster", tools)
 
+    def test_parallel_web_results_are_deterministically_ordered(self):
+        class SlowScanner:
+            def __init__(self, name: str, delay: float):
+                self.name = name
+                self.delay = delay
+
+            def scan(self, *args, **kwargs):
+                time.sleep(self.delay)
+                return {"success": True, "data": {"tool": self.name}, "command": f"{self.name} dummy"}
+
+        class FakeNmap:
+            def scan(self, *args, **kwargs):
+                return {"success": True, "scan_data": {"hosts": []}, "command": "nmap dummy"}
+
+        scanners = {
+            "nmap": FakeNmap(),
+            # Intentionally make completion order differ from desired order:
+            "whatweb": SlowScanner("whatweb", 0.06),
+            "nuclei": SlowScanner("nuclei", 0.01),
+            "gobuster": SlowScanner("gobuster", 0.03),
+            "sqlmap": SlowScanner("sqlmap", 0.01),
+            "trivy": SlowScanner("trivy", 0.01),
+            "supabase_rls": type("Noop", (), {"check": lambda self, url, **kw: {"success": True, "data": {}, "command": "rls"}})(),
+        }
+
+        orch = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
+        report = orch.run(
+            "http://127.0.0.1:8080",
+            output=None,
+            parallel_web=True,
+            max_workers=3,
+        )
+
+        tools = [r.get("tool") for r in report.get("results", []) if isinstance(r, dict)]
+        self.assertGreaterEqual(len(tools), 4)
+        self.assertEqual(tools[0], "nmap")
+        self.assertEqual(tools[1], "whatweb")
+        self.assertEqual(tools[2], "nuclei")
+        self.assertEqual(tools[3], "gobuster")
+
+
+if __name__ == "__main__":
+    unittest.main()

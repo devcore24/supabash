@@ -27,6 +27,27 @@ DEFAULT_CONFIG = {
         # Safety: require explicit opt-in for public IP targets
         "allow_public_ips": False,
     },
+    # Tool registry (enable/disable tools globally)
+    # Note: some tools are also conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL).
+    "tools": {
+        "nmap": {"enabled": True, "timeout_seconds": 600},
+        "masscan": {"enabled": True, "timeout_seconds": 600},
+        "rustscan": {"enabled": True, "timeout_seconds": 600},
+        "whatweb": {"enabled": True, "timeout_seconds": 300},
+        "nuclei": {"enabled": True, "timeout_seconds": 1800},
+        "gobuster": {"enabled": True, "timeout_seconds": 1800},
+        "sqlmap": {"enabled": True, "timeout_seconds": 1800},
+        # Slow/noisy: keep opt-in by default
+        "nikto": {"enabled": False, "timeout_seconds": 1200},
+        "sslscan": {"enabled": True, "timeout_seconds": 600},
+        "dnsenum": {"enabled": True, "timeout_seconds": 900},
+        # Prefer underscore in config keys for readability; both forms are accepted by the runtime.
+        "enum4linux_ng": {"enabled": True, "timeout_seconds": 1200},
+        "trivy": {"enabled": True, "timeout_seconds": 1800},
+        "supabase_rls": {"enabled": True, "timeout_seconds": 10},
+        # Credentials brute forcing should remain opt-in/manual for safety.
+        "hydra": {"enabled": False, "timeout_seconds": 3600},
+    },
     "llm": {
         "max_input_chars": 12000,
         "cache_enabled": False,
@@ -116,6 +137,31 @@ class ConfigManager:
                             loaded["llm"].setdefault(k, v)
                         else:
                             loaded["llm"].setdefault(k, v)
+                if "tools" not in loaded:
+                    loaded["tools"] = DEFAULT_CONFIG["tools"]
+                else:
+                    default_tools = DEFAULT_CONFIG.get("tools", {})
+                    if isinstance(default_tools, dict) and isinstance(loaded.get("tools"), dict):
+                        tools_cfg = loaded["tools"]
+                        for k, v in default_tools.items():
+                            variants = [k]
+                            if isinstance(k, str) and "_" in k:
+                                variants.append(k.replace("_", "-"))
+                            if isinstance(k, str) and "-" in k:
+                                variants.append(k.replace("-", "_"))
+
+                            present = [vv for vv in variants if vv in tools_cfg]
+                            if not present:
+                                tools_cfg[k] = v
+                                continue
+
+                            for key in present:
+                                existing = tools_cfg.get(key)
+                                if isinstance(existing, dict) and isinstance(v, dict):
+                                    for dk, dv in v.items():
+                                        existing.setdefault(dk, dv)
+                                else:
+                                    tools_cfg[key] = v
                 if use_fallback:
                     # Migrate legacy user config into project-local config.yaml
                     self.config_file = CONFIG_FILE

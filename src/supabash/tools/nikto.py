@@ -1,7 +1,8 @@
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
+from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
@@ -13,7 +14,13 @@ class NiktoScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, port: int = 80, cancel_event=None) -> Dict[str, Any]:
+    def scan(
+        self,
+        target: str,
+        port: int = 80,
+        cancel_event=None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Executes a Nikto scan against the target.
         
@@ -36,7 +43,8 @@ class NiktoScanner:
         ]
 
         # Nikto can take a while, 20 min timeout
-        kwargs = {"timeout": 1200}
+        timeout = resolve_timeout_seconds(timeout_seconds, default=1200)
+        kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
         result: CommandResult = self.runner.run(command, **kwargs)
@@ -47,7 +55,8 @@ class NiktoScanner:
                 "success": False,
                 "error": result.stderr,
                 "canceled": bool(getattr(result, "canceled", False)),
-                "raw_output": result.stdout
+                "raw_output": result.stdout,
+                "command": result.command,
             }
 
         parsed_data = self._parse_xml(result.stdout)

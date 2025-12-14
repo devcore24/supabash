@@ -1,7 +1,8 @@
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
+from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
@@ -14,7 +15,13 @@ class WhatWebScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, arguments: str = None, cancel_event=None) -> Dict[str, Any]:
+    def scan(
+        self,
+        target: str,
+        arguments: str = None,
+        cancel_event=None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Executes a WhatWeb scan against the target.
 
@@ -31,7 +38,8 @@ class WhatWebScanner:
         if arguments:
             command.extend(arguments.split())
 
-        kwargs = {"timeout": 300}
+        timeout = resolve_timeout_seconds(timeout_seconds, default=300)
+        kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
         result: CommandResult = self.runner.run(command, **kwargs)
@@ -45,7 +53,8 @@ class WhatWebScanner:
                 "success": False,
                 "error": err,
                 "canceled": bool(getattr(result, "canceled", False)),
-                "raw_output": result.stdout
+                "raw_output": result.stdout,
+                "command": result.command,
             }
 
         parsed = self._parse_json_lines(result.stdout)

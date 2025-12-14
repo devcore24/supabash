@@ -1,7 +1,8 @@
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
+from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
@@ -13,7 +14,14 @@ class NucleiScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, templates: str = None, rate_limit: int = None, cancel_event=None) -> Dict[str, Any]:
+    def scan(
+        self,
+        target: str,
+        templates: str = None,
+        rate_limit: int = None,
+        cancel_event=None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Executes a Nuclei scan against the target.
         
@@ -41,7 +49,8 @@ class NucleiScanner:
             command.extend(["-rate-limit", str(rate_limit)])
 
         # Nuclei can take a while depending on templates, default 30 min
-        kwargs = {"timeout": 1800}
+        timeout = resolve_timeout_seconds(timeout_seconds, default=1800)
+        kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
         result: CommandResult = self.runner.run(command, **kwargs)
@@ -57,7 +66,8 @@ class NucleiScanner:
                 "success": False,
                 "error": err,
                 "canceled": bool(getattr(result, "canceled", False)),
-                "raw_output": result.stdout
+                "raw_output": result.stdout,
+                "command": result.command,
             }
 
         parsed_data = self._parse_json(result.stdout)

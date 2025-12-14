@@ -1,6 +1,7 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
+from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
@@ -13,7 +14,15 @@ class RustscanScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, target: str, ports: str = "1-1000", batch: int = 2000, arguments: str = None, cancel_event=None) -> Dict[str, Any]:
+    def scan(
+        self,
+        target: str,
+        ports: str = "1-1000",
+        batch: int = 2000,
+        arguments: str = None,
+        cancel_event=None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Executes a Rustscan scan against the target.
 
@@ -40,7 +49,8 @@ class RustscanScanner:
         if arguments:
             command.extend(arguments.split())
 
-        kwargs = {"timeout": 600}
+        timeout = resolve_timeout_seconds(timeout_seconds, default=600)
+        kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
         result: CommandResult = self.runner.run(command, **kwargs)
@@ -51,7 +61,8 @@ class RustscanScanner:
                 "success": False,
                 "error": result.stderr,
                 "canceled": bool(getattr(result, "canceled", False)),
-                "raw_output": result.stdout
+                "raw_output": result.stdout,
+                "command": result.command,
             }
 
         parsed_data = self._parse_greppable(result.stdout)

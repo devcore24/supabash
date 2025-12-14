@@ -1,3 +1,5 @@
+import json
+import re
 import time
 from pathlib import Path
 from threading import Event
@@ -5,6 +7,8 @@ from typing import Any, Dict, List, Optional
 
 from supabash.audit import AuditOrchestrator
 from supabash.agent import AgentState, MethodologyPlanner
+from supabash import prompts
+from supabash.llm_context import prepare_json_payload
 
 
 class ReActOrchestrator(AuditOrchestrator):
@@ -35,6 +39,7 @@ class ReActOrchestrator(AuditOrchestrator):
         nuclei_rate_limit: int = 0,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
+        llm_plan: bool = False,
         remediate: bool = False,
         max_remediations: int = 5,
         min_remediation_severity: str = "MEDIUM",
@@ -51,7 +56,12 @@ class ReActOrchestrator(AuditOrchestrator):
             "results": [],
             "mode": mode,
             "started_at": time.time(),
-            "react": {"max_actions": int(max_actions), "actions": [], "notes": ""},
+            "react": {
+                "max_actions": int(max_actions),
+                "actions": [],
+                "notes": "",
+                "planner": {"type": "llm" if llm_plan else "heuristic", "plans": [], "error": None},
+            },
             "tuning": {
                 "nuclei_rate_limit": nuclei_rate_limit or None,
                 "gobuster_threads": gobuster_threads,
@@ -78,12 +88,13 @@ class ReActOrchestrator(AuditOrchestrator):
             return agg
 
         note("tool_start", "nmap", f"Running nmap ({mode})")
-        nmap_entry = self._run_tool(
+        nmap_entry = self._run_tool_if_enabled(
             "nmap",
             lambda: self.scanners["nmap"].scan(
                 scan_host,
                 arguments=self._nmap_args_for_mode(mode),
                 cancel_event=cancel_event,
+                timeout_seconds=self._tool_timeout_seconds("nmap"),
             ),
         )
         agg["results"].append(nmap_entry)
@@ -101,10 +112,26 @@ class ReActOrchestrator(AuditOrchestrator):
                 ports.extend(host.get("ports", []))
         state = AgentState(target=target, ports=ports, findings=[], actions_run=["nmap"])
 
-        plan = self.planner.suggest(state)
-        next_steps = list(plan.get("next_steps", [])) if isinstance(plan, dict) else []
-        notes = plan.get("notes", "") if isinstance(plan, dict) else ""
-        agg["react"]["notes"] = notes
+        actions_queue: List[str] = []
+        stop_requested = False
+        llm_plan_failed = False
+
+        if not llm_plan:
+            plan = self.planner.suggest(state)
+            next_steps = list(plan.get("next_steps", [])) if isinstance(plan, dict) else []
+            notes = plan.get("notes", "") if isinstance(plan, dict) else ""
+            agg["react"]["notes"] = notes
+            actions_queue = list(next_steps)
+            try:
+                preview = ", ".join(str(s) for s in next_steps[:10])
+                if len(next_steps) > 10:
+                    preview = f"{preview}, …"
+                msg = f"Planned next steps: {preview}" if preview else "Planner returned no next steps."
+                note("plan_ready", "planner", msg)
+                if notes:
+                    note("methodology", "planner", notes)
+            except Exception:
+                pass
 
         # Derive web targets (same as audit)
         web_targets: List[str] = []
@@ -114,9 +141,167 @@ class ReActOrchestrator(AuditOrchestrator):
             web_targets = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
         agg["web_targets"] = web_targets
 
+        def parse_llm_plan(text: str) -> Dict[str, Any]:
+            raw = (text or "").strip()
+            if not raw:
+                raise ValueError("empty LLM response")
+            obj = None
+            try:
+                obj = json.loads(raw)
+            except Exception:
+                m = re.search(r"\{.*\}", raw, flags=re.S)
+                if m:
+                    obj = json.loads(m.group(0))
+            if not isinstance(obj, dict):
+                raise ValueError("LLM planner output is not a JSON object")
+            steps = obj.get("next_steps", [])
+            if steps is None:
+                steps = []
+            if not isinstance(steps, list):
+                raise ValueError("LLM planner output next_steps is not a list")
+            cleaned = []
+            for s in steps:
+                if s is None:
+                    continue
+                st = str(s).strip()
+                if st:
+                    cleaned.append(st)
+            notes = obj.get("notes", "")
+            if notes is None:
+                notes = ""
+            return {"next_steps": cleaned, "notes": str(notes)}
+
+        def llm_plan_next_steps(remaining: int) -> Dict[str, Any]:
+            allowed_bases = [
+                "whatweb",
+                "nuclei",
+                "gobuster",
+                "dnsenum",
+                "sslscan",
+                "enum4linux-ng",
+                "nikto",
+                "sqlmap",
+                "trivy",
+                "stop",
+            ]
+
+            open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {})) if nmap_entry.get("success") else []
+            tls_ports = [p for p in open_ports if p in (443, 8443)]
+            smb_detected = any(p in (139, 445) for p in open_ports)
+
+            results_summary = []
+            for r in agg.get("results", []):
+                if not isinstance(r, dict):
+                    continue
+                results_summary.append(
+                    {
+                        "tool": r.get("tool"),
+                        "success": r.get("success"),
+                        "skipped": r.get("skipped"),
+                        "reason": r.get("reason"),
+                        "error": r.get("error"),
+                    }
+                )
+
+            enabled_map = {b: bool(self._tool_enabled(b, default=True)) for b in allowed_bases if b != "stop"}
+            available_map = {b: bool(b in self.scanners) for b in allowed_bases if b != "stop"}
+
+            findings_preview = []
+            try:
+                findings_preview = self._collect_findings(agg)[-20:]
+            except Exception:
+                findings_preview = []
+
+            context_obj = {
+                "target": target,
+                "mode": mode,
+                "scan_host": scan_host,
+                "open_ports": open_ports,
+                "web_targets": web_targets,
+                "observations": {
+                    "results": results_summary[-12:],
+                    "findings": findings_preview,
+                },
+                "executed_actions": list(agg.get("react", {}).get("actions", []))[-20:],
+                "remaining_actions": int(remaining),
+                "available_actions": allowed_bases,
+                "tool_enabled": enabled_map,
+                "tool_available": available_map,
+                "preconditions": {
+                    "sqlmap_url_provided": bool(normalized.get("sqlmap_url")),
+                    "container_image_provided": bool(container_image),
+                    "domain_target": bool(self._should_run_dnsenum(scan_host)),
+                    "tls_ports_detected": tls_ports,
+                    "smb_ports_detected": bool(smb_detected),
+                },
+            }
+
+            max_chars = self._llm_max_chars(default=8000)
+            payload, truncated = prepare_json_payload(context_obj, max_chars=max_chars)
+            messages = [
+                {"role": "system", "content": prompts.REACT_LLM_PLANNER_PROMPT},
+                {"role": "user", "content": payload},
+            ]
+            if truncated:
+                messages.insert(1, {"role": "system", "content": "Note: Input was truncated to fit context limits."})
+
+            note("llm_start", "planner", "Planning next steps with LLM")
+            chat_with_meta = getattr(self.llm, "chat_with_meta", None)
+            if callable(chat_with_meta):
+                content, meta = chat_with_meta(messages)
+            else:
+                content = self.llm.chat(messages)
+                meta = None
+
+            if isinstance(meta, dict):
+                meta = dict(meta)
+                meta.update(
+                    {
+                        "call_type": "plan",
+                        "input_truncated": bool(truncated),
+                        "input_chars": len(payload),
+                        "max_input_chars": int(max_chars),
+                    }
+                )
+                self._append_llm_call(agg, meta)
+
+            plan_obj = parse_llm_plan(content)
+
+            # Filter to allowed + stop sentinel
+            filtered: List[str] = []
+            local_stop = False
+            for step in plan_obj.get("next_steps", []):
+                base = str(step).split(":", 1)[0].strip().lower()
+                if base in ("stop", "done", "finish"):
+                    local_stop = True
+                    break
+                if base not in allowed_bases:
+                    continue
+                filtered.append(step)
+
+            plan_obj["next_steps"] = filtered
+            plan_obj["_stop"] = bool(local_stop)
+            return plan_obj
+
         def run_or_skip(name: str, func, reason: str = "") -> Dict[str, Any]:
             if canceled():
+                try:
+                    note("tool_skip", name, "Canceled")
+                except Exception:
+                    pass
                 return {"tool": name, "success": False, "skipped": True, "reason": "Canceled"}
+            if not self._tool_enabled(name, default=True):
+                try:
+                    note("tool_skip", name, "Disabled by config (tools.<name>.enabled=false)")
+                except Exception:
+                    pass
+                return self._skip_disabled(name)
+            if name not in self.scanners:
+                try:
+                    note("tool_skip", name, "Scanner not available")
+                except Exception:
+                    pass
+                return self._skip_tool(name, "Scanner not available")
             note("tool_start", name, f"Running {name}")
             entry = self._run_tool(name, func)
             note("tool_end", name, f"Finished {name}")
@@ -125,14 +310,44 @@ class ReActOrchestrator(AuditOrchestrator):
             return entry if entry.get("success") or entry.get("error") else self._skip_tool(name, reason or "Skipped")
 
         executed = 0
-        for action in next_steps:
-            if executed >= int(max_actions):
-                break
+        while executed < int(max_actions):
             if canceled():
                 agg["canceled"] = True
                 break
+            if llm_plan and not actions_queue and not stop_requested and not llm_plan_failed:
+                remaining = int(max_actions) - executed
+                try:
+                    plan_obj = llm_plan_next_steps(remaining)
+                    agg["react"]["planner"]["plans"].append(plan_obj)
+                    notes = plan_obj.get("notes", "")
+                    if isinstance(notes, str) and notes.strip():
+                        agg["react"]["notes"] = notes.strip()
+                        note("methodology", "llm_planner", notes.strip())
+                    steps = list(plan_obj.get("next_steps", []))
+                    preview = ", ".join(str(s) for s in steps[:10])
+                    msg = f"Planned next steps: {preview}" if preview else "LLM planner returned no next steps."
+                    note("plan_ready", "llm_planner", msg)
+                    actions_queue = list(steps)
+                    stop_requested = bool(plan_obj.get("_stop")) or not actions_queue
+                except Exception as e:
+                    llm_plan_failed = True
+                    err = f"LLM planning failed: {e}"
+                    agg["error"] = err
+                    agg["failed"] = True
+                    agg["react"]["planner"]["error"] = err
+                    note("error", "llm_planner", err)
+                    break
+
+            if not actions_queue:
+                break
+
+            action = actions_queue.pop(0)
             agg["react"]["actions"].append(action)
             executed += 1
+            try:
+                note("action_selected", "react", f"{executed}/{int(max_actions)}: {action}")
+            except Exception:
+                pass
 
             # Normalize actions like "hydra:ssh"
             base = str(action).split(":", 1)[0].strip().lower()
@@ -141,7 +356,16 @@ class ReActOrchestrator(AuditOrchestrator):
                 if not web_targets:
                     agg["results"].append(self._skip_tool("whatweb", "No web targets detected"))
                 else:
-                    agg["results"].append(run_or_skip("whatweb", lambda: self.scanners["whatweb"].scan(web_targets[0], cancel_event=cancel_event)))
+                    agg["results"].append(
+                        run_or_skip(
+                            "whatweb",
+                            lambda: self.scanners["whatweb"].scan(
+                                web_targets[0],
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("whatweb"),
+                            ),
+                        )
+                    )
                 continue
 
             if base == "nuclei":
@@ -151,7 +375,12 @@ class ReActOrchestrator(AuditOrchestrator):
                     agg["results"].append(
                         run_or_skip(
                             "nuclei",
-                            lambda: self.scanners["nuclei"].scan(web_targets[0], rate_limit=nuclei_rate_limit or None, cancel_event=cancel_event),
+                            lambda: self.scanners["nuclei"].scan(
+                                web_targets[0],
+                                rate_limit=nuclei_rate_limit or None,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                            ),
                         )
                     )
                 continue
@@ -169,6 +398,7 @@ class ReActOrchestrator(AuditOrchestrator):
                                     wordlist=gobuster_wordlist,
                                     threads=gobuster_threads,
                                     cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("gobuster"),
                                 ),
                             )
                         )
@@ -180,6 +410,7 @@ class ReActOrchestrator(AuditOrchestrator):
                                     web_targets[0],
                                     threads=gobuster_threads,
                                     cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("gobuster"),
                                 ),
                             )
                         )
@@ -187,7 +418,16 @@ class ReActOrchestrator(AuditOrchestrator):
 
             if base == "sqlmap":
                 if normalized["sqlmap_url"]:
-                    agg["results"].append(run_or_skip("sqlmap", lambda: self.scanners["sqlmap"].scan(normalized["sqlmap_url"], cancel_event=cancel_event)))
+                    agg["results"].append(
+                        run_or_skip(
+                            "sqlmap",
+                            lambda: self.scanners["sqlmap"].scan(
+                                normalized["sqlmap_url"],
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("sqlmap"),
+                            ),
+                        )
+                    )
                 else:
                     agg["results"].append(self._skip_tool("sqlmap", "No parameterized URL provided (include '?' in target URL)"))
                 continue
@@ -196,11 +436,98 @@ class ReActOrchestrator(AuditOrchestrator):
                 if not container_image:
                     agg["results"].append(self._skip_tool("trivy", "No container image provided"))
                 else:
-                    agg["results"].append(run_or_skip("trivy", lambda: self.scanners["trivy"].scan(container_image, cancel_event=cancel_event)))
+                    agg["results"].append(
+                        run_or_skip(
+                            "trivy",
+                            lambda: self.scanners["trivy"].scan(
+                                container_image,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("trivy"),
+                            ),
+                        )
+                    )
                 continue
 
             if base == "hydra":
                 agg["results"].append(self._skip_tool("hydra", "Requires explicit usernames/passwords inputs; run manually"))
+                continue
+
+            if base == "dnsenum":
+                if self._should_run_dnsenum(scan_host):
+                    agg["results"].append(
+                        run_or_skip(
+                            "dnsenum",
+                            lambda: self.scanners["dnsenum"].scan(
+                                scan_host,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("dnsenum"),
+                            ),
+                        )
+                    )
+                else:
+                    agg["results"].append(self._skip_tool("dnsenum", "Not a domain target"))
+                continue
+
+            if base == "sslscan":
+                open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {})) if nmap_entry.get("success") else []
+                tls_ports = [p for p in open_ports if p in (443, 8443)]
+                if not tls_ports:
+                    agg["results"].append(self._skip_tool("sslscan", "No TLS ports detected (443/8443)"))
+                else:
+                    agg["results"].append(
+                        run_or_skip(
+                            "sslscan",
+                            lambda: self.scanners["sslscan"].scan(
+                                scan_host,
+                                port=tls_ports[0],
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("sslscan"),
+                            ),
+                        )
+                    )
+                continue
+
+            if base == "enum4linux-ng":
+                open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {})) if nmap_entry.get("success") else []
+                if any(p in (139, 445) for p in open_ports):
+                    agg["results"].append(
+                        run_or_skip(
+                            "enum4linux-ng",
+                            lambda: self.scanners["enum4linux-ng"].scan(
+                                scan_host,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("enum4linux-ng"),
+                            ),
+                        )
+                    )
+                else:
+                    agg["results"].append(self._skip_tool("enum4linux-ng", "No SMB ports detected (139/445)"))
+                continue
+
+            if base == "nikto":
+                if not web_targets:
+                    agg["results"].append(self._skip_tool("nikto", "No web targets detected"))
+                else:
+                    from urllib.parse import urlparse
+
+                    try:
+                        u = urlparse(web_targets[0])
+                        host = u.hostname or scan_host
+                        port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
+                    except Exception:
+                        host = scan_host
+                        port = 80
+                    agg["results"].append(
+                        run_or_skip(
+                            "nikto",
+                            lambda: self.scanners["nikto"].scan(
+                                host,
+                                port=port,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("nikto"),
+                            ),
+                        )
+                    )
                 continue
 
             if base == "nmap":
@@ -212,6 +539,21 @@ class ReActOrchestrator(AuditOrchestrator):
         if canceled() or agg.get("canceled"):
             agg["canceled"] = True
             agg["finished_at"] = time.time()
+            return agg
+
+        if agg.get("failed"):
+            agg["finished_at"] = time.time()
+            note("done", "react", "ReAct loop finished (failed)")
+            if output is not None:
+                try:
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    output.write_text(json_dump(agg), encoding="utf-8")
+                    agg["saved_to"] = str(output)
+                except Exception as e:
+                    agg["saved_to"] = None
+                    agg["write_error"] = str(e)
+            else:
+                agg["saved_to"] = None
             return agg
 
         # Summary + remediation
@@ -232,6 +574,7 @@ class ReActOrchestrator(AuditOrchestrator):
         )
         agg["findings"] = findings
         agg["finished_at"] = time.time()
+        note("done", "react", "ReAct loop finished")
 
         if output is not None:
             try:
@@ -251,4 +594,3 @@ def json_dump(obj: Any) -> str:
     import json
 
     return json.dumps(obj, indent=2)
-

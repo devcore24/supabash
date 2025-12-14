@@ -13,8 +13,8 @@ class TestReport(unittest.TestCase):
         report = {
             "target": "example.com",
             "results": [
-                {"tool": "nmap", "success": True},
-                {"tool": "nuclei", "success": False, "error": "fail"},
+                {"tool": "nmap", "success": True, "command": "nmap example.com -oX - -sV"},
+                {"tool": "nuclei", "success": False, "error": "fail", "command": "nuclei -u http://example.com -jsonl -silent"},
             ],
             "summary": {
                 "summary": "One issue found.",
@@ -29,6 +29,8 @@ class TestReport(unittest.TestCase):
         self.assertIn("SQLi", md)
         self.assertIn("nmap", md)
         self.assertIn("fail", md)
+        self.assertIn("Commands Executed", md)
+        self.assertIn("nmap example.com", md)
 
     def test_write_markdown(self):
         report = {"target": "t", "results": []}

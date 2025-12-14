@@ -1,7 +1,8 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import os
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
+from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
@@ -22,6 +23,7 @@ class HydraRunner:
         passwords: str,
         options: str = None,
         cancel_event=None,
+        timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Executes a Hydra brute-force attempt.
@@ -55,13 +57,25 @@ class HydraRunner:
         if options:
             command[1:1] = options.split()
 
-        kwargs = {"timeout": 3600}
+        timeout = resolve_timeout_seconds(timeout_seconds, default=3600)
+        kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
         result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Hydra failed: {result.stderr}")
-            return {"success": False, "error": result.stderr, "canceled": bool(getattr(result, "canceled", False)), "raw_output": result.stdout}
+            err = result.stderr
+            if not err:
+                err = result.stdout or ""
+            if not err:
+                err = f"Command failed (RC={result.return_code}): {result.command}"
+            return {
+                "success": False,
+                "error": err,
+                "canceled": bool(getattr(result, "canceled", False)),
+                "raw_output": result.stdout,
+                "command": result.command,
+            }
 
         return {"success": True, "raw_output": result.stdout, "command": result.command}

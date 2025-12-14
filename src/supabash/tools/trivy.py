@@ -1,7 +1,8 @@
 import json
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
+from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
@@ -14,7 +15,14 @@ class TrivyScanner:
     def __init__(self, runner: CommandRunner = None):
         self.runner = runner if runner else CommandRunner()
 
-    def scan(self, image: str, severity: str = "HIGH,CRITICAL", arguments: str = None, cancel_event=None) -> Dict[str, Any]:
+    def scan(
+        self,
+        image: str,
+        severity: str = "HIGH,CRITICAL",
+        arguments: str = None,
+        cancel_event=None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Run Trivy against a container image and return parsed JSON results.
 
@@ -38,14 +46,26 @@ class TrivyScanner:
         if arguments:
             command.extend(arguments.split())
 
-        kwargs = {"timeout": 1800}
+        timeout = resolve_timeout_seconds(timeout_seconds, default=1800)
+        kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
         result: CommandResult = self.runner.run(command, **kwargs)
 
         if not result.success:
             logger.error(f"Trivy scan failed: {result.stderr}")
-            return {"success": False, "error": result.stderr, "canceled": bool(getattr(result, "canceled", False)), "raw_output": result.stdout}
+            err = result.stderr
+            if not err:
+                err = result.stdout or ""
+            if not err:
+                err = f"Command failed (RC={result.return_code}): {result.command}"
+            return {
+                "success": False,
+                "error": err,
+                "canceled": bool(getattr(result, "canceled", False)),
+                "raw_output": result.stdout,
+                "command": result.command,
+            }
 
         parsed = self._parse_json(result.stdout)
         return {"success": True, "findings": parsed, "command": result.command}

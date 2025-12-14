@@ -1,4 +1,5 @@
 import json
+import ipaddress
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -13,12 +14,17 @@ from supabash.tools import (
     NucleiScanner,
     GobusterScanner,
     SqlmapScanner,
+    NiktoScanner,
+    SslscanScanner,
+    DnsenumScanner,
+    Enum4linuxNgScanner,
     TrivyScanner,
     SupabaseRLSChecker,
 )
 from supabash.llm import LLMClient
 from supabash import prompts
 from supabash.llm_context import prepare_json_payload
+from supabash.report_order import stable_sort_results
 
 logger = setup_logger(__name__)
 
@@ -40,16 +46,114 @@ class AuditOrchestrator:
             "nuclei": NucleiScanner(),
             "gobuster": GobusterScanner(),
             "sqlmap": SqlmapScanner(),
+            "nikto": NiktoScanner(),
+            "sslscan": SslscanScanner(),
+            "dnsenum": DnsenumScanner(),
+            "enum4linux-ng": Enum4linuxNgScanner(),
             "trivy": TrivyScanner(),
             "supabase_rls": SupabaseRLSChecker(),
         }
         self.llm = llm_client or LLMClient()
+
+    def _has_scanner(self, name: str) -> bool:
+        return isinstance(self.scanners, dict) and name in self.scanners and self.scanners.get(name) is not None
+
+    def _open_ports_from_nmap(self, nmap_data: Dict[str, Any]) -> List[int]:
+        ports: List[int] = []
+        for host in (nmap_data or {}).get("hosts", []) or []:
+            for p in host.get("ports", []) or []:
+                try:
+                    if str(p.get("state", "")).lower() != "open":
+                        continue
+                    ports.append(int(p.get("port")))
+                except Exception:
+                    continue
+        return sorted(set(ports))
+
+    def _is_ip_literal(self, host: str) -> bool:
+        try:
+            ipaddress.ip_address((host or "").strip())
+            return True
+        except Exception:
+            return False
+
+    def _should_run_dnsenum(self, scan_host: str) -> bool:
+        host = (scan_host or "").strip()
+        if not host or "/" in host or ":" in host:
+            return False
+        return not self._is_ip_literal(host)
+
+    def _tool_config(self, tool: str) -> Dict[str, Any]:
+        """
+        Returns tool config dict (best-effort).
+        Supports both '-' and '_' variants in config keys.
+        """
+        tool = str(tool or "").strip()
+        if not tool:
+            return {}
+        keys = [tool]
+        if "-" in tool:
+            keys.append(tool.replace("-", "_"))
+        if "_" in tool:
+            keys.append(tool.replace("_", "-"))
+
+        cfg_obj = None
+        try:
+            cfg_obj = getattr(self.llm, "config", None)
+            cfg_obj = getattr(cfg_obj, "config", None) if cfg_obj is not None else None
+        except Exception:
+            cfg_obj = None
+        if not isinstance(cfg_obj, dict):
+            return {}
+
+        tools_cfg = cfg_obj.get("tools", {})
+        if not isinstance(tools_cfg, dict):
+            return {}
+        for k in keys:
+            v = tools_cfg.get(k)
+            if isinstance(v, dict):
+                return v
+        return {}
+
+    def _tool_timeout_seconds(self, tool: str) -> Optional[int]:
+        cfg = self._tool_config(tool)
+        if not cfg:
+            return None
+        value = cfg.get("timeout_seconds", cfg.get("timeout"))
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    def _tool_enabled(self, tool: str, default: bool = True) -> bool:
+        cfg = self._tool_config(tool)
+        if not cfg:
+            return bool(default)
+        enabled = cfg.get("enabled")
+        if enabled is None:
+            return bool(default)
+        return bool(enabled)
+
+    def _skip_disabled(self, tool: str) -> Dict[str, Any]:
+        return self._skip_tool(tool, "Disabled by config (tools.<name>.enabled=false)")
+
+    def _run_tool_if_enabled(self, name: str, func) -> Dict[str, Any]:
+        if not self._tool_enabled(name, default=True):
+            return self._skip_disabled(name)
+        return self._run_tool(name, func)
 
     def _run_tool(self, name: str, func) -> Dict[str, Any]:
         try:
             result = func()
             success = result.get("success", False)
             entry: Dict[str, Any] = {"tool": name, "success": success, "data": result}
+            # Auditability: bubble up the executed command (if the tool wrapper provides it).
+            if isinstance(result, dict):
+                cmd = result.get("command")
+                if isinstance(cmd, str) and cmd.strip():
+                    entry["command"] = cmd.strip()
             if not success and isinstance(result, dict):
                 err = result.get("error")
                 if isinstance(err, str) and err.strip():
@@ -250,6 +354,17 @@ class AuditOrchestrator:
                         "recommendation": f.get("fixed", ""),
                         "tool": "trivy",
                     })
+            # sslscan weak protocols
+            if tool == "sslscan":
+                weak = data.get("scan_data", {}).get("weak_protocols_enabled", [])
+                if isinstance(weak, list):
+                    for proto in weak[:10]:
+                        findings.append({
+                            "severity": "MEDIUM",
+                            "title": "Weak TLS protocol enabled",
+                            "evidence": str(proto),
+                            "tool": "sslscan",
+                        })
             # Gobuster paths
             if tool == "gobuster":
                 for path in data.get("findings", []):
@@ -347,6 +462,7 @@ class AuditOrchestrator:
         nuclei_rate_limit: int = 0,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
+        run_nikto: bool = False,
         remediate: bool = False,
         max_remediations: int = 5,
         min_remediation_severity: str = "MEDIUM",
@@ -368,6 +484,7 @@ class AuditOrchestrator:
                 "nuclei_rate_limit": nuclei_rate_limit or None,
                 "gobuster_threads": gobuster_threads,
                 "gobuster_wordlist": gobuster_wordlist,
+                "nikto_enabled": bool(run_nikto),
             },
         }
         if container_image:
@@ -384,12 +501,13 @@ class AuditOrchestrator:
                     pass
 
         def run_nmap() -> Dict[str, Any]:
-            return self._run_tool(
+            return self._run_tool_if_enabled(
                 "nmap",
                 lambda: self.scanners["nmap"].scan(
                     scan_host,
                     arguments=self._nmap_args_for_mode(mode),
                     cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("nmap"),
                 ),
             )
 
@@ -398,16 +516,28 @@ class AuditOrchestrator:
                 # Sequential (default)
                 results: List[Dict[str, Any]] = []
                 note("tool_start", "whatweb", "Running whatweb")
-                whatweb_entry = self._run_tool("whatweb", lambda: self.scanners["whatweb"].scan(web_target, cancel_event=cancel_event))
+                whatweb_entry = self._run_tool_if_enabled(
+                    "whatweb",
+                    lambda: self.scanners["whatweb"].scan(
+                        web_target,
+                        cancel_event=cancel_event,
+                        timeout_seconds=self._tool_timeout_seconds("whatweb"),
+                    ),
+                )
                 note("tool_end", "whatweb", "Finished whatweb")
                 results.append(whatweb_entry)
                 if canceled() or (isinstance(whatweb_entry.get("data"), dict) and whatweb_entry["data"].get("canceled")):
                     return results
 
                 note("tool_start", "nuclei", "Running nuclei")
-                nuclei_entry = self._run_tool(
+                nuclei_entry = self._run_tool_if_enabled(
                     "nuclei",
-                    lambda: self.scanners["nuclei"].scan(web_target, rate_limit=nuclei_rate_limit or None, cancel_event=cancel_event),
+                    lambda: self.scanners["nuclei"].scan(
+                        web_target,
+                        rate_limit=nuclei_rate_limit or None,
+                        cancel_event=cancel_event,
+                        timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                    ),
                 )
                 note("tool_end", "nuclei", "Finished nuclei")
                 results.append(nuclei_entry)
@@ -416,22 +546,24 @@ class AuditOrchestrator:
 
                 note("tool_start", "gobuster", "Running gobuster")
                 if gobuster_wordlist:
-                    gobuster_entry = self._run_tool(
+                    gobuster_entry = self._run_tool_if_enabled(
                         "gobuster",
                         lambda: self.scanners["gobuster"].scan(
                             web_target,
                             wordlist=gobuster_wordlist,
                             threads=gobuster_threads,
                             cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
                         ),
                     )
                 else:
-                    gobuster_entry = self._run_tool(
+                    gobuster_entry = self._run_tool_if_enabled(
                         "gobuster",
                         lambda: self.scanners["gobuster"].scan(
                             web_target,
                             threads=gobuster_threads,
                             cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
                         ),
                     )
                 note("tool_end", "gobuster", "Finished gobuster")
@@ -444,35 +576,70 @@ class AuditOrchestrator:
             max_w = max(1, min(int(max_workers), 8))
             with ThreadPoolExecutor(max_workers=max_w) as ex:
                 note("tool_start", "whatweb", "Running whatweb")
-                futures[ex.submit(self._run_tool, "whatweb", lambda: self.scanners["whatweb"].scan(web_target, cancel_event=cancel_event))] = "whatweb"
+                if self._tool_enabled("whatweb", default=True):
+                    futures[
+                        ex.submit(
+                            self._run_tool,
+                            "whatweb",
+                            lambda: self.scanners["whatweb"].scan(
+                                web_target,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("whatweb"),
+                            ),
+                        )
+                    ] = "whatweb"
+                else:
+                    results.append(self._skip_disabled("whatweb"))
                 note("tool_start", "nuclei", "Running nuclei")
-                futures[ex.submit(self._run_tool, "nuclei", lambda: self.scanners["nuclei"].scan(web_target, rate_limit=nuclei_rate_limit or None, cancel_event=cancel_event))] = "nuclei"
+                if self._tool_enabled("nuclei", default=True):
+                    futures[
+                        ex.submit(
+                            self._run_tool,
+                            "nuclei",
+                            lambda: self.scanners["nuclei"].scan(
+                                web_target,
+                                rate_limit=nuclei_rate_limit or None,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                            ),
+                        )
+                    ] = "nuclei"
+                else:
+                    results.append(self._skip_disabled("nuclei"))
                 note("tool_start", "gobuster", "Running gobuster")
                 if gobuster_wordlist:
-                    futures[
-                        ex.submit(
-                            self._run_tool,
-                            "gobuster",
-                            lambda: self.scanners["gobuster"].scan(
-                                web_target,
-                                wordlist=gobuster_wordlist,
-                                threads=gobuster_threads,
-                                cancel_event=cancel_event,
-                            ),
-                        )
-                    ] = "gobuster"
+                    if self._tool_enabled("gobuster", default=True):
+                        futures[
+                            ex.submit(
+                                self._run_tool,
+                                "gobuster",
+                                lambda: self.scanners["gobuster"].scan(
+                                    web_target,
+                                    wordlist=gobuster_wordlist,
+                                    threads=gobuster_threads,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                ),
+                            )
+                        ] = "gobuster"
+                    else:
+                        results.append(self._skip_disabled("gobuster"))
                 else:
-                    futures[
-                        ex.submit(
-                            self._run_tool,
-                            "gobuster",
-                            lambda: self.scanners["gobuster"].scan(
-                                web_target,
-                                threads=gobuster_threads,
-                                cancel_event=cancel_event,
-                            ),
-                        )
-                    ] = "gobuster"
+                    if self._tool_enabled("gobuster", default=True):
+                        futures[
+                            ex.submit(
+                                self._run_tool,
+                                "gobuster",
+                                lambda: self.scanners["gobuster"].scan(
+                                    web_target,
+                                    threads=gobuster_threads,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                ),
+                            )
+                        ] = "gobuster"
+                    else:
+                        results.append(self._skip_disabled("gobuster"))
 
                 for fut in as_completed(futures):
                     tool = futures.get(fut, "tool")
@@ -512,6 +679,95 @@ class AuditOrchestrator:
                 for entry in web_future.result():
                     agg["results"].append(entry)
 
+            if nmap_entry and nmap_entry.get("success"):
+                open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {}))
+                agg["open_ports"] = open_ports
+
+                if self._should_run_dnsenum(scan_host):
+                    if self._has_scanner("dnsenum"):
+                        note("tool_start", "dnsenum", "Running dnsenum")
+                        agg["results"].append(
+                            self._run_tool_if_enabled(
+                                "dnsenum",
+                                lambda: self.scanners["dnsenum"].scan(
+                                    scan_host,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("dnsenum"),
+                                ),
+                            )
+                        )
+                        note("tool_end", "dnsenum", "Finished dnsenum")
+                    else:
+                        agg["results"].append(self._skip_tool("dnsenum", "Scanner not available"))
+                else:
+                    agg["results"].append(self._skip_tool("dnsenum", "Not a domain target"))
+
+                tls_ports = [p for p in open_ports if p in (443, 8443)]
+                if tls_ports:
+                    if self._has_scanner("sslscan"):
+                        for p in tls_ports[:2]:
+                            note("tool_start", "sslscan", f"Running sslscan on port {p}")
+                            agg["results"].append(
+                                self._run_tool_if_enabled(
+                                    "sslscan",
+                                    lambda p=p: self.scanners["sslscan"].scan(
+                                        scan_host,
+                                        port=p,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("sslscan"),
+                                    ),
+                                )
+                            )
+                            note("tool_end", "sslscan", f"Finished sslscan on port {p}")
+                    else:
+                        agg["results"].append(self._skip_tool("sslscan", "Scanner not available"))
+                else:
+                    agg["results"].append(self._skip_tool("sslscan", "No TLS ports detected (443/8443)"))
+
+                if any(p in (139, 445) for p in open_ports):
+                    if self._has_scanner("enum4linux-ng"):
+                        note("tool_start", "enum4linux-ng", "Running enum4linux-ng")
+                        agg["results"].append(
+                            self._run_tool_if_enabled(
+                                "enum4linux-ng",
+                                lambda: self.scanners["enum4linux-ng"].scan(
+                                    scan_host,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("enum4linux-ng"),
+                                ),
+                            )
+                        )
+                        note("tool_end", "enum4linux-ng", "Finished enum4linux-ng")
+                    else:
+                        agg["results"].append(self._skip_tool("enum4linux-ng", "Scanner not available"))
+                else:
+                    agg["results"].append(self._skip_tool("enum4linux-ng", "No SMB ports detected (139/445)"))
+
+            if run_nikto:
+                if self._has_scanner("nikto"):
+                    try:
+                        u = urlparse(web_target)
+                        host = u.hostname or scan_host
+                        port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
+                    except Exception:
+                        host = scan_host
+                        port = 80
+                    note("tool_start", "nikto", "Running nikto")
+                    agg["results"].append(
+                        self._run_tool_if_enabled(
+                            "nikto",
+                            lambda: self.scanners["nikto"].scan(
+                                host,
+                                port=port,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("nikto"),
+                            ),
+                        )
+                    )
+                    note("tool_end", "nikto", "Finished nikto")
+                else:
+                    agg["results"].append(self._skip_tool("nikto", "Scanner not available"))
+
         else:
             # Run nmap first (required to discover web targets)
             note("tool_start", "nmap", f"Running nmap ({mode})")
@@ -528,13 +784,106 @@ class AuditOrchestrator:
                 web_targets = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
                 agg["web_targets"] = web_targets
 
+            # Post-recon conditional modules
+            if nmap_entry.get("success"):
+                open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {}))
+                agg["open_ports"] = open_ports
+
+                # DNS enumeration (domain targets)
+                if self._should_run_dnsenum(scan_host):
+                    if self._has_scanner("dnsenum"):
+                        note("tool_start", "dnsenum", "Running dnsenum")
+                        agg["results"].append(
+                            self._run_tool_if_enabled(
+                                "dnsenum",
+                                lambda: self.scanners["dnsenum"].scan(
+                                    scan_host,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("dnsenum"),
+                                ),
+                            )
+                        )
+                        note("tool_end", "dnsenum", "Finished dnsenum")
+                    else:
+                        agg["results"].append(self._skip_tool("dnsenum", "Scanner not available"))
+                else:
+                    agg["results"].append(self._skip_tool("dnsenum", "Not a domain target"))
+
+                # TLS scan (https ports)
+                tls_ports = [p for p in open_ports if p in (443, 8443)]
+                if tls_ports:
+                    if self._has_scanner("sslscan"):
+                        for p in tls_ports[:2]:
+                            note("tool_start", "sslscan", f"Running sslscan on port {p}")
+                            agg["results"].append(
+                                self._run_tool_if_enabled(
+                                    "sslscan",
+                                    lambda p=p: self.scanners["sslscan"].scan(
+                                        scan_host,
+                                        port=p,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("sslscan"),
+                                    ),
+                                )
+                            )
+                            note("tool_end", "sslscan", f"Finished sslscan on port {p}")
+                    else:
+                        agg["results"].append(self._skip_tool("sslscan", "Scanner not available"))
+                else:
+                    agg["results"].append(self._skip_tool("sslscan", "No TLS ports detected (443/8443)"))
+
+                # SMB enumeration
+                if any(p in (139, 445) for p in open_ports):
+                    if self._has_scanner("enum4linux-ng"):
+                        note("tool_start", "enum4linux-ng", "Running enum4linux-ng")
+                        agg["results"].append(
+                            self._run_tool_if_enabled(
+                                "enum4linux-ng",
+                                lambda: self.scanners["enum4linux-ng"].scan(
+                                    scan_host,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("enum4linux-ng"),
+                                ),
+                            )
+                        )
+                        note("tool_end", "enum4linux-ng", "Finished enum4linux-ng")
+                    else:
+                        agg["results"].append(self._skip_tool("enum4linux-ng", "Scanner not available"))
+                else:
+                    agg["results"].append(self._skip_tool("enum4linux-ng", "No SMB ports detected (139/445)"))
+
             if web_targets:
                 for entry in run_web_tools(web_targets[0]):
                     agg["results"].append(entry)
+                if run_nikto:
+                    if self._has_scanner("nikto"):
+                        try:
+                            u = urlparse(web_targets[0])
+                            host = u.hostname or scan_host
+                            port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
+                        except Exception:
+                            host = scan_host
+                            port = 80
+                        note("tool_start", "nikto", "Running nikto")
+                        agg["results"].append(
+                            self._run_tool_if_enabled(
+                                "nikto",
+                                lambda: self.scanners["nikto"].scan(
+                                    host,
+                                    port=port,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("nikto"),
+                                ),
+                            )
+                        )
+                        note("tool_end", "nikto", "Finished nikto")
+                    else:
+                        agg["results"].append(self._skip_tool("nikto", "Scanner not available"))
             else:
                 agg["results"].append(self._skip_tool("whatweb", "No web ports detected (80/443/8080/8443)"))
                 agg["results"].append(self._skip_tool("nuclei", "No web ports detected (80/443/8080/8443)"))
                 agg["results"].append(self._skip_tool("gobuster", "No web ports detected (80/443/8080/8443)"))
+                agg["results"].append(self._skip_tool("nikto", "No web ports detected (80/443/8080/8443)"))
 
         if normalized["sqlmap_url"]:
             if canceled():
@@ -542,7 +891,14 @@ class AuditOrchestrator:
                 agg["finished_at"] = time.time()
                 return agg
             note("tool_start", "sqlmap", "Running sqlmap")
-            sqlmap_entry = self._run_tool("sqlmap", lambda: self.scanners["sqlmap"].scan(normalized["sqlmap_url"], cancel_event=cancel_event))
+            sqlmap_entry = self._run_tool_if_enabled(
+                "sqlmap",
+                lambda: self.scanners["sqlmap"].scan(
+                    normalized["sqlmap_url"],
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("sqlmap"),
+                ),
+            )
             agg["results"].append(sqlmap_entry)
             note("tool_end", "sqlmap", "Finished sqlmap")
             if canceled() or (isinstance(sqlmap_entry.get("data"), dict) and sqlmap_entry["data"].get("canceled")):
@@ -564,7 +920,15 @@ class AuditOrchestrator:
                 agg["finished_at"] = time.time()
                 return agg
             note("tool_start", "supabase_rls", "Running supabase RLS check")
-            agg["results"].append(self._run_tool("supabase_rls", lambda: self.scanners["supabase_rls"].check(supabase_url)))
+            agg["results"].append(
+                self._run_tool_if_enabled(
+                    "supabase_rls",
+                    lambda: self.scanners["supabase_rls"].check(
+                        supabase_url,
+                        timeout_seconds=self._tool_timeout_seconds("supabase_rls"),
+                    ),
+                )
+            )
             note("tool_end", "supabase_rls", "Finished supabase RLS check")
 
         if container_image:
@@ -573,13 +937,28 @@ class AuditOrchestrator:
                 agg["finished_at"] = time.time()
                 return agg
             note("tool_start", "trivy", "Running trivy")
-            trivy_entry = self._run_tool("trivy", lambda: self.scanners["trivy"].scan(container_image, cancel_event=cancel_event))
+            trivy_entry = self._run_tool_if_enabled(
+                "trivy",
+                lambda: self.scanners["trivy"].scan(
+                    container_image,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("trivy"),
+                ),
+            )
             agg["results"].append(trivy_entry)
             note("tool_end", "trivy", "Finished trivy")
             if canceled() or (isinstance(trivy_entry.get("data"), dict) and trivy_entry["data"].get("canceled")):
                 agg["canceled"] = True
                 agg["finished_at"] = time.time()
                 return agg
+
+        # Stable ordering: when parallel web tools are used, as_completed() appends results in
+        # completion order which is non-deterministic; sort for predictable reporting.
+        if parallel_web:
+            try:
+                agg["results"] = stable_sort_results(agg.get("results", []))
+            except Exception:
+                pass
 
         if canceled():
             agg["canceled"] = True

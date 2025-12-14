@@ -1,8 +1,13 @@
 import typer
 import shlex
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+import os
+import sys
+import shutil
+import importlib
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -17,6 +22,9 @@ from supabash.safety import is_allowed_target, is_public_ip_target
 from supabash.audit import AuditOrchestrator
 from supabash.session_state import default_chat_state_path, clear_state as clear_session_state
 from supabash.react import ReActOrchestrator
+from supabash.report_paths import build_report_paths
+from supabash.slash_parse import normalize_target_token
+from supabash.tool_settings import get_tool_timeout_seconds
 
 app = typer.Typer(
     name="supabash",
@@ -137,12 +145,13 @@ def scan(
 
     status_msg = f"[bold green]Running {scanner_name} ({profile})... This may take a moment.[/bold green]"
     with console.status(status_msg):
+        tool_timeout = get_tool_timeout_seconds(config_manager.config, scanner_name)
         if scanner_name == "nmap":
-            result = scanner.scan(target, ports=ports, arguments=args)
+            result = scanner.scan(target, ports=ports, arguments=args, timeout_seconds=tool_timeout)
         elif scanner_name == "masscan":
-            result = scanner.scan(target, ports=ports, rate=extra_kwargs["rate"], arguments=args)
+            result = scanner.scan(target, ports=ports, rate=extra_kwargs["rate"], arguments=args, timeout_seconds=tool_timeout)
         else:
-            result = scanner.scan(target, ports=ports, batch=extra_kwargs["batch"], arguments=args)
+            result = scanner.scan(target, ports=ports, batch=extra_kwargs["batch"], arguments=args, timeout_seconds=tool_timeout)
 
     if not result["success"]:
         error_msg = result.get('error', '')
@@ -218,6 +227,7 @@ def audit(
     gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
     parallel_web: bool = typer.Option(False, "--parallel-web", help="Run web tools in parallel (URL targets can overlap with recon)"),
     max_workers: int = typer.Option(3, "--max-workers", help="Max concurrent workers when --parallel-web is enabled"),
+    nikto: bool = typer.Option(False, "--nikto", help="Run Nikto web scan (slow; opt-in)"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
     min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
@@ -249,18 +259,7 @@ def audit(
     if container_image:
         console.print(f"[dim]Including container image: {container_image}[/dim]")
 
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_path = Path(output) if output else Path("reports") / f"report-{ts}.json"
-    if out_path.exists() and out_path.is_dir():
-        out_path = out_path / f"report-{ts}.json"
-    elif out_path.suffix == "":
-        out_path = out_path.with_suffix(".json")
-
-    md_path = Path(markdown) if markdown else out_path.with_suffix(".md")
-    if md_path.exists() and md_path.is_dir():
-        md_path = md_path / f"{out_path.stem}.md"
-    elif md_path.suffix == "":
-        md_path = md_path.with_suffix(".md")
+    out_path, md_path = build_report_paths(output, markdown)
 
     console.print(f"[dim]Results will be saved to {out_path}[/dim]")
 
@@ -276,6 +275,7 @@ def audit(
             gobuster_wordlist=gobuster_wordlist,
             parallel_web=parallel_web,
             max_workers=max_workers,
+            run_nikto=nikto,
             remediate=remediate,
             max_remediations=max_remediations,
             min_remediation_severity=min_remediation_severity,
@@ -300,8 +300,11 @@ def audit(
 @app.command()
 def react(
     target: str = typer.Argument(..., help="Target IP or URL"),
-    output: str = typer.Option("reports/react_report.json", "--output", "-o", help="Output JSON report path"),
-    markdown: str = typer.Option(None, "--markdown", "-m", help="Optional markdown report path"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output JSON path (default: reports/react-YYYYmmdd-HHMMSS.json)"),
+    markdown: Optional[str] = typer.Option(None, "--markdown", "-m", help="Output Markdown path (default: derived from --output with .md)"),
+    status: bool = typer.Option(True, "--status/--no-status", help="Print live progress updates during the run"),
+    status_file: Optional[str] = typer.Option(None, "--status-file", help="Write JSON status updates to this file while running"),
+    llm_plan: bool = typer.Option(False, "--llm-plan", help="Use the LLM to iteratively plan next actions (fails the run if planning fails)"),
     allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
     allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
     consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
@@ -339,12 +342,98 @@ def react(
         console.print("[yellow]Consent not confirmed. Aborting.[/yellow]")
         raise typer.Exit(code=1)
 
+    out_path, md_path = build_report_paths(output, markdown, default_basename="react")
+
+    # Preflight: avoid permission errors when a previous sudo run created root-owned report files.
+    # If the chosen output file exists and isn't writable, fall back to a timestamped sibling path.
+    try:
+        if out_path.exists() and not os.access(out_path, os.W_OK):
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            alt_out = out_path.with_name(f"{out_path.stem}-{ts}{out_path.suffix}")
+            alt_md = alt_out.with_suffix(".md") if markdown is None else md_path
+            console.print(f"[yellow]Output path not writable: {out_path}[/yellow]")
+            console.print(f"[yellow]Writing to: {alt_out}[/yellow]")
+            out_path, md_path = alt_out, alt_md
+        if not out_path.parent.exists():
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+        if not os.access(out_path.parent, os.W_OK):
+            fallback_dir = Path.home() / ".supabash" / "reports"
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            alt_out = fallback_dir / f"{out_path.stem}-{ts}{out_path.suffix}"
+            alt_md = alt_out.with_suffix(".md") if markdown is None else (fallback_dir / Path(markdown).name)
+            console.print(f"[yellow]Report directory not writable: {out_path.parent}[/yellow]")
+            console.print(f"[yellow]Writing to: {alt_out}[/yellow]")
+            out_path, md_path = alt_out, alt_md
+    except Exception:
+        pass
+
+    console.print(f"[dim]Results will be saved to {out_path}[/dim]")
+
+    status_path = Path(status_file) if status_file else None
+    if status_path is not None and status_path.exists() and status_path.is_dir():
+        status_path = status_path / "react_status.json"
+
+    last_line = {"event": None, "tool": None, "message": None}
+
+    def progress_cb(event: str, tool: str, message: str, agg: dict):
+        try:
+            payload = {
+                "event": event,
+                "tool": tool,
+                "message": message,
+                "target": agg.get("target"),
+                "mode": agg.get("mode"),
+                "started_at": agg.get("started_at"),
+                "react": agg.get("react", {}),
+            }
+            if status_path is not None:
+                try:
+                    status_path.parent.mkdir(parents=True, exist_ok=True)
+                    status_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+
+            if not status:
+                return
+            # De-dupe noisy repeats
+            if (
+                last_line.get("event") == event
+                and last_line.get("tool") == tool
+                and last_line.get("message") == message
+            ):
+                return
+            last_line.update({"event": event, "tool": tool, "message": message})
+
+            label = event
+            if event == "tool_start":
+                label = "RUN"
+            elif event == "tool_end":
+                label = "DONE"
+            elif event == "tool_skip":
+                label = "SKIP"
+            elif event == "plan_ready":
+                label = "PLAN"
+            elif event == "methodology":
+                label = "METHOD"
+            elif event == "action_selected":
+                label = "ACTION"
+            elif event == "llm_start":
+                label = "LLM"
+            elif event == "done":
+                label = "DONE"
+
+            tool_txt = f" {tool}" if tool else ""
+            msg_txt = f": {message}" if message else ""
+            console.print(f"[dim][{label}]{tool_txt}{msg_txt}[/dim]")
+        except Exception:
+            return
+
     console.print(f"[bold red][*] Starting ReAct loop for {target}...[/bold red]")
     orchestrator = ReActOrchestrator()
     with console.status("[bold green]Running ReAct loop...[/bold green]"):
         report = orchestrator.run(
             target,
-            Path(output) if output else None,
+            out_path,
             mode=mode,
             nuclei_rate_limit=nuclei_rate_limit,
             gobuster_threads=gobuster_threads,
@@ -353,20 +442,37 @@ def react(
             max_remediations=max_remediations,
             min_remediation_severity=min_remediation_severity,
             max_actions=max_actions,
+            progress_cb=progress_cb,
+            llm_plan=llm_plan,
         )
 
     saved_path = report.get("saved_to")
+    run_error = report.get("error")
     if saved_path:
-        console.print(f"[bold green]ReAct complete.[/bold green] Report saved to [cyan]{saved_path}[/cyan]")
+        if run_error:
+            console.print(f"[bold red]ReAct FAILED.[/bold red] Report saved to [cyan]{saved_path}[/cyan]")
+        else:
+            console.print(f"[bold green]ReAct complete.[/bold green] Report saved to [cyan]{saved_path}[/cyan]")
     else:
-        console.print("[yellow]ReAct completed but did not write a report file.[/yellow]")
+        if run_error:
+            console.print("[red]ReAct FAILED and did not write a report file.[/red]")
+        else:
+            console.print("[yellow]ReAct completed but did not write a report file.[/yellow]")
         if "write_error" in report:
             console.print(f"[red]{report['write_error']}[/red]")
+        if isinstance(run_error, str) and run_error.strip():
+            console.print(f"[red]{run_error}[/red]")
 
-    if markdown:
-        from supabash.report import write_markdown
-        md_path = write_markdown(report, Path(markdown))
-        console.print(f"[green]Markdown report written to {md_path}[/green]")
+    if saved_path:
+        try:
+            from supabash.report import write_markdown
+            md_written = write_markdown(report, md_path)
+            console.print(f"[green]Markdown report written to {md_written}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Failed to write Markdown report:[/yellow] {e}")
+
+    if run_error:
+        raise typer.Exit(code=1)
 
 @app.command()
 def config(
@@ -620,7 +726,29 @@ def chat():
         if chat_meta.get("markdown_saved_to"):
             console.print(f"[green]Saved Markdown:[/green] {chat_meta.get('markdown_saved_to')}")
 
+    last_job_hint = {"job_id": None, "state": None, "step": None}
+
     while True:
+        try:
+            active = session.job_status()
+        except Exception:
+            active = None
+        if active and getattr(active, "state", None) in ("queued", "running"):
+            job_id = getattr(active, "job_id", None)
+            step = getattr(active, "current_step", None)
+            state = getattr(active, "state", None)
+            if (
+                last_job_hint.get("job_id") != job_id
+                or last_job_hint.get("state") != state
+                or last_job_hint.get("step") != step
+            ):
+                msg = getattr(active, "message", None) or ""
+                step_txt = f" step={step}" if step else ""
+                msg_txt = f" — {msg}" if msg else ""
+                console.print(f"[dim]Job running: {active.kind} target={active.target} id={job_id} state={state}{step_txt}{msg_txt}[/dim]")
+                console.print("[dim]Use /status (or /status --watch) for live progress, or /stop to cancel.[/dim]")
+                last_job_hint.update({"job_id": job_id, "state": state, "step": step})
+
         user_input = typer.prompt("chat> ")
         if not user_input.strip():
             continue
@@ -727,7 +855,7 @@ def chat():
                 elif token == "--bg":
                     bg = True
                 elif not token.startswith("-") and target is None:
-                    target = token
+                    target = normalize_target_token(token)
             if not target:
                 console.print("[red]Usage:[/red] /scan <target> [--profile fast|full|stealth] [--scanner nmap|masscan|rustscan] [--allow-public] [--bg]")
                 continue
@@ -767,6 +895,7 @@ def chat():
             parallel_web = False
             max_workers = 3
             bg = False
+            run_nikto = False
 
             i = 1
             while i < len(parts):
@@ -799,6 +928,10 @@ def chat():
                     container_image = parts[i + 1]
                     i += 2
                     continue
+                if token == "--nikto":
+                    run_nikto = True
+                    i += 1
+                    continue
                 if token == "--markdown" and i + 1 < len(parts):
                     markdown = parts[i + 1]
                     i += 2
@@ -828,7 +961,7 @@ def chat():
                     i += 1
                     continue
                 if not token.startswith("-") and target is None:
-                    target = token
+                    target = normalize_target_token(token)
                     i += 1
                     continue
                 i += 1
@@ -838,10 +971,13 @@ def chat():
                     "[red]Usage:[/red] /audit <target> [--mode normal|stealth|aggressive] "
                     "[--nuclei-rate N] [--gobuster-threads N] [--gobuster-wordlist PATH] "
                     "[--parallel-web] [--max-workers N] "
-                    "[--container-image IMG] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
+                    "[--container-image IMG] [--nikto] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
                     "[--output reports/report-YYYYmmdd-HHMMSS.json] [--markdown reports/report-YYYYmmdd-HHMMSS.md] [--allow-public] [--bg]"
                 )
                 continue
+
+            out_path, md_path = build_report_paths(output, markdown)
+            console.print(f"[dim]Results will be saved to {out_path}[/dim]")
 
             if bg:
                 try:
@@ -854,12 +990,13 @@ def chat():
                         parallel_web=parallel_web,
                         max_workers=max_workers,
                         container_image=container_image,
+                        run_nikto=run_nikto,
                         remediate=remediate,
                         max_remediations=max_remediations,
                         min_remediation_severity=min_remediation_severity,
                         allow_public=allow_public,
-                        output=Path(output) if output else None,
-                        markdown=Path(markdown) if markdown else None,
+                        output=out_path,
+                        markdown=md_path,
                     )
                     console.print(f"[cyan]Audit job started (id={job.job_id}). Use /status or /stop.[/cyan]")
                 except Exception as e:
@@ -876,12 +1013,13 @@ def chat():
                         parallel_web=parallel_web,
                         max_workers=max_workers,
                         container_image=container_image,
+                        run_nikto=run_nikto,
                         remediate=remediate,
                         max_remediations=max_remediations,
                         min_remediation_severity=min_remediation_severity,
                         allow_public=allow_public,
-                        output=Path(output) if output else None,
-                        markdown=Path(markdown) if markdown else None,
+                        output=out_path,
+                        markdown=md_path,
                     )
                 show_audit(rep)
                 session.save_state(state_path)
@@ -913,7 +1051,8 @@ def chat():
             continue
 
         if user_input.startswith("/summary"):
-            summary = session.summarize_findings()
+            with console.status("[green]Thinking...[/green]"):
+                summary = session.summarize_findings()
             if summary:
                 console.print(Panel(summary, title="LLM Summary", border_style="cyan"))
                 meta = getattr(session, "last_llm_meta", None) or {}
@@ -943,7 +1082,8 @@ def chat():
                 continue
             title = parts[1]
             evidence = parts[2] if len(parts) > 2 else ""
-            resp = session.remediate(title=title, evidence=evidence)
+            with console.status("[green]Thinking...[/green]"):
+                resp = session.remediate(title=title, evidence=evidence)
             if resp:
                 console.print(Panel(resp, title="LLM Fix", border_style="green"))
                 meta = getattr(session, "last_llm_meta", None) or {}
@@ -973,7 +1113,11 @@ def chat():
 
         if user_input.startswith("/report"):
             parts = shlex.split(user_input)
-            path = Path(parts[1]) if len(parts) > 1 else Path("chat_report.json")
+            if len(parts) > 1:
+                path = Path(parts[1])
+            else:
+                ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+                path = Path("reports") / f"chat-{ts}.json"
             res = session.save_report(path)
             if res.get("success"):
                 console.print(f"[green]Saved report to {res['path']}[/green]")
@@ -983,7 +1127,8 @@ def chat():
 
         if user_input.startswith("/test"):
             console.print("[cyan]Running unit tests...[/cyan]")
-            res = session.run_tests(workdir=Path(__file__).resolve().parents[2])
+            with console.status("[green]Running tests...[/green]"):
+                res = session.run_tests(workdir=Path(__file__).resolve().parents[2])
             if res.get("success"):
                 console.print("[green]Tests passed[/green]")
             else:
@@ -995,7 +1140,8 @@ def chat():
             continue
 
         # Freeform: ask clarifying questions + propose next commands (no auto-execution)
-        result = session.clarify_goal(user_input)
+        with console.status("[green]Thinking...[/green]"):
+            result = session.clarify_goal(user_input)
         questions = result.get("questions", [])
         suggested = result.get("suggested_commands", [])
         safety = result.get("safety", [])
@@ -1021,6 +1167,133 @@ def chat():
             console.print("[yellow]No suggestions available. Use slash commands: /scan, /audit, /details, /report, /test, /summary, /fix, /plan[/yellow]")
         else:
             console.print(Panel("\n".join(lines), title="Engagement Planner", border_style="cyan"))
+
+@app.command()
+def doctor(
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+    verbose: bool = typer.Option(False, "--verbose", help="Print extra details"),
+):
+    """
+    Check environment readiness (config + system binaries).
+    """
+    from supabash.llm import LLMClient
+
+    checks = []
+
+    def add_check(name: str, ok: bool, message: str = "", *, required: bool = True, details: Optional[dict] = None):
+        checks.append(
+            {
+                "name": name,
+                "ok": bool(ok),
+                "required": bool(required),
+                "message": message,
+                "details": details or {},
+            }
+        )
+
+    # Python environment
+    add_check(
+        "python",
+        True,
+        f"{sys.version.split()[0]} ({sys.executable})",
+        required=True,
+        details={"executable": sys.executable, "version": sys.version.split()[0]},
+    )
+    add_check("venv", bool(os.getenv("VIRTUAL_ENV")), os.getenv("VIRTUAL_ENV", "not in venv"), required=False)
+
+    # Python deps (best-effort)
+    for mod in ("typer", "rich", "yaml", "litellm", "requests"):
+        try:
+            importlib.import_module(mod)
+            add_check(f"py:{mod}", True, "installed", required=True)
+        except Exception as e:
+            add_check(f"py:{mod}", False, f"missing ({e})", required=True)
+
+    # Config sanity (best-effort)
+    cfg_path = getattr(config_manager, "config_file", None)
+    cfg_ok = bool(cfg_path and Path(cfg_path).exists())
+    add_check("config", cfg_ok, str(cfg_path) if cfg_path else "unknown", required=True)
+    try:
+        llm_client = LLMClient()
+        provider = config_manager.config.get("llm", {}).get("provider")
+        model = config_manager.config.get("llm", {}).get(provider, {}).get("model") if provider else None
+        add_check("llm.provider", bool(provider), str(provider or "missing"), required=False)
+        add_check("llm.model", bool(model), str(model or "missing"), required=False)
+        # Don't fail doctor if key is missing; audit/summary will enforce at runtime.
+        add_check("llm.key", True, "checked at runtime", required=False)
+    except Exception as e:
+        add_check("llm", False, f"error: {e}", required=False)
+
+    # Reports directory
+    reports_dir = Path("reports")
+    try:
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        test_path = reports_dir / ".write_test"
+        test_path.write_text("ok")
+        test_path.unlink(missing_ok=True)
+        add_check("reports_dir", True, str(reports_dir.resolve()), required=True)
+    except Exception as e:
+        add_check("reports_dir", False, f"not writable: {e}", required=True)
+
+    # System binaries used by wrappers
+    required_bins = [
+        ("nmap", True),
+        ("whatweb", True),
+        ("nuclei", True),
+        ("gobuster", True),
+    ]
+    optional_bins = [
+        ("sqlmap", False),
+        ("masscan", False),
+        ("rustscan", False),
+        ("nikto", False),
+        ("hydra", False),
+        ("trivy", False),
+        ("sslscan", False),
+        ("dnsenum", False),
+    ]
+
+    for bin_name, req in required_bins + optional_bins:
+        path = shutil.which(bin_name)
+        add_check(f"bin:{bin_name}", bool(path), path or "missing", required=req, details={"which": path})
+
+    enum_legacy = shutil.which("enum4linux")
+    enum_ng = shutil.which("enum4linux-ng")
+    add_check(
+        "bin:enum4linux",
+        bool(enum_legacy or enum_ng),
+        enum_legacy or enum_ng or "missing",
+        required=False,
+        details={"enum4linux": enum_legacy, "enum4linux-ng": enum_ng},
+    )
+
+    required_failed = [c for c in checks if c["required"] and not c["ok"]]
+    overall_ok = not required_failed
+
+    if json_output:
+        import json
+
+        console.print_json(json.dumps({"ok": overall_ok, "checks": checks}, indent=2))
+        raise typer.Exit(code=0 if overall_ok else 1)
+
+    table = Table(show_header=True, header_style="bold magenta")
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Message")
+    for c in checks:
+        status = "[green]OK[/green]" if c["ok"] else ("[red]FAIL[/red]" if c["required"] else "[yellow]WARN[/yellow]")
+        msg = c.get("message") or ""
+        if verbose and c.get("details"):
+            d = c["details"]
+            if isinstance(d, dict) and d:
+                msg = f"{msg} ({', '.join(f'{k}={v}' for k,v in list(d.items())[:3])})"
+        table.add_row(c["name"], status, msg)
+    console.print(table)
+    if overall_ok:
+        console.print("[green]Doctor: OK[/green]")
+        raise typer.Exit(code=0)
+    console.print("[red]Doctor: FAILED[/red] (missing required dependencies)")
+    raise typer.Exit(code=1)
 
 if __name__ == "__main__":
     app()

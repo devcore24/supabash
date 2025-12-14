@@ -2,6 +2,7 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
+from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
@@ -19,6 +20,7 @@ class GobusterScanner:
         wordlist: Optional[str] = None,
         threads: int = 10,
         cancel_event=None,
+        timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Executes a Gobuster scan against the target.
@@ -56,7 +58,8 @@ class GobusterScanner:
         ]
 
         # 30 minute timeout
-        kwargs = {"timeout": 1800}
+        timeout = resolve_timeout_seconds(timeout_seconds, default=1800)
+        kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
         result: CommandResult = self.runner.run(command, **kwargs)
@@ -70,7 +73,8 @@ class GobusterScanner:
                 "success": False,
                 "error": err,
                 "canceled": bool(getattr(result, "canceled", False)),
-                "raw_output": result.stdout
+                "raw_output": result.stdout,
+                "command": result.command,
             }
 
         parsed_data = self._parse_output(result.stdout)

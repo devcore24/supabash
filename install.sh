@@ -16,6 +16,11 @@ if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
 fi
 
+RUSTSCAN_VERSION="${RUSTSCAN_VERSION:-2.4.1}"
+RUSTSCAN_REPO="${RUSTSCAN_REPO:-bee-san/RustScan}"
+ENUM4LINUX_NG_VERSION="${ENUM4LINUX_NG_VERSION:-v1.3.7}"
+ENUM4LINUX_NG_REPO="${ENUM4LINUX_NG_REPO:-cddmp/enum4linux-ng}"
+
 info() {
     echo -e "${BLUE}[INFO]${RESET} $1"
 }
@@ -63,6 +68,42 @@ apt_pkg_available() {
     apt-cache show "$1" >/dev/null 2>&1
 }
 
+fetch_github_release_json() {
+    local repo="$1"
+    local version="$2"
+    local url=""
+
+    # Try exact tag, then v-prefixed tag, then latest
+    url="https://api.github.com/repos/${repo}/releases/tags/${version}"
+    if curl -fsSL "$url" 2>/dev/null; then
+        return 0
+    fi
+    url="https://api.github.com/repos/${repo}/releases/tags/v${version}"
+    if curl -fsSL "$url" 2>/dev/null; then
+        return 0
+    fi
+    url="https://api.github.com/repos/${repo}/releases/latest"
+    curl -fsSL "$url"
+}
+
+pick_release_asset_url() {
+    local release_json="$1"
+    local pattern="$2"
+    echo "$release_json" | jq -r --arg pat "$pattern" '.assets[] | select(.name|test($pat)) | .browser_download_url' | head -n 1
+}
+
+download_url_to_tmp() {
+    local url="$1"
+    local tmpdir="$2"
+    local name="$3"
+    if command -v curl &> /dev/null; then
+        curl -fsSL "$url" -o "${tmpdir}/${name}" >/dev/null 2>&1 || return 1
+    else
+        wget -qO "${tmpdir}/${name}" "$url" >/dev/null 2>&1 || return 1
+    fi
+    [ -s "${tmpdir}/${name}" ]
+}
+
 # 2. System Dependencies (APT)
 install_apt_deps() {
     info "Updating package lists..."
@@ -80,6 +121,7 @@ install_apt_deps() {
         jq
         nmap
         masscan
+        rustscan
         nikto
         sqlmap
         hydra
@@ -87,7 +129,6 @@ install_apt_deps() {
         whatweb
         sslscan
         dnsenum
-        enum4linux
         # Add other standard tools here
     )
 
@@ -97,13 +138,6 @@ install_apt_deps() {
         if apt_pkg_available "$pkg"; then
             INSTALL+=("$pkg")
             continue
-        fi
-        if [[ "$pkg" == "enum4linux" ]]; then
-            if apt_pkg_available "enum4linux-ng"; then
-                warn "Package 'enum4linux' not found; using 'enum4linux-ng' instead."
-                INSTALL+=("enum4linux-ng")
-                continue
-            fi
         fi
         MISSING+=("$pkg")
     done
@@ -124,7 +158,7 @@ install_external_tools() {
         # Download latest release binary (simplified for amd64 linux)
         wget -q https://github.com/projectdiscovery/nuclei/releases/download/v2.9.8/nuclei_2.9.8_linux_amd64.zip
         unzip -q nuclei_2.9.8_linux_amd64.zip
-        sudo mv nuclei /usr/local/bin/
+        $SUDO mv nuclei /usr/local/bin/
         rm nuclei_2.9.8_linux_amd64.zip
         success "Nuclei installed."
     else
@@ -142,6 +176,173 @@ install_external_tools() {
         success "Trivy installed."
     else
         info "Trivy is already installed."
+    fi
+
+    # Install RustScan (optional fast port scanner)
+    if ! command -v rustscan &> /dev/null; then
+        if apt_pkg_available "rustscan"; then
+            info "Installing RustScan via APT..."
+            $SUDO apt-get install -y rustscan
+            success "RustScan installed."
+        else
+            info "Installing RustScan from GitHub release..."
+            arch="$(uname -m)"
+
+            asset_url=""
+            asset_name=""
+            # Try to use the GitHub API to find a suitable asset (best-effort).
+            if command -v jq &> /dev/null; then
+                release_json="$(fetch_github_release_json "$RUSTSCAN_REPO" "$RUSTSCAN_VERSION" || true)"
+                if [ -n "$release_json" ]; then
+                    if [[ "$arch" == "x86_64" || "$arch" == "amd64" ]]; then
+                        for pat in '^rustscan\\.deb\\.zip$' '^x86_64-linux-rustscan\\.tar\\.gz(\\.1)?\\.zip$' '^x86-linux-rustscan\\.zip$'; do
+                            asset_url="$(pick_release_asset_url "$release_json" "$pat")"
+                            if [ -n "$asset_url" ]; then
+                                break
+                            fi
+                        done
+                    elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+                        for pat in '^aarch64-linux-rustscan\\.zip$' '^arm64-linux-rustscan\\.zip$'; do
+                            asset_url="$(pick_release_asset_url "$release_json" "$pat")"
+                            if [ -n "$asset_url" ]; then
+                                break
+                            fi
+                        done
+                    fi
+                fi
+            fi
+
+            # Fallback: direct URLs (avoids GitHub API rate limits / jq issues).
+            if [ -z "$asset_url" ]; then
+                tags=("$RUSTSCAN_VERSION")
+                if [[ "$RUSTSCAN_VERSION" != v* ]]; then
+                    tags+=("v${RUSTSCAN_VERSION}")
+                fi
+                candidates=()
+                if [[ "$arch" == "x86_64" || "$arch" == "amd64" ]]; then
+                    for tag in "${tags[@]}"; do
+                        base="https://github.com/${RUSTSCAN_REPO}/releases/download/${tag}"
+                        candidates+=("${base}/rustscan.deb.zip")
+                        candidates+=("${base}/x86_64-linux-rustscan.tar.gz.zip")
+                        candidates+=("${base}/x86_64-linux-rustscan.tar.gz.1.zip")
+                    done
+                elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+                    for tag in "${tags[@]}"; do
+                        base="https://github.com/${RUSTSCAN_REPO}/releases/download/${tag}"
+                        candidates+=("${base}/aarch64-linux-rustscan.zip")
+                        candidates+=("${base}/arm64-linux-rustscan.zip")
+                    done
+                else
+                    warn "Unsupported architecture for RustScan installer: $arch (skipping)"
+                    return 0
+                fi
+
+                tmp_probe="$(mktemp -d)"
+                for url in "${candidates[@]}"; do
+                    name="$(basename "$url")"
+                    if download_url_to_tmp "$url" "$tmp_probe" "$name"; then
+                        asset_url="$url"
+                        asset_name="$name"
+                        break
+                    fi
+                done
+                rm -rf "$tmp_probe"
+            fi
+
+            if [ -z "$asset_url" ]; then
+                warn "Could not find a suitable RustScan release asset for arch=$arch in repo=$RUSTSCAN_REPO (version=$RUSTSCAN_VERSION)."
+                warn "Try installing manually: https://github.com/${RUSTSCAN_REPO}/releases"
+                return 0
+            fi
+
+            if [ -z "$asset_name" ]; then
+                asset_name="$(basename "$asset_url")"
+            fi
+
+            tmpdir="$(mktemp -d)"
+            download_url_to_tmp "$asset_url" "$tmpdir" "$asset_name" || true
+
+            if [ ! -s "${tmpdir}/${asset_name}" ]; then
+                warn "Failed to download RustScan package (${asset_name}). You may need to install it manually."
+                rm -rf "$tmpdir"
+            else
+                # Asset types:
+                # - rustscan.deb.zip -> contains a .deb
+                # - x86_64-linux-rustscan.tar.gz.zip -> zip containing a tar.gz (which contains rustscan)
+                # - aarch64-linux-rustscan.zip -> zip containing rustscan binary
+                unzip -q "${tmpdir}/${asset_name}" -d "${tmpdir}/rustscan" || true
+
+                deb_path="$(find "${tmpdir}/rustscan" -maxdepth 3 -type f -name '*.deb' | head -n 1)"
+                if [ -n "$deb_path" ]; then
+                    info "Installing RustScan .deb package..."
+                    $SUDO dpkg -i "$deb_path" || $SUDO apt-get -f install -y
+                    rm -rf "$tmpdir"
+                else
+                    tgz_path="$(find "${tmpdir}/rustscan" -maxdepth 3 -type f -name '*.tar.gz' | head -n 1)"
+                    if [ -n "$tgz_path" ]; then
+                        tar -xzf "$tgz_path" -C "${tmpdir}/rustscan" || true
+                    fi
+                    bin_path="$(find "${tmpdir}/rustscan" -maxdepth 4 -type f -name rustscan | head -n 1)"
+                    if [ -z "$bin_path" ]; then
+                        warn "RustScan archive did not contain a 'rustscan' binary (skipping)."
+                        rm -rf "$tmpdir"
+                    else
+                        $SUDO install -m 0755 "$bin_path" /usr/local/bin/rustscan
+                        rm -rf "$tmpdir"
+                    fi
+                fi
+
+                if command -v rustscan &> /dev/null; then
+                    success "RustScan installed."
+                else
+                    warn "RustScan install attempted, but rustscan is still not on PATH."
+                fi
+            fi
+        fi
+    else
+        info "RustScan is already installed."
+    fi
+
+    # Install enum4linux-ng (optional SMB enumeration helper)
+    if ! command -v enum4linux-ng &> /dev/null && ! command -v enum4linux &> /dev/null; then
+        info "Installing enum4linux-ng from GitHub..."
+        # Dependencies used by enum4linux-ng
+        ENUM_DEPS=(
+            smbclient
+            samba-common-bin
+            python3-impacket
+            python3-ldap3
+            python3-yaml
+        )
+        ENUM_INSTALL=()
+        for pkg in "${ENUM_DEPS[@]}"; do
+            if apt_pkg_available "$pkg"; then
+                ENUM_INSTALL+=("$pkg")
+            fi
+        done
+        if [ "${#ENUM_INSTALL[@]}" -gt 0 ]; then
+            $SUDO apt-get install -y "${ENUM_INSTALL[@]}"
+        fi
+
+        tmpdir="$(mktemp -d)"
+        script_url=""
+        for ref in "$ENUM4LINUX_NG_VERSION" "main" "master"; do
+            url="https://raw.githubusercontent.com/${ENUM4LINUX_NG_REPO}/${ref}/enum4linux-ng.py"
+            if download_url_to_tmp "$url" "$tmpdir" "enum4linux-ng.py"; then
+                script_url="$url"
+                break
+            fi
+        done
+
+        if [ -n "$script_url" ]; then
+            $SUDO install -m 0755 "${tmpdir}/enum4linux-ng.py" /usr/local/bin/enum4linux-ng
+            success "enum4linux-ng installed."
+        else
+            warn "Failed to download enum4linux-ng script. Install manually: https://github.com/${ENUM4LINUX_NG_REPO}"
+        fi
+        rm -rf "$tmpdir"
+    else
+        info "enum4linux-ng/enum4linux already installed."
     fi
 }
 
@@ -187,9 +388,9 @@ EOF
     
     # Link it to /usr/local/bin
     if [ -L "/usr/local/bin/supabash" ]; then
-        sudo rm /usr/local/bin/supabash
+        $SUDO rm /usr/local/bin/supabash
     fi
-    sudo ln -s "$(pwd)/supabash_runner" /usr/local/bin/supabash
+    $SUDO ln -s "$(pwd)/supabash_runner" /usr/local/bin/supabash
     
     success "Symlink created. You can now run 'supabash' from anywhere."
 }

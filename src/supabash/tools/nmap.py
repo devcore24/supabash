@@ -4,6 +4,7 @@ import os
 import shlex
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
+from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
@@ -21,7 +22,14 @@ class NmapScanner:
         except Exception:
             return False
 
-    def scan(self, target: str, ports: str = None, arguments: str = "-sV -O", cancel_event=None) -> Dict[str, Any]:
+    def scan(
+        self,
+        target: str,
+        ports: str = None,
+        arguments: str = "-sV -O",
+        cancel_event=None,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Executes an Nmap scan against the target.
         
@@ -66,7 +74,8 @@ class NmapScanner:
         if args_list:
             command.extend(args_list)
 
-        kwargs = {"timeout": 600}  # 10 min timeout default
+        timeout = resolve_timeout_seconds(timeout_seconds, default=600)  # 10 min timeout default
+        kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
         result: CommandResult = self.runner.run(command, **kwargs)
@@ -79,6 +88,7 @@ class NmapScanner:
                 "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout,
                 "warnings": warnings,
+                "command": result.command,
             }
 
         parsed_data = self._parse_xml(result.stdout)
@@ -89,6 +99,7 @@ class NmapScanner:
                 "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout,
                 "warnings": warnings,
+                "command": result.command,
             }
         return {
             "success": True,

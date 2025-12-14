@@ -45,6 +45,9 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
         - [x] Rustscan wrapper with greppable parser.
     - [x] **CLI Integration:** Allow selecting Nmap/Masscan/Rustscan via `--scanner`.
     - [x] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
+    - [x] **TLS Checks:** Add `sslscan` wrapper (runs when 443/8443 detected).
+    - [x] **DNS Enum:** Add `dnsenum` wrapper (runs for domain targets).
+    - [x] **SMB Enum:** Add `enum4linux-ng` wrapper (runs when 139/445 detected).
 - [x] **Web Module Wrappers**
     - [x] **Nikto:** Wrapper for server config scanning.
     - [x] **Nuclei:** Wrapper for template-based scanning (Crucial for modern CVEs).
@@ -78,6 +81,8 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Support `/details <tool>` to inspect per-tool audit output.
     - [x] Add LLM-backed summary and remediation commands (/summary, /fix).
     - [x] Enable the agent to ask clarifying questions to the user.
+    - [x] Make chat `/audit` write timestamped reports to `reports/` by default (JSON + Markdown).
+    - [x] Accept `target=...` style tokens in slash commands (e.g., `/audit target=localhost`).
     - [x] Chat workflow:
         - Single session as control plane; acknowledge and confirm scope before running tools.
         - [x] Support slash commands (e.g., `/scan`, `/audit`, `/stop`, `/status`, `/details`, `/report`, `/test`) without leaving chat.
@@ -85,7 +90,8 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
             - `/stop` sends a cancel request and terminates running tool processes (best-effort).
         - [x] Stream progress for long-running tools (checkpoints/heartbeats) via `/status --watch`; offer `/details <tool>` for full output.
         - Keep safety checks in-line: enforce allowed-hosts/rate limits; block out-of-scope requests.
-        - [x] Allow resume if disconnected (reload last scan/audit state from disk).
+    - [x] Allow resume if disconnected (reload last scan/audit state from disk).
+    - [x] Show progress feedback in chat for long-running actions (LLM “Thinking…” + job running hints).
 - [x] **The "ReAct" Loop (Reason + Act)**
     - [x] Implement the main agent loop:
         1.  Analyze Goal.
@@ -95,6 +101,10 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
         5.  Decide next step or Finish.
     - [x] Add methodology map (recon → web/app → auth → container) and heuristic/LLM planner to pick next tools from findings.
     - [x] Maintain agent state (targets, ports, tech stack, findings, actions run) and expose `/plan` to show next steps.
+    - [x] ReAct CLI: print live progress updates (planner + tools) and optional `--status-file`.
+    - [x] ReAct: avoid report permission errors (fallback path when output not writable).
+    - [x] ReAct: default timestamped report filenames (JSON + Markdown).
+    - [x] ReAct: `--llm-plan` (LLM suggests actions iteratively; aborts on planning failure and writes error to report).
 - [x] **Context & Cost Management**
     - [x] Implement a token limiter to ensure tool output doesn't crash the LLM context window (truncate large Nmap results).
     - [x] Implement token usage tracking and cost estimation.
@@ -129,6 +139,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] **JSON Report:** For machine integration.
     - [x] **Markdown Report:** A pretty, readable audit file with sections.
     - [x] Auto-generate Markdown alongside JSON (same timestamped filename).
+    - [x] ReAct: auto-generate Markdown alongside JSON.
 - [x] **Code Fix Generator**
     - [x] Ensure the AI provides specific code snippets (e.g., "Change line 40 in Dockerfile to...").
 
@@ -159,11 +170,12 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 ## 🚧 Phase 8: Hardening & UX (Post-MVP)
 *Goal: Make Supabash safer, more predictable, and easier to operate at scale.*
 
-- [ ] Add `supabash doctor` environment checks (binaries + config).
-- [ ] Add plugin/tool registry (enable/disable tools in config).
-- [ ] Add per-tool timeouts in config (e.g. `tools.nmap.timeout_seconds`).
-- [ ] Make parallel tool results deterministic (stable ordering in reports).
-- [ ] Include exact commands executed in reports (auditability).
+- [x] Add `supabash doctor` environment checks (binaries + config).
+
+- [x] Add plugin/tool registry (enable/disable tools in `config.yaml`).
+- [x] Add per-tool timeouts in config (e.g. `tools.nmap.timeout_seconds`).
+- [x] Make parallel tool results deterministic (stable ordering in reports).
+- [x] Include exact commands executed in reports (auditability).
 - [ ] Add report schema versioning + validation.
 - [ ] Add safety caps for aggressive mode (global rate limits).
 - [ ] Add CI workflow to run unit tests automatically.
@@ -171,3 +183,10 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [ ] Improve Markdown report styling (anchors, tables, collapsible sections).
 - [ ] Add explicit offline/no-LLM mode (graceful degradation).
 - [ ] Add more opt-in integration targets beyond Juice Shop.
+
+### Next Tool Additions (Planned)
+- [x] **sslscan:** TLS configuration checks (run only when HTTPS ports are open).
+- [x] **dnsenum:** DNS enumeration (run only for domain targets).
+- [x] **enum4linux-ng:** SMB enumeration helper (run only when 445/139 are open).
+- [x] Wire **Nikto** into the audit flow (opt-in via `--nikto`, runs on discovered web targets).
+- [ ] Wire **Hydra** into the workflow (opt-in; requires explicit user-provided credential lists).

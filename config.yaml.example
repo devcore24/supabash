@@ -10,6 +10,56 @@ core:
   allow_public_ips: false
   # Persist your consent decision after first run
   consent_accepted: false
+
+# Tool registry (enable/disable tools globally)
+# Note: some tools are also conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL).
+tools:
+  nmap:
+    enabled: true
+    timeout_seconds: 600
+  masscan:
+    enabled: true
+    timeout_seconds: 600
+  rustscan:
+    enabled: true
+    timeout_seconds: 600
+  whatweb:
+    enabled: true
+    timeout_seconds: 300
+  nuclei:
+    enabled: true
+    timeout_seconds: 1800
+  gobuster:
+    enabled: true
+    timeout_seconds: 1800
+  sqlmap:
+    enabled: true
+    timeout_seconds: 1800
+  # Slow/noisy: keep opt-in by default
+  nikto:
+    enabled: false
+    timeout_seconds: 1200
+  sslscan:
+    enabled: true
+    timeout_seconds: 600
+  dnsenum:
+    enabled: true
+    timeout_seconds: 900
+  # Prefer underscore in config keys for readability; both forms are accepted by the runtime.
+  enum4linux_ng:
+    enabled: true
+    timeout_seconds: 1200
+  trivy:
+    enabled: true
+    timeout_seconds: 1800
+  supabase_rls:
+    enabled: true
+    timeout_seconds: 10
+  # Credentials brute forcing should remain opt-in/manual for safety.
+  hydra:
+    enabled: false
+    timeout_seconds: 3600
+
 llm:
   # Safety: truncate very large tool output before sending to the LLM
   max_input_chars: 12000

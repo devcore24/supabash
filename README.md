@@ -1,5 +1,5 @@
 
-# SUPABASH
+# Supabash
 
 ```text
    _____                   _               _     
@@ -16,8 +16,8 @@
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
-> **⚠️ Development Status:** This project is currently in **Active Development (Phase 3)**. The CLI, tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; the full autonomous ReAct loop and deeper safety/reporting polish are still in progress.  
-> Progress: `[██████████████████--]` **88%**
+> **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.  
+> Progress: `[██████████████████--]` **92%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -27,11 +27,11 @@
 
 ## 🚀 Key Features
 
-*   **🤖 Autonomous Reasoning:** The agent decides which tools to run based on the initial scan results (ReAct Pattern).
-*   **🛡️ Full-Stack Auditing:** Scans infrastructure, Docker containers, web applications, and wireless networks.
+*   **🤖 Autonomous Reasoning (Beta):** The agent can plan next steps based on scan results (ReAct Pattern).
+*   **🛡️ Auditing:** Scans infrastructure, web applications, and Docker container images (wireless is planned).
 *   **📝 Smart Reporting:** Generates human-readable audits containing detection details, severity levels, and **code-level fix suggestions**.
 *   **⚡ High-Performance:** Orchestrates fast scanners (Rust/Go) alongside deep-dive frameworks (Python/Ruby).
-*   **🔌 Plugin Architecture:** Easily extensible tool definitions.
+*   **🔌 Extensible Design:** Modular wrappers today; plugin registry planned.
 
 ---
 
@@ -46,7 +46,7 @@ Supabash aims to orchestrate the following tools over time (not all wrappers are
 *   **Netdiscover** (ARP reconnaissance)
 *   **Dnsenum** (DNS enumeration)
 *   **Sslscan** (SSL/TLS analysis)
-*   **Enum4linux** (SMB/Samba enumeration)
+*   **Enum4linux-ng** (SMB/Samba enumeration)
 
 ### 🌐 Web & Exploit
 *   **Metasploit Framework** (Exploitation & validation)
@@ -106,6 +106,12 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
+### Quick Environment Check
+```bash
+supabash doctor
+supabash doctor --json
+```
+
 ### Manual Installation
 1.  Install system dependencies:
     - Quick list: `requirements_system.txt`
@@ -151,6 +157,8 @@ supabash audit "http://192.168.1.10" --yes --parallel-web --max-workers 3
 supabash audit "http://192.168.1.10/?id=1" --yes
 # generate LLM remediation steps + code samples (costs tokens)
 supabash audit 192.168.1.10 --yes --remediate --max-remediations 5 --min-remediation-severity HIGH
+# opt-in: run nikto too (slow)
+supabash audit "http://192.168.1.10" --yes --nikto
 ```
 Note: by default Supabash writes `reports/report-YYYYmmdd-HHMMSS.json` and `reports/report-YYYYmmdd-HHMMSS.md`. Avoid running `supabash audit` with `sudo` unless you need root-only scan modes; otherwise your report files may be owned by root.
 If web tools show `Executable not found`, install system requirements via `install.sh` or `docs/system-requirements.md`.
@@ -158,9 +166,13 @@ If web tools show `Executable not found`, install system requirements via `insta
 ### 2b. ReAct Loop (Plan → Act)
 Run an iterative ReAct loop that plans next tools based on recon results.
 ```bash
-supabash react 192.168.1.10 --output reports/react_report.json --yes --max-actions 10
-supabash react "http://192.168.1.10" --output reports/react_report.json --yes --remediate
+supabash react 192.168.1.10 --yes --max-actions 10
+supabash react "http://192.168.1.10" --yes --remediate
+supabash react 192.168.1.10 --output reports/my-react.json --yes
+supabash react localhost --yes --status-file reports/react_status.json
+supabash react localhost --yes --llm-plan   # LLM-driven planning (requires configured provider/key)
 ```
+Note: ReAct writes `reports/react-YYYYmmdd-HHMMSS.json` and `reports/react-YYYYmmdd-HHMMSS.md` by default.
 
 ### 3. Container Image Scan
 Scan a local Docker image for CVEs and configuration issues (via Trivy).
@@ -175,9 +187,11 @@ supabash chat
 # inside chat:
 /scan 192.168.1.10 --profile fast --scanner nmap  # add --allow-public only if authorized
 /scan 192.168.1.10 --profile fast --scanner nmap --bg
-/audit 192.168.1.10 --mode normal --output reports/report-YYYYmmdd-HHMMSS.json --remediate
-/audit 192.168.1.10 --mode normal --remediate --bg
+/audit 192.168.1.10 --mode normal --remediate  # writes reports/report-YYYYmmdd-HHMMSS.json + .md
+/audit 192.168.1.10 --mode normal --output reports/custom.json --remediate
+/audit 192.168.1.10 --mode normal --nikto --remediate --bg
 /audit "http://192.168.1.10" --mode normal --parallel-web --max-workers 3 --bg
+/audit target=localhost   # also accepted
 /status
 /status --watch --interval 1 --verbose
 /stop   # sends a cancel request; running tool processes are terminated (best-effort)
@@ -210,6 +224,8 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 
 - Default config lives in the project root as `config.yaml` (falls back to `~/.supabash/config.yaml`).
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `~/.supabash/logs/debug.log`.
+- Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
+- Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
 - Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
 - Edit allowed hosts via CLI: `supabash config --allow-host 10.0.0.0/24`, `supabash config --remove-host 10.0.0.0/24`, `supabash config --list-allowed-hosts`.
@@ -225,20 +241,12 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 ---
 
 ## ✅ Implemented Wrappers (Beta)
-- Nmap (used by `supabash scan`)
-- Masscan (library wrapper for fast port discovery)
-- Rustscan (fast scanner using nmap greppable output)
-- Nikto (web scanner)
-- Nuclei (template-based vuln scanner)
-- Gobuster (directory brute-forcing)
-- WhatWeb (tech stack detection)
-- sqlmap (SQL injection detection)
-- Hydra (credential brute-forcing)
-- Trivy (container image vulnerability scanning)
-- Supabase RLS checker (public access detection)
-- LLM client wrapper (litellm-based) with config-driven provider/model selection
-- Chat session with slash commands (/scan, /details, /report, /test, /summary, /fix, /plan)
-- Markdown report generator (`--markdown`) with findings aggregation
+- **Audit pipeline (runs by default):** Nmap → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase RLS/Trivy)
+- **Recon engines (scan mode):** Nmap, Masscan, Rustscan
+- **Wrappers implemented:** Nikto (opt-in via `--nikto`), Hydra (not wired; requires explicit credential inputs)
+- **LLM integration:** litellm-based client with config-driven provider/model selection
+- **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
+- **Reporting:** timestamped JSON + Markdown reports under `reports/` (includes exact commands executed for auditability)
 
 ---
 

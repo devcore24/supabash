@@ -9,6 +9,9 @@ from .sqlmap import SqlmapScanner
 from .hydra import HydraRunner
 from .trivy import TrivyScanner
 from .supabase_rls import SupabaseRLSChecker
+from .sslscan import SslscanScanner
+from .dnsenum import DnsenumScanner
+from .enum4linux_ng import Enum4linuxNgScanner
 
 __all__ = [
     "NmapScanner",
@@ -22,4 +25,7 @@ __all__ = [
     "HydraRunner",
     "TrivyScanner",
     "SupabaseRLSChecker",
+    "SslscanScanner",
+    "DnsenumScanner",
+    "Enum4linuxNgScanner",
 ]
