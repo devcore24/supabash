@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Dict, Any
 import json
+from datetime import datetime, timezone
 
 def generate_markdown(report: Dict[str, Any]) -> str:
     lines = []
@@ -9,6 +10,45 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     lines.append(f"**Target:** {target}")
     if report.get("container_image"):
         lines.append(f"**Container Image:** {report['container_image']}")
+
+    llm_meta = report.get("llm")
+    if isinstance(llm_meta, dict) and llm_meta.get("enabled") is False:
+        reason = llm_meta.get("reason") or "disabled"
+        lines.append("\n## LLM")
+        lines.append(f"- status: disabled ({reason})")
+
+    # Timestamps (best-effort)
+    def fmt_ts(ts: Any) -> str:
+        try:
+            if ts is None:
+                return ""
+            if isinstance(ts, bool):
+                return ""
+            val = float(ts)
+            return datetime.fromtimestamp(val, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        except Exception:
+            return ""
+
+    started = fmt_ts(report.get("started_at"))
+    finished = fmt_ts(report.get("finished_at"))
+    if started or finished:
+        lines.append("\n## Run Info")
+        if started:
+            lines.append(f"- started_at: {started}")
+        if finished:
+            lines.append(f"- finished_at: {finished}")
+
+    # TOC (anchors match GitHub-style headings)
+    lines.append("\n## Table of Contents")
+    toc = [
+        ("Summary", "#summary"),
+        ("Findings Overview", "#findings-overview"),
+        ("Findings (Detailed)", "#findings-detailed"),
+        ("Tools Run", "#tools-run"),
+        ("Commands Executed", "#commands-executed"),
+    ]
+    for title, anchor in toc:
+        lines.append(f"- [{title}]({anchor})")
 
     # Errors (if any)
     errors = []
@@ -97,8 +137,28 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             lines.append("\n## Summary")
             lines.append(str(summary))
 
-    # Detailed Findings (aggregated)
+    # Findings overview table
+    sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+    sev_counts = {k: 0 for k in sev_order}
     agg_findings = report.get("findings", [])
+    if isinstance(agg_findings, list):
+        for f in agg_findings:
+            if not isinstance(f, dict):
+                continue
+            sev = str(f.get("severity", "INFO")).upper()
+            if sev not in sev_counts:
+                sev = "INFO"
+            sev_counts[sev] += 1
+    else:
+        agg_findings = []
+
+    lines.append("\n## Findings Overview")
+    lines.append("| Severity | Count |")
+    lines.append("|---|---:|")
+    for sev in sev_order:
+        lines.append(f"| {sev} | {sev_counts[sev]} |")
+
+    # Detailed Findings (aggregated)
     if isinstance(agg_findings, list) and agg_findings:
         lines.append("\n## Findings (Detailed)")
         for f in agg_findings:
@@ -130,23 +190,36 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     lines.append(code_sample.strip())
                     lines.append("```")
 
+    # Tools run (table + short notes)
+    results = report.get("results", []) or []
     lines.append("\n## Tools Run")
-    for entry in report.get("results", []):
+    lines.append("| Tool | Status | Command |")
+    lines.append("|---|---|---|")
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
         tool = entry.get("tool", "unknown")
-        if entry.get("skipped"):
-            status = "⏭️ skipped"
+        skipped = bool(entry.get("skipped"))
+        if skipped:
+            status = "skipped"
         else:
             success = entry.get("success")
-            status = "✅ success" if success else "❌ failed"
-        lines.append(f"- **{tool}**: {status}")
-        if entry.get("skipped") and entry.get("reason"):
-            lines.append(f"  - Reason: {entry['reason']}")
-        if not entry.get("skipped") and not entry.get("success") and entry.get("error"):
-            lines.append(f"  - Error: {entry['error']}")
+            status = "success" if success else "failed"
+        cmd = entry.get("command")
+        if not isinstance(cmd, str) or not cmd.strip():
+            data = entry.get("data")
+            if isinstance(data, dict):
+                cmd = data.get("command")
+        cmd_cell = f"`{cmd.strip()}`" if isinstance(cmd, str) and cmd.strip() else ""
+        lines.append(f"| {tool} | {status} | {cmd_cell} |")
+        if skipped and entry.get("reason"):
+            lines.append(f"- **{tool}**: ⏭️ skipped — {entry['reason']}")
+        if not skipped and not entry.get("success") and entry.get("error"):
+            lines.append(f"- **{tool}**: ❌ failed — {entry['error']}")
 
     # Auditability: exact commands executed (when available)
     commands = []
-    for entry in report.get("results", []) or []:
+    for entry in results:
         if not isinstance(entry, dict):
             continue
         tool = entry.get("tool", "unknown")

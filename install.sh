@@ -20,6 +20,8 @@ RUSTSCAN_VERSION="${RUSTSCAN_VERSION:-2.4.1}"
 RUSTSCAN_REPO="${RUSTSCAN_REPO:-bee-san/RustScan}"
 ENUM4LINUX_NG_VERSION="${ENUM4LINUX_NG_VERSION:-v1.3.7}"
 ENUM4LINUX_NG_REPO="${ENUM4LINUX_NG_REPO:-cddmp/enum4linux-ng}"
+# Optional: install PDF/HTML report export dependencies (WeasyPrint)
+SUPABASH_PDF_EXPORT="${SUPABASH_PDF_EXPORT:-0}"
 
 info() {
     echo -e "${BLUE}[INFO]${RESET} $1"
@@ -362,6 +364,68 @@ setup_python_env() {
     success "Python environment ready."
 }
 
+install_optional_pdf_export() {
+    if [ "$SUPABASH_PDF_EXPORT" = "1" ]; then
+        info "Optional PDF export install requested via SUPABASH_PDF_EXPORT=1"
+    else
+        read -p "Install optional PDF/HTML report export deps (WeasyPrint)? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Skipping optional PDF/HTML export dependencies."
+            return 0
+        fi
+    fi
+
+    info "Installing system libraries for WeasyPrint..."
+    WEASY_DEPS=(
+        libcairo2
+        libpango-1.0-0
+        libpangocairo-1.0-0
+        libpangoft2-1.0-0
+        libgdk-pixbuf-2.0-0
+        shared-mime-info
+        fonts-dejavu-core
+    )
+
+    WEASY_INSTALL=()
+    WEASY_MISSING=()
+    for pkg in "${WEASY_DEPS[@]}"; do
+        if apt_pkg_available "$pkg"; then
+            WEASY_INSTALL+=("$pkg")
+        else
+            WEASY_MISSING+=("$pkg")
+        fi
+    done
+
+    if [ "${#WEASY_INSTALL[@]}" -gt 0 ]; then
+        $SUDO apt-get install -y "${WEASY_INSTALL[@]}"
+    fi
+    if [ "${#WEASY_MISSING[@]}" -gt 0 ]; then
+        warn "Some WeasyPrint dependencies were not found in APT and were skipped: ${WEASY_MISSING[*]}"
+    fi
+
+    if [ ! -d "venv" ]; then
+        warn "venv/ not found; creating Python environment first."
+        setup_python_env
+    fi
+    source venv/bin/activate
+
+    # Python packages: WeasyPrint + Markdown->HTML converter
+    info "Installing Python packages for PDF export (weasyprint, markdown)..."
+    if python3 -c "import weasyprint" >/dev/null 2>&1; then
+        info "WeasyPrint is already installed in this venv."
+    else
+        pip install weasyprint
+    fi
+    if python3 -c "import markdown" >/dev/null 2>&1; then
+        info "markdown is already installed in this venv."
+    else
+        pip install markdown
+    fi
+
+    success "Optional PDF/HTML export dependencies installed."
+}
+
 # 5. Global Entry Point
 setup_symlink() {
     info "Creating global 'supabash' command..."
@@ -413,6 +477,7 @@ main() {
     install_apt_deps
     install_external_tools
     setup_python_env
+    install_optional_pdf_export
     setup_symlink
     
     echo

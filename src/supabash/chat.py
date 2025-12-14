@@ -177,8 +177,18 @@ class ChatSession:
         if md_target is not None and report.get("saved_to"):
             try:
                 from supabash.report import write_markdown
+                from supabash.report_export import export_from_markdown_file
                 md_path = write_markdown(report, md_target)
                 report.setdefault("_chat", {})["markdown_saved_to"] = md_path
+                exports = export_from_markdown_file(Path(md_path), config=(self.config_manager.config if self.config_manager is not None else None))
+                if exports.html_path:
+                    report.setdefault("_chat", {})["html_saved_to"] = str(exports.html_path)
+                if exports.pdf_path:
+                    report.setdefault("_chat", {})["pdf_saved_to"] = str(exports.pdf_path)
+                if exports.html_error:
+                    report.setdefault("_chat", {})["html_export_error"] = exports.html_error
+                if exports.pdf_error:
+                    report.setdefault("_chat", {})["pdf_export_error"] = exports.pdf_error
             except Exception as e:
                 report.setdefault("_chat", {})["markdown_error"] = str(e)
 

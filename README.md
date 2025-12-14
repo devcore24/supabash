@@ -17,7 +17,7 @@
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.  
-> Progress: `[██████████████████--]` **92%**
+> Progress: `[███████████████████-]` **97%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -105,6 +105,22 @@ cd supabash
 chmod +x install.sh
 sudo ./install.sh
 ```
+
+### Optional: PDF/HTML Report Export (WeasyPrint)
+
+If you want Supabash to export reports to **HTML/PDF** (in addition to JSON/Markdown), you’ll need extra dependencies.
+
+- **System libraries (Ubuntu/Debian):**
+  - `libcairo2`, `libpango-1.0-0`, `libpangocairo-1.0-0`, `libpangoft2-1.0-0`, `libgdk-pixbuf-2.0-0`, `shared-mime-info`, `fonts-dejavu-core`
+- **Python packages (installed into the project venv, not system Python):**
+  - `weasyprint`, `markdown`
+
+Installer support:
+- Interactive install: run `sudo ./install.sh` and answer **yes** to the optional PDF prompt
+- Non-interactive: `SUPABASH_PDF_EXPORT=1 sudo ./install.sh`
+
+Enable exports:
+- Set `core.report_exports.html=true` and/or `core.report_exports.pdf=true` in `config.yaml`
 
 ### Quick Environment Check
 ```bash
@@ -226,6 +242,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `~/.supabash/logs/debug.log`.
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
+- Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`react`.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
 - Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
 - Edit allowed hosts via CLI: `supabash config --allow-host 10.0.0.0/24`, `supabash config --remove-host 10.0.0.0/24`, `supabash config --list-allowed-hosts`.
@@ -237,6 +254,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - LLM caching (optional): enable with `llm.cache_enabled=true` (and optionally set `llm.cache_ttl_seconds`, `llm.cache_max_entries`, `llm.cache_dir`) to reuse identical LLM responses and reduce cost.
 - Tune web tooling: `supabash audit ... --nuclei-rate 10 --gobuster-threads 20` (and optionally `--gobuster-wordlist /path/to/list`).
 - Parallelize web tools: `supabash audit ... --parallel-web --max-workers 3` (URL targets can overlap recon with web tooling).
+- Safety caps (aggressive mode): Supabash enforces global caps (rate limits / concurrency) in `--mode aggressive`; configure via `core.aggressive_caps` in `config.yaml`.
 
 ---
 
@@ -247,6 +265,8 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - **LLM integration:** litellm-based client with config-driven provider/model selection
 - **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
 - **Reporting:** timestamped JSON + Markdown reports under `reports/` (includes exact commands executed for auditability)
+- **Report schema:** JSON reports include `schema_version` + `schema_validation` for sanity checks and forward compatibility
+- **Markdown reports:** include TOC + summary tables for readability
 
 ---
 
@@ -279,6 +299,10 @@ Usage of Supabash for attacking targets without prior mutual consent is illegal.
 ## 🤝 Contributing
 
 Contributions are welcome! Please read `CONTRIBUTING.md` for details on our code of conduct and the process for submitting pull requests.
+
+CI runs unit tests automatically via GitHub Actions (`.github/workflows/ci.yml`).
+
+Release/packaging guide: `docs/release.md`.
 
 1.  Fork the repository
 2.  Create your feature branch (`git checkout -b feature/AmazingFeature`)

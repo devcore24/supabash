@@ -51,12 +51,16 @@ def stable_sort_results(results: List[Any]) -> List[Any]:
         tool_str = "" if tool is None else str(tool)
         tool_norm = tool_str.replace("_", "-")
 
-        data = item.get("data")
         command = ""
-        if isinstance(data, dict):
-            cmd = data.get("command")
-            if isinstance(cmd, str):
-                command = cmd
+        top_cmd = item.get("command")
+        if isinstance(top_cmd, str):
+            command = top_cmd
+        if not command:
+            data = item.get("data")
+            if isinstance(data, dict):
+                cmd = data.get("command")
+                if isinstance(cmd, str):
+                    command = cmd
 
         # Keep 'skipped' entries after successful entries within the same tool.
         skipped_rank = 1 if item.get("skipped") else 0
@@ -65,4 +69,3 @@ def stable_sort_results(results: List[Any]) -> List[Any]:
         return (_tool_order_index(tool_norm), tool_norm, skipped_rank, success_rank, command)
 
     return sorted(items, key=key)
-

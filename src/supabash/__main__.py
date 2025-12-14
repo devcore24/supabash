@@ -229,6 +229,7 @@ def audit(
     max_workers: int = typer.Option(3, "--max-workers", help="Max concurrent workers when --parallel-web is enabled"),
     nikto: bool = typer.Option(False, "--nikto", help="Run Nikto web scan (slow; opt-in)"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
     max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
     min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
 ):
@@ -277,6 +278,7 @@ def audit(
             max_workers=max_workers,
             run_nikto=nikto,
             remediate=remediate,
+            use_llm=not no_llm,
             max_remediations=max_remediations,
             min_remediation_severity=min_remediation_severity,
         )
@@ -292,8 +294,18 @@ def audit(
     if saved_path:
         try:
             from supabash.report import write_markdown
+            from supabash.report_export import export_from_markdown_file
             md_written = write_markdown(report, md_path)
             console.print(f"[green]Markdown report written to {md_written}[/green]")
+            exports = export_from_markdown_file(Path(md_written), config=config_manager.config)
+            if exports.html_path:
+                console.print(f"[green]HTML report written to {exports.html_path}[/green]")
+            if exports.pdf_path:
+                console.print(f"[green]PDF report written to {exports.pdf_path}[/green]")
+            if exports.html_error:
+                console.print(f"[yellow]HTML export skipped:[/yellow] {exports.html_error}")
+            if exports.pdf_error:
+                console.print(f"[yellow]PDF export skipped:[/yellow] {exports.pdf_error}")
         except Exception as e:
             console.print(f"[yellow]Failed to write Markdown report:[/yellow] {e}")
 
@@ -305,6 +317,7 @@ def react(
     status: bool = typer.Option(True, "--status/--no-status", help="Print live progress updates during the run"),
     status_file: Optional[str] = typer.Option(None, "--status-file", help="Write JSON status updates to this file while running"),
     llm_plan: bool = typer.Option(False, "--llm-plan", help="Use the LLM to iteratively plan next actions (fails the run if planning fails)"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/planning/remediation for this run (offline/no-LLM mode)"),
     allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
     allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
     consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
@@ -444,6 +457,7 @@ def react(
             max_actions=max_actions,
             progress_cb=progress_cb,
             llm_plan=llm_plan,
+            use_llm=not no_llm,
         )
 
     saved_path = report.get("saved_to")
@@ -466,8 +480,18 @@ def react(
     if saved_path:
         try:
             from supabash.report import write_markdown
+            from supabash.report_export import export_from_markdown_file
             md_written = write_markdown(report, md_path)
             console.print(f"[green]Markdown report written to {md_written}[/green]")
+            exports = export_from_markdown_file(Path(md_written), config=config_manager.config)
+            if exports.html_path:
+                console.print(f"[green]HTML report written to {exports.html_path}[/green]")
+            if exports.pdf_path:
+                console.print(f"[green]PDF report written to {exports.pdf_path}[/green]")
+            if exports.html_error:
+                console.print(f"[yellow]HTML export skipped:[/yellow] {exports.html_error}")
+            if exports.pdf_error:
+                console.print(f"[yellow]PDF export skipped:[/yellow] {exports.pdf_error}")
         except Exception as e:
             console.print(f"[yellow]Failed to write Markdown report:[/yellow] {e}")
 

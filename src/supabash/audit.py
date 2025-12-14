@@ -25,6 +25,8 @@ from supabash.llm import LLMClient
 from supabash import prompts
 from supabash.llm_context import prepare_json_payload
 from supabash.report_order import stable_sort_results
+from supabash.report_schema import SCHEMA_VERSION, annotate_schema_validation
+from supabash.aggressive_caps import apply_aggressive_caps
 
 logger = setup_logger(__name__)
 
@@ -174,6 +176,21 @@ class AuditOrchestrator:
         except Exception:
             return default
         return default
+
+    def _llm_enabled(self, default: bool = True) -> bool:
+        try:
+            cfg = getattr(self.llm, "config", None)
+            cfg_dict = getattr(cfg, "config", None) if cfg is not None else None
+            if isinstance(cfg_dict, dict):
+                llm_cfg = cfg_dict.get("llm", {})
+                if isinstance(llm_cfg, dict):
+                    enabled = llm_cfg.get("enabled")
+                    if enabled is None:
+                        return bool(default)
+                    return bool(enabled)
+        except Exception:
+            return bool(default)
+        return bool(default)
 
     def _append_llm_call(self, agg: Dict[str, Any], meta: Optional[Dict[str, Any]]) -> None:
         if not isinstance(meta, dict):
@@ -470,11 +487,29 @@ class AuditOrchestrator:
         progress_cb: Optional[Any] = None,
         parallel_web: bool = False,
         max_workers: int = 3,
+        use_llm: bool = True,
     ) -> Dict[str, Any]:
         normalized = self._normalize_target(target)
         scan_host = normalized["scan_host"]
 
+        cfg_obj = None
+        try:
+            cfg_obj = getattr(self.llm, "config", None)
+            cfg_obj = getattr(cfg_obj, "config", None) if cfg_obj is not None else None
+        except Exception:
+            cfg_obj = None
+        cfg_dict = cfg_obj if isinstance(cfg_obj, dict) else {}
+
+        nuclei_rate_limit, gobuster_threads, max_workers, caps_meta = apply_aggressive_caps(
+            mode,
+            config=cfg_dict,
+            nuclei_rate_limit=nuclei_rate_limit,
+            gobuster_threads=gobuster_threads,
+            max_workers=max_workers,
+        )
+
         agg: Dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
             "target": target,
             "scan_host": scan_host,
             "results": [],
@@ -486,6 +521,7 @@ class AuditOrchestrator:
                 "gobuster_wordlist": gobuster_wordlist,
                 "nikto_enabled": bool(run_nikto),
             },
+            "safety": {"aggressive_caps": caps_meta},
         }
         if container_image:
             agg["container_image"] = container_image
@@ -657,6 +693,10 @@ class AuditOrchestrator:
         if normalized["base_url"]:
             web_targets = [normalized["base_url"]]
         agg["web_targets"] = web_targets
+
+        llm_enabled = bool(use_llm) and self._llm_enabled(default=True)
+        if not llm_enabled:
+            agg["llm"] = {"enabled": False, "reason": "Disabled by config or --no-llm", "calls": []}
 
         if canceled():
             agg["canceled"] = True
@@ -964,23 +1004,31 @@ class AuditOrchestrator:
             agg["canceled"] = True
             agg["finished_at"] = time.time()
             return agg
-        note("llm_start", "summary", "Summarizing with LLM")
-        summary, llm_meta = self._summarize_with_llm(agg)
-        if llm_meta:
-            self._append_llm_call(agg, llm_meta)
-        if summary:
-            agg["summary"] = summary
+        if llm_enabled:
+            note("llm_start", "summary", "Summarizing with LLM")
+            summary, llm_meta = self._summarize_with_llm(agg)
+            if llm_meta:
+                self._append_llm_call(agg, llm_meta)
+            if summary:
+                agg["summary"] = summary
+        else:
+            if remediate:
+                agg.setdefault("llm", {})["remediation_skipped"] = True
 
         findings = self._collect_findings(agg)
         findings = self._apply_remediations(
             agg,
             findings,
-            enabled=remediate,
+            enabled=remediate and llm_enabled,
             max_remediations=max_remediations,
             min_severity=min_remediation_severity,
         )
         agg["findings"] = findings
         agg["finished_at"] = time.time()
+        try:
+            annotate_schema_validation(agg, kind="audit")
+        except Exception:
+            pass
 
         if output is not None:
             try:

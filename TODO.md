@@ -176,12 +176,12 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add per-tool timeouts in config (e.g. `tools.nmap.timeout_seconds`).
 - [x] Make parallel tool results deterministic (stable ordering in reports).
 - [x] Include exact commands executed in reports (auditability).
-- [ ] Add report schema versioning + validation.
-- [ ] Add safety caps for aggressive mode (global rate limits).
-- [ ] Add CI workflow to run unit tests automatically.
-- [ ] Add packaging/release guide (pip/standalone binary).
-- [ ] Improve Markdown report styling (anchors, tables, collapsible sections).
-- [ ] Add explicit offline/no-LLM mode (graceful degradation).
+- [x] Add report schema versioning + validation.
+- [x] Add safety caps for aggressive mode (global rate limits).
+- [x] Add CI workflow to run unit tests automatically.
+- [x] Add packaging/release guide (pip/standalone binary).
+- [x] Improve Markdown report styling (anchors, tables, collapsible sections).
+- [x] Add explicit offline/no-LLM mode (graceful degradation).
 - [ ] Add more opt-in integration targets beyond Juice Shop.
 
 ### Next Tool Additions (Planned)

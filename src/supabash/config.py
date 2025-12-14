@@ -26,6 +26,19 @@ DEFAULT_CONFIG = {
         "consent_accepted": False,
         # Safety: require explicit opt-in for public IP targets
         "allow_public_ips": False,
+        # Safety caps for aggressive mode (global rate limits / concurrency caps)
+        # These prevent accidental noisy behavior even in aggressive mode.
+        "aggressive_caps": {
+            "max_nuclei_rate": 20,
+            "default_nuclei_rate": 10,
+            "max_gobuster_threads": 50,
+            "max_parallel_workers": 6,
+        },
+        # Optional report exports (require extra dependencies)
+        "report_exports": {
+            "html": False,
+            "pdf": False,
+        },
     },
     # Tool registry (enable/disable tools globally)
     # Note: some tools are also conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL).
@@ -49,6 +62,8 @@ DEFAULT_CONFIG = {
         "hydra": {"enabled": False, "timeout_seconds": 3600},
     },
     "llm": {
+        # Global kill-switch: disable all LLM calls (offline/no-LLM mode).
+        "enabled": True,
         "max_input_chars": 12000,
         "cache_enabled": False,
         "cache_ttl_seconds": 3600,

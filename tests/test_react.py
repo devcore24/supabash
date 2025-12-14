@@ -63,6 +63,8 @@ class TestReAct(unittest.TestCase):
         report = orch.run("example.com", out, max_actions=5)
         self.assertTrue(out.exists())
         self.assertIn("react", report)
+        self.assertIn("schema_version", report)
+        self.assertIn("schema_validation", report)
         self.assertEqual(report["react"]["actions"][:3], ["whatweb", "nuclei", "gobuster"])
         tools = [r.get("tool") for r in report.get("results", [])]
         self.assertIn("nmap", tools)
@@ -74,4 +76,3 @@ class TestReAct(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

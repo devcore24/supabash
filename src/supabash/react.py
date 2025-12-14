@@ -9,6 +9,8 @@ from supabash.audit import AuditOrchestrator
 from supabash.agent import AgentState, MethodologyPlanner
 from supabash import prompts
 from supabash.llm_context import prepare_json_payload
+from supabash.report_schema import SCHEMA_VERSION, annotate_schema_validation
+from supabash.aggressive_caps import apply_aggressive_caps
 
 
 class ReActOrchestrator(AuditOrchestrator):
@@ -46,11 +48,34 @@ class ReActOrchestrator(AuditOrchestrator):
         max_actions: int = 10,
         cancel_event: Optional[Event] = None,
         progress_cb: Optional[Any] = None,
+        use_llm: bool = True,
     ) -> Dict[str, Any]:
         normalized = self._normalize_target(target)
         scan_host = normalized["scan_host"]
 
+        cfg_obj = None
+        try:
+            cfg_obj = getattr(self.llm, "config", None)
+            cfg_obj = getattr(cfg_obj, "config", None) if cfg_obj is not None else None
+        except Exception:
+            cfg_obj = None
+        cfg_dict = cfg_obj if isinstance(cfg_obj, dict) else {}
+
+        nuclei_rate_limit, gobuster_threads, _, caps_meta = apply_aggressive_caps(
+            mode,
+            config=cfg_dict,
+            nuclei_rate_limit=nuclei_rate_limit,
+            gobuster_threads=gobuster_threads,
+            max_workers=None,
+        )
+
+        llm_enabled = bool(use_llm) and self._llm_enabled(default=True)
+        if llm_plan and not llm_enabled:
+            # Graceful degradation: fall back to heuristic planning when LLM is disabled.
+            llm_plan = False
+
         agg: Dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
             "target": target,
             "scan_host": scan_host,
             "results": [],
@@ -67,7 +92,13 @@ class ReActOrchestrator(AuditOrchestrator):
                 "gobuster_threads": gobuster_threads,
                 "gobuster_wordlist": gobuster_wordlist,
             },
+            "safety": {"aggressive_caps": caps_meta},
         }
+        if not llm_enabled:
+            agg["llm"] = {"enabled": False, "reason": "Disabled by config or --no-llm", "calls": []}
+        if use_llm and not llm_enabled:
+            # When config disables LLM but the caller asked for it, record for visibility.
+            agg["react"]["planner"]["warning"] = "LLM disabled; falling back to heuristic planner"
         if container_image:
             agg["container_image"] = container_image
 
@@ -85,6 +116,10 @@ class ReActOrchestrator(AuditOrchestrator):
         if canceled():
             agg["canceled"] = True
             agg["finished_at"] = time.time()
+            try:
+                annotate_schema_validation(agg, kind="react")
+            except Exception:
+                pass
             return agg
 
         note("tool_start", "nmap", f"Running nmap ({mode})")
@@ -103,6 +138,10 @@ class ReActOrchestrator(AuditOrchestrator):
         if canceled() or (isinstance(nmap_entry.get("data"), dict) and nmap_entry["data"].get("canceled")):
             agg["canceled"] = True
             agg["finished_at"] = time.time()
+            try:
+                annotate_schema_validation(agg, kind="react")
+            except Exception:
+                pass
             return agg
 
         # Step 2: Build state + plan next actions
@@ -539,10 +578,18 @@ class ReActOrchestrator(AuditOrchestrator):
         if canceled() or agg.get("canceled"):
             agg["canceled"] = True
             agg["finished_at"] = time.time()
+            try:
+                annotate_schema_validation(agg, kind="react")
+            except Exception:
+                pass
             return agg
 
         if agg.get("failed"):
             agg["finished_at"] = time.time()
+            try:
+                annotate_schema_validation(agg, kind="react")
+            except Exception:
+                pass
             note("done", "react", "ReAct loop finished (failed)")
             if output is not None:
                 try:
@@ -557,23 +604,31 @@ class ReActOrchestrator(AuditOrchestrator):
             return agg
 
         # Summary + remediation
-        note("llm_start", "summary", "Summarizing with LLM")
-        summary, llm_meta = self._summarize_with_llm(agg)
-        if llm_meta:
-            self._append_llm_call(agg, llm_meta)
-        if summary:
-            agg["summary"] = summary
+        if llm_enabled:
+            note("llm_start", "summary", "Summarizing with LLM")
+            summary, llm_meta = self._summarize_with_llm(agg)
+            if llm_meta:
+                self._append_llm_call(agg, llm_meta)
+            if summary:
+                agg["summary"] = summary
+        else:
+            if remediate:
+                agg.setdefault("llm", {})["remediation_skipped"] = True
 
         findings = self._collect_findings(agg)
         findings = self._apply_remediations(
             agg,
             findings,
-            enabled=remediate,
+            enabled=remediate and llm_enabled,
             max_remediations=max_remediations,
             min_severity=min_remediation_severity,
         )
         agg["findings"] = findings
         agg["finished_at"] = time.time()
+        try:
+            annotate_schema_validation(agg, kind="react")
+        except Exception:
+            pass
         note("done", "react", "ReAct loop finished")
 
         if output is not None:

@@ -56,6 +56,8 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertTrue(output.exists())
         data = json.loads(output.read_text())
         self.assertEqual(data["target"], "example.com")
+        self.assertIn("schema_version", data)
+        self.assertIn("schema_validation", data)
         self.assertEqual(data["container_image"], "alpine:latest")
         # ensure all tools ran
         tool_names = [r["tool"] for r in data["results"]]

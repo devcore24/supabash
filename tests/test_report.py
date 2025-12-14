@@ -21,7 +21,10 @@ class TestReport(unittest.TestCase):
                 "findings": [
                     {"severity": "high", "title": "SQLi", "evidence": "param id injectable", "recommendation": "Use prepared statements"}
                 ]
-            }
+            },
+            "started_at": 1.0,
+            "finished_at": 2.0,
+            "findings": [{"severity": "HIGH", "title": "SQLi", "tool": "sqlmap"}],
         }
         md = generate_markdown(report)
         self.assertIn("Supabash Audit Report", md)
@@ -29,6 +32,9 @@ class TestReport(unittest.TestCase):
         self.assertIn("SQLi", md)
         self.assertIn("nmap", md)
         self.assertIn("fail", md)
+        self.assertIn("Table of Contents", md)
+        self.assertIn("Findings Overview", md)
+        self.assertIn("| Tool | Status | Command |", md)
         self.assertIn("Commands Executed", md)
         self.assertIn("nmap example.com", md)
 

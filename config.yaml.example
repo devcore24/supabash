@@ -10,6 +10,16 @@ core:
   allow_public_ips: false
   # Persist your consent decision after first run
   consent_accepted: false
+  # Safety caps for aggressive mode (global rate limits / concurrency caps)
+  aggressive_caps:
+    max_nuclei_rate: 20
+    default_nuclei_rate: 10
+    max_gobuster_threads: 50
+    max_parallel_workers: 6
+  # Optional report exports (require extra dependencies)
+  report_exports:
+    html: false
+    pdf: false
 
 # Tool registry (enable/disable tools globally)
 # Note: some tools are also conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL).
@@ -61,6 +71,8 @@ tools:
     timeout_seconds: 3600
 
 llm:
+  # Global kill-switch: disable all LLM calls (offline/no-LLM mode)
+  enabled: true
   # Safety: truncate very large tool output before sending to the LLM
   max_input_chars: 12000
   # Cost control: cache identical requests (never stores API keys)
