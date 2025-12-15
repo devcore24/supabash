@@ -23,10 +23,14 @@ Notes:
 ### Optional tools (manual alternatives)
 
 #### httpx (HTTP probing / alive web targets)
-Install from GitHub release:
+Install from GitHub release (Linux example):
 ```bash
-# pick a release asset matching your architecture
-curl -fsSL https://github.com/projectdiscovery/httpx/releases/latest | head
+tag="$(curl -fsSL https://api.github.com/repos/projectdiscovery/httpx/releases/latest | jq -r .tag_name)"
+ver="${tag#v}"
+curl -fsSL -o /tmp/httpx.zip "https://github.com/projectdiscovery/httpx/releases/download/${tag}/httpx_${ver}_linux_amd64.zip"
+unzip -q /tmp/httpx.zip -d /tmp/httpx
+sudo install -m 0755 /tmp/httpx/httpx /usr/local/bin/httpx
+rm -rf /tmp/httpx /tmp/httpx.zip
 ```
 
 #### enum4linux-ng (SMB enumeration)

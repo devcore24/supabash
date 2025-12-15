@@ -5,3 +5,8 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
+
+  dvwa:
+    image: vulnerables/web-dvwa:latest
+    ports:
+      - "3001:80"

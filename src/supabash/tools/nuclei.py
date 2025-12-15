@@ -19,6 +19,7 @@ class NucleiScanner:
         target: str,
         templates: str = None,
         rate_limit: int = None,
+        silent: bool = False,
         cancel_event=None,
         timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -35,14 +36,15 @@ class NucleiScanner:
         """
         logger.info(f"Starting Nuclei scan on {target}")
         
-        # Command: nuclei -u <target> -jsonl -silent
+        # Command: nuclei -u <target> -jsonl
         command = [
             "nuclei",
             "-u", target,
             "-jsonl",
-            "-silent"
         ]
 
+        if silent:
+            command.append("-silent")
         if templates:
             command.extend(["-t", templates])
         if rate_limit:
@@ -103,6 +105,7 @@ class NucleiScanner:
                 }
                 findings.append(simplified)
             except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse Nuclei JSON line: {e}")
+                # Nuclei can emit non-JSON lines depending on version/flags; ignore quietly.
+                logger.debug(f"Skipping non-JSON nuclei line: {e}")
         
         return findings

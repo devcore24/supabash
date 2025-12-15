@@ -185,7 +185,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add packaging/release guide (pip/standalone binary).
 - [x] Improve Markdown report styling (anchors, tables, collapsible sections).
 - [x] Add explicit offline/no-LLM mode (graceful degradation).
-- [ ] Add more opt-in integration targets beyond Juice Shop.
+- [x] Add more opt-in integration targets beyond Juice Shop.
 
 ### Next Tool Additions (Planned)
 - [x] **sslscan:** TLS configuration checks (run only when HTTPS ports are open).

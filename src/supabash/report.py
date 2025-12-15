@@ -139,24 +139,44 @@ def generate_markdown(report: Dict[str, Any]) -> str:
 
     # Findings overview table
     sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
-    sev_counts = {k: 0 for k in sev_order}
-    agg_findings = report.get("findings", [])
-    if isinstance(agg_findings, list):
-        for f in agg_findings:
+    def sev_counts(findings: Any) -> Dict[str, int]:
+        counts = {k: 0 for k in sev_order}
+        if not isinstance(findings, list):
+            return counts
+        for f in findings:
             if not isinstance(f, dict):
                 continue
             sev = str(f.get("severity", "INFO")).upper()
-            if sev not in sev_counts:
+            if sev not in counts:
                 sev = "INFO"
-            sev_counts[sev] += 1
-    else:
+            counts[sev] += 1
+        return counts
+
+    agg_findings = report.get("findings", [])
+    if not isinstance(agg_findings, list):
         agg_findings = []
 
+    summary_findings = []
+    if isinstance(summary, dict):
+        sf = summary.get("findings", [])
+        if isinstance(sf, list):
+            summary_findings = sf
+
     lines.append("\n## Findings Overview")
+    if summary_findings:
+        lines.append("\n### Summary (LLM)")
+        lines.append("| Severity | Count |")
+        lines.append("|---|---:|")
+        counts = sev_counts(summary_findings)
+        for sev in sev_order:
+            lines.append(f"| {sev} | {counts[sev]} |")
+        lines.append("\n### Detailed (Tools)")
+
     lines.append("| Severity | Count |")
     lines.append("|---|---:|")
+    counts = sev_counts(agg_findings)
     for sev in sev_order:
-        lines.append(f"| {sev} | {sev_counts[sev]} |")
+        lines.append(f"| {sev} | {counts[sev]} |")
 
     # Detailed Findings (aggregated)
     if isinstance(agg_findings, list) and agg_findings:

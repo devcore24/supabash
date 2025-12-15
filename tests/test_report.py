@@ -15,12 +15,13 @@ class TestReport(unittest.TestCase):
             "target": "example.com",
             "results": [
                 {"tool": "nmap", "success": True, "command": "nmap example.com -oX - -sV"},
-                {"tool": "nuclei", "success": False, "error": "fail", "command": "nuclei -u http://example.com -jsonl -silent"},
+                {"tool": "nuclei", "success": False, "error": "fail", "command": "nuclei -u http://example.com -jsonl"},
             ],
             "summary": {
                 "summary": "One issue found.",
                 "findings": [
-                    {"severity": "high", "title": "SQLi", "evidence": "param id injectable", "recommendation": "Use prepared statements"}
+                    {"severity": "high", "title": "SQLi", "evidence": "param id injectable", "recommendation": "Use prepared statements"},
+                    {"severity": "low", "title": "Missing header", "evidence": "X-Frame-Options", "recommendation": "Set header"},
                 ]
             },
             "started_at": 1.0,
@@ -35,6 +36,8 @@ class TestReport(unittest.TestCase):
         self.assertIn("fail", md)
         self.assertIn("Table of Contents", md)
         self.assertIn("Findings Overview", md)
+        self.assertIn("Summary (LLM)", md)
+        self.assertIn("Detailed (Tools)", md)
         self.assertIn("| Tool | Status | Command |", md)
         self.assertIn("Commands Executed", md)
         self.assertIn("nmap example.com", md)

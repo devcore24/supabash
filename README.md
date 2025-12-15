@@ -17,7 +17,7 @@
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.  
-> Progress: `[███████████████████▉]` **98%**
+> Progress: `[███████████████████▉]` **99%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters (Red/Blue Teams) who want to **automate security audits** without sacrificing depth or understanding. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -146,6 +146,14 @@ supabash doctor --json
 
 - Docker-based harness: `docker-compose.integration.yml`
 - Guide: `docs/integration-testing.md`
+  - Targets: OWASP Juice Shop (`:3000`) + DVWA (`:3001`)
+
+Enable the opt-in integration tests (skipped unless `SUPABASH_INTEGRATION=1`):
+```bash
+SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest tests.test_integration_dvwa -q
+SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest tests.test_integration_juiceshop -q
+SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest discover -s tests -q
+```
 
 ---
 
