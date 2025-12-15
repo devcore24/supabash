@@ -187,6 +187,29 @@ class ReActOrchestrator(AuditOrchestrator):
             web_targets = [normalized["base_url"]]
         elif nmap_entry.get("success"):
             web_targets = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
+        # Best-effort probe to validate endpoints before running web tools.
+        if web_targets and self._has_scanner("httpx"):
+            try:
+                note("tool_start", "httpx", "Probing web targets with httpx")
+            except Exception:
+                pass
+            httpx_entry = self._run_tool_if_enabled(
+                "httpx",
+                lambda: self.scanners["httpx"].scan(
+                    web_targets,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("httpx"),
+                ),
+            )
+            agg["results"].append(httpx_entry)
+            try:
+                note("tool_end", "httpx", "Finished httpx")
+            except Exception:
+                pass
+            if httpx_entry.get("success"):
+                alive = httpx_entry.get("data", {}).get("alive")
+                if isinstance(alive, list) and alive:
+                    web_targets = [str(x) for x in alive if str(x).strip()]
         agg["web_targets"] = web_targets
 
         def parse_llm_plan(text: str) -> Dict[str, Any]:
@@ -221,6 +244,7 @@ class ReActOrchestrator(AuditOrchestrator):
 
         def llm_plan_next_steps(remaining: int) -> Dict[str, Any]:
             allowed_bases = [
+                "httpx",
                 "whatweb",
                 "nuclei",
                 "gobuster",
@@ -402,6 +426,26 @@ class ReActOrchestrator(AuditOrchestrator):
             base, _, suffix = action_str.partition(":")
             base = base.strip().lower()
             suffix = suffix.strip().lower()
+
+            if base == "httpx":
+                if not web_targets:
+                    agg["results"].append(self._skip_tool("httpx", "No web targets detected"))
+                else:
+                    entry = run_or_skip(
+                        "httpx",
+                        lambda: self.scanners["httpx"].scan(
+                            web_targets,
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("httpx"),
+                        ),
+                    )
+                    agg["results"].append(entry)
+                    if entry.get("success"):
+                        alive = entry.get("data", {}).get("alive")
+                        if isinstance(alive, list) and alive:
+                            web_targets = [str(x) for x in alive if str(x).strip()]
+                            agg["web_targets"] = web_targets
+                continue
 
             if base == "whatweb":
                 if not web_targets:

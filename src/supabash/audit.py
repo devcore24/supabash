@@ -11,6 +11,7 @@ from supabash.logger import setup_logger
 from supabash.tools import (
     NmapScanner,
     WhatWebScanner,
+    HttpxScanner,
     NucleiScanner,
     GobusterScanner,
     SqlmapScanner,
@@ -46,6 +47,7 @@ class AuditOrchestrator:
         self.scanners = scanners or {
             "nmap": NmapScanner(),
             "whatweb": WhatWebScanner(),
+            "httpx": HttpxScanner(),
             "nuclei": NucleiScanner(),
             "gobuster": GobusterScanner(),
             "sqlmap": SqlmapScanner(),
@@ -925,6 +927,25 @@ class AuditOrchestrator:
             if not web_targets and nmap_entry.get("success"):
                 web_targets = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
                 agg["web_targets"] = web_targets
+
+            # Probe derived web targets (best-effort) to avoid false-positives from service detection.
+            if web_targets and self._has_scanner("httpx"):
+                note("tool_start", "httpx", "Probing web targets with httpx")
+                httpx_entry = self._run_tool_if_enabled(
+                    "httpx",
+                    lambda: self.scanners["httpx"].scan(
+                        web_targets,
+                        cancel_event=cancel_event,
+                        timeout_seconds=self._tool_timeout_seconds("httpx"),
+                    ),
+                )
+                agg["results"].append(httpx_entry)
+                note("tool_end", "httpx", "Finished httpx")
+                if httpx_entry.get("success"):
+                    alive = httpx_entry.get("data", {}).get("alive")
+                    if isinstance(alive, list) and alive:
+                        web_targets = [str(x) for x in alive if str(x).strip()]
+                        agg["web_targets"] = web_targets
 
             # Post-recon conditional modules
             if nmap_entry.get("success"):

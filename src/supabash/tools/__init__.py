@@ -5,6 +5,7 @@ from .gobuster import GobusterScanner
 from .masscan import MasscanScanner
 from .rustscan import RustscanScanner
 from .whatweb import WhatWebScanner
+from .httpx import HttpxScanner
 from .sqlmap import SqlmapScanner
 from .hydra import HydraRunner
 from .trivy import TrivyScanner
@@ -21,6 +22,7 @@ __all__ = [
     "MasscanScanner",
     "RustscanScanner",
     "WhatWebScanner",
+    "HttpxScanner",
     "SqlmapScanner",
     "HydraRunner",
     "TrivyScanner",

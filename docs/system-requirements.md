@@ -16,11 +16,18 @@ sudo apt-get install -y \\
 
 Notes:
 - On Ubuntu, you may need to enable `universe` for some packages: `sudo add-apt-repository universe && sudo apt-get update -y`.
-- `rustscan`, `nuclei`, `trivy`, and `enum4linux` are not consistently available as APT packages across distros/versions; `install.sh` includes a working automated path for these.
+- `rustscan`, `httpx`, `nuclei`, `trivy`, and `enum4linux` are not consistently available as APT packages across distros/versions; `install.sh` includes a working automated path for these.
 - Ubuntu 24.04 does not ship `enum4linux` as an APT package in many setups; prefer `enum4linux-ng` (installed by `install.sh`).
 - Some tools are listed in README as a planned toolset but not all wrappers are implemented yet.
 
 ### Optional tools (manual alternatives)
+
+#### httpx (HTTP probing / alive web targets)
+Install from GitHub release:
+```bash
+# pick a release asset matching your architecture
+curl -fsSL https://github.com/projectdiscovery/httpx/releases/latest | head
+```
 
 #### enum4linux-ng (SMB enumeration)
 ```bash

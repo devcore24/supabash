@@ -46,6 +46,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
         - [x] Masscan wrapper with list-output parser.
         - [x] Rustscan wrapper with greppable parser.
     - [x] **CLI Integration:** Allow selecting Nmap/Masscan/Rustscan via `--scanner`.
+    - [x] **HTTP Probing:** Add `httpx` wrapper to validate live web URLs before web tools run.
     - [x] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
     - [x] **TLS Checks:** Add `sslscan` wrapper (runs when 443/8443 detected).
     - [x] **DNS Enum:** Add `dnsenum` wrapper (runs for domain targets).

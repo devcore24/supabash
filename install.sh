@@ -18,6 +18,8 @@ fi
 
 RUSTSCAN_VERSION="${RUSTSCAN_VERSION:-2.4.1}"
 RUSTSCAN_REPO="${RUSTSCAN_REPO:-bee-san/RustScan}"
+HTTPX_VERSION="${HTTPX_VERSION:-latest}"
+HTTPX_REPO="${HTTPX_REPO:-projectdiscovery/httpx}"
 ENUM4LINUX_NG_VERSION="${ENUM4LINUX_NG_VERSION:-v1.3.7}"
 ENUM4LINUX_NG_REPO="${ENUM4LINUX_NG_REPO:-cddmp/enum4linux-ng}"
 # Optional: update nuclei templates for the invoking (non-root) user after install
@@ -76,6 +78,12 @@ fetch_github_release_json() {
     local repo="$1"
     local version="$2"
     local url=""
+
+    if [ -z "$version" ] || [ "$version" = "latest" ]; then
+        url="https://api.github.com/repos/${repo}/releases/latest"
+        curl -fsSL "$url"
+        return 0
+    fi
 
     # Try exact tag, then v-prefixed tag, then latest
     url="https://api.github.com/repos/${repo}/releases/tags/${version}"
@@ -194,6 +202,53 @@ install_external_tools() {
         fi
     else
         info "Nuclei is already installed."
+    fi
+
+    # Install httpx (ProjectDiscovery HTTP probing)
+    if ! command -v httpx &> /dev/null; then
+        info "Installing httpx from GitHub release..."
+        arch="$(uname -m)"
+        asset_url=""
+
+        if command -v jq &> /dev/null; then
+            release_json="$(fetch_github_release_json "$HTTPX_REPO" "$HTTPX_VERSION" || true)"
+            if [ -n "$release_json" ]; then
+                if [[ "$arch" == "x86_64" || "$arch" == "amd64" ]]; then
+                    asset_url="$(pick_release_asset_url "$release_json" '^httpx_.*_linux_amd64\\.zip$')"
+                elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+                    asset_url="$(pick_release_asset_url "$release_json" '^httpx_.*_linux_arm64\\.zip$')"
+                fi
+            fi
+        fi
+
+        if [ -z "$asset_url" ]; then
+            warn "Could not find a suitable httpx release asset for arch=$arch in repo=$HTTPX_REPO (version=$HTTPX_VERSION)."
+            warn "Try installing manually: https://github.com/${HTTPX_REPO}/releases"
+        else
+            asset_name="$(basename "$asset_url")"
+            tmpdir="$(mktemp -d)"
+            download_url_to_tmp "$asset_url" "$tmpdir" "$asset_name" || true
+            if [ ! -s "${tmpdir}/${asset_name}" ]; then
+                warn "Failed to download httpx package (${asset_name}). You may need to install it manually."
+                rm -rf "$tmpdir"
+            else
+                unzip -q "${tmpdir}/${asset_name}" -d "${tmpdir}/httpx" || true
+                bin_path="$(find "${tmpdir}/httpx" -maxdepth 3 -type f -name httpx | head -n 1)"
+                if [ -z "$bin_path" ]; then
+                    warn "httpx archive did not contain a 'httpx' binary (skipping)."
+                else
+                    $SUDO install -m 0755 "$bin_path" /usr/local/bin/httpx
+                fi
+                rm -rf "$tmpdir"
+                if command -v httpx &> /dev/null; then
+                    success "httpx installed."
+                else
+                    warn "httpx install attempted, but httpx is still not on PATH."
+                fi
+            fi
+        fi
+    else
+        info "httpx is already installed."
     fi
 
     # Install Trivy (Container Scanner)

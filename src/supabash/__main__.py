@@ -1302,6 +1302,7 @@ def doctor(
         ("sqlmap", False),
         ("masscan", False),
         ("rustscan", False),
+        ("httpx", False),
         ("nikto", False),
         ("hydra", False),
         ("trivy", False),

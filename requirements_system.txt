@@ -2,6 +2,7 @@
 nmap
 masscan
 rustscan
+httpx
 nikto
 sqlmap
 hydra

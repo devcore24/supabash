@@ -32,6 +32,8 @@ class MethodologyPlanner:
         # Recon branching: open web ports
         web_ports = [p for p in state.ports if p.get("port") in (80, 443, 8080, 8443) and p.get("state") == "open"]
         if web_ports:
+            actions.append("httpx")
+            notes.append("Web ports open: probe HTTP(S) endpoints with httpx to confirm live URLs.")
             actions.append("whatweb")
             actions.append("nuclei")
             actions.append("gobuster")

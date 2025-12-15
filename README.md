@@ -19,7 +19,7 @@
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.  
 > Progress: `[███████████████████▉]` **98%**
 
-**Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
+**Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters (Red/Blue Teams) who want to **automate security audits** without sacrificing depth or understanding. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
 **Don't just find the vulnerability. Bash it, understand it, and fix it.**
 
@@ -43,6 +43,7 @@ Supabash aims to orchestrate the following tools over time (not all wrappers are
 *   **Nmap** (Network mapping & service detection)
 *   **Masscan** (High-speed port scanning)
 *   **Rustscan** (Modern, fast port scanner)
+*   **httpx** (HTTP probing / alive endpoints)
 *   **Netdiscover** (ARP reconnaissance)
 *   **Dnsenum** (DNS enumeration)
 *   **Sslscan** (SSL/TLS analysis)
@@ -267,9 +268,9 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 ---
 
 ## ✅ Implemented Wrappers (Beta)
-- **Audit pipeline (runs by default):** Nmap → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase RLS/Trivy)
+- **Audit pipeline (runs by default):** Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase RLS/Trivy)
 - **Recon engines (scan mode):** Nmap, Masscan, Rustscan
-- **Wrappers implemented:** Nikto (opt-in via `--nikto`), Hydra (not wired; requires explicit credential inputs)
+- **Wrappers implemented:** Nikto (opt-in via `--nikto`), Hydra (opt-in via `--hydra` + explicit wordlists)
 - **LLM integration:** litellm-based client with config-driven provider/model selection
 - **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
 - **Reporting:** timestamped JSON + Markdown reports under `reports/` (includes exact commands executed for auditability)

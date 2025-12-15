@@ -46,6 +46,7 @@ DEFAULT_CONFIG = {
         "nmap": {"enabled": True, "timeout_seconds": 600},
         "masscan": {"enabled": True, "timeout_seconds": 600},
         "rustscan": {"enabled": True, "timeout_seconds": 600},
+        "httpx": {"enabled": True, "timeout_seconds": 300},
         "whatweb": {"enabled": True, "timeout_seconds": 300},
         "nuclei": {"enabled": True, "timeout_seconds": 1800},
         "gobuster": {"enabled": True, "timeout_seconds": 1800},

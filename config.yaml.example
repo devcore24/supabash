@@ -33,6 +33,9 @@ tools:
   rustscan:
     enabled: true
     timeout_seconds: 600
+  httpx:
+    enabled: true
+    timeout_seconds: 300
   whatweb:
     enabled: true
     timeout_seconds: 300

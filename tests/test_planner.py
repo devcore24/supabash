@@ -15,6 +15,7 @@ class TestMethodologyPlanner(unittest.TestCase):
         )
         planner = MethodologyPlanner()
         plan = planner.suggest(state)
+        self.assertIn("httpx", plan["next_steps"])
         self.assertIn("whatweb", plan["next_steps"])
         self.assertIn("nuclei", plan["next_steps"])
         self.assertIn("gobuster", plan["next_steps"])
