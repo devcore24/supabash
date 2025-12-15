@@ -721,7 +721,10 @@ def chat():
     """
     logger.info("Command 'chat' triggered")
     console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
-    console.print("[dim]Type 'exit' to quit. Use slash commands: /scan, /audit, /status, /stop, /details [tool], /report, /test, /summary, /fix, /plan, /clear-state[/dim]")
+    console.print(
+        "[dim]Type 'exit' to quit. Use slash commands:\n"
+        "/scan, /audit, /status, /stop, /details [tool], /report, /test, /summary, /fix, /plan, /clear-state[/dim]"
+    )
     allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
     session = ChatSession(allowed_hosts=allowed, config_manager=config_manager)
     state_path = default_chat_state_path()
