@@ -1,109 +1,39 @@
 core:
   log_level: INFO
   save_reports: true
-  # Restrict scope to your own infrastructure (hosts/IPs/CIDRs)
-  allowed_hosts:
-    - localhost
-    - 127.0.0.1
-    - 10.0.0.0/24
-  # Safety: block public IP scanning by default (enable only if authorized)
-  allow_public_ips: false
-  # Persist your consent decision after first run
-  consent_accepted: false
-  # Safety caps for aggressive mode (global rate limits / concurrency caps)
-  aggressive_caps:
-    max_nuclei_rate: 20
-    default_nuclei_rate: 10
-    max_gobuster_threads: 50
-    max_parallel_workers: 6
-  # Optional report exports (require extra dependencies)
   report_exports:
-    html: false
-    pdf: false
-
-# Tool registry (enable/disable tools globally)
-# Note: some tools are also conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL).
-tools:
-  nmap:
-    enabled: true
-    timeout_seconds: 600
-  masscan:
-    enabled: true
-    timeout_seconds: 600
-  rustscan:
-    enabled: true
-    timeout_seconds: 600
-  httpx:
-    enabled: true
-    timeout_seconds: 300
-  whatweb:
-    enabled: true
-    timeout_seconds: 300
-  nuclei:
-    enabled: true
-    timeout_seconds: 1800
-  gobuster:
-    enabled: true
-    timeout_seconds: 1800
-  sqlmap:
-    enabled: true
-    timeout_seconds: 1800
-  # Slow/noisy: keep opt-in by default
-  nikto:
-    enabled: false
-    timeout_seconds: 1200
-  sslscan:
-    enabled: true
-    timeout_seconds: 600
-  dnsenum:
-    enabled: true
-    timeout_seconds: 900
-  # Prefer underscore in config keys for readability; both forms are accepted by the runtime.
-  enum4linux_ng:
-    enabled: true
-    timeout_seconds: 1200
-  trivy:
-    enabled: true
-    timeout_seconds: 1800
-  supabase_rls:
-    enabled: true
-    timeout_seconds: 10
-  # Credentials brute forcing should remain opt-in/manual for safety.
-  hydra:
-    enabled: false
-    timeout_seconds: 3600
-
+    html: true
+    pdf: true
+  allowed_hosts:
+  - localhost
+  - 127.0.0.1
+  - 10.0.0.0/24
+  consent_accepted: true
+  allow_public_ips: false
 llm:
-  # Global kill-switch: disable all LLM calls (offline/no-LLM mode)
-  enabled: true
-  # Safety: truncate very large tool output before sending to the LLM
-  max_input_chars: 12000
-  # Cost control: cache identical requests (never stores API keys)
-  cache_enabled: false
-  cache_ttl_seconds: 3600
-  cache_max_entries: 500
-  # cache_dir: ~/.supabash/cache/llm
-  provider: anthropic
+  provider: openai
   anthropic:
     api_key: YOUR_ANTHROPIC_KEY
-    model: claude-3-opus-20240229
+    model: claude-opus-4-5
     api_base: https://api.anthropic.com/v1
   gemini:
     api_key: YOUR_GEMINI_KEY
-    model: gemini-1.5-pro-latest
+    model: gemini-3-pro
   openai:
     api_key: YOUR_OPENAI_KEY
-    model: gpt-4-turbo
+    model: gpt-5.1
   mistral:
     api_key: YOUR_MISTRAL_KEY
-    model: mistral-large-latest
+    model: mistral-large-2512
     api_base: https://api.mistral.ai/v1
-  # Local models via Ollama (no API key required)
+  max_input_chars: 12000
+  cache_enabled: false
+  cache_ttl_seconds: 3600
+  cache_max_entries: 500
   ollama:
     api_key: null
     model: ollama/llama3.1
     api_base: http://localhost:11434
-  # Local models via LM Studio (OpenAI-compatible; no API key required)
   lmstudio:
     api_key: null
     model: local-model
