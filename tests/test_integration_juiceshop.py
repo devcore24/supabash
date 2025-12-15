@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from supabash.audit import AuditOrchestrator
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 def _has_bin(name: str) -> bool:
@@ -44,7 +45,7 @@ class TestIntegrationJuiceShop(unittest.TestCase):
                 self.fail(f"Juice Shop not reachable: {last_err}")
 
             orch = AuditOrchestrator()
-            out = Path("/tmp/juiceshop_audit.json")
+            out = artifact_path("juiceshop_audit.json")
             report = orch.run(target, out, mode="normal", nuclei_rate_limit=1, gobuster_threads=5)
             self.assertTrue(out.exists())
             self.assertEqual(report.get("target"), target)
@@ -55,7 +56,7 @@ class TestIntegrationJuiceShop(unittest.TestCase):
             for t in ("whatweb", "nuclei", "gobuster"):
                 self.assertIn(t, tools)
                 self.assertFalse(tools[t].get("skipped", False))
-            out.unlink(missing_ok=True)
+            cleanup_artifact(out)
         finally:
             subprocess.run(["docker", "compose", "-f", str(compose), "down"], check=False, capture_output=True, text=True)
 

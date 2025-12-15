@@ -19,6 +19,7 @@ DEFAULT_TOOL_ORDER: Tuple[str, ...] = (
     "enum4linux-ng",
     # Optional / special
     "sqlmap",
+    "hydra",
     "supabase_rls",
     "trivy",
 )

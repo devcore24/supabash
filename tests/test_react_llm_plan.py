@@ -4,6 +4,7 @@ from pathlib import Path
 
 from supabash.react import ReActOrchestrator
 from supabash import prompts
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class FakeScanner:
@@ -66,7 +67,7 @@ class TestReActLLMPlan(unittest.TestCase):
         }
         llm = FakeLLMPlanner()
         orch = ReActOrchestrator(scanners=scanners, llm_client=llm, planner=None)
-        out = Path("/tmp/react_llm_plan.json")
+        out = artifact_path("react_llm_plan.json")
         report = orch.run("example.com", out, llm_plan=True, max_actions=5)
         self.assertTrue(out.exists())
         self.assertGreaterEqual(llm.plan_calls, 2)
@@ -74,7 +75,7 @@ class TestReActLLMPlan(unittest.TestCase):
         self.assertIn("whatweb", actions)
         self.assertIn("nuclei", actions)
         self.assertIn("gobuster", actions)
-        out.unlink(missing_ok=True)
+        cleanup_artifact(out)
 
     def test_llm_plan_failure_sets_error_and_writes_report(self):
         scanners = {
@@ -82,14 +83,13 @@ class TestReActLLMPlan(unittest.TestCase):
             "whatweb": FakeScanner("whatweb"),
         }
         orch = ReActOrchestrator(scanners=scanners, llm_client=FailingLLMPlanner(), planner=None)
-        out = Path("/tmp/react_llm_plan_fail.json")
+        out = artifact_path("react_llm_plan_fail.json")
         report = orch.run("example.com", out, llm_plan=True, max_actions=3)
         self.assertTrue(out.exists())
         self.assertTrue(report.get("error"))
         self.assertTrue(report.get("failed"))
-        out.unlink(missing_ok=True)
+        cleanup_artifact(out)
 
 
 if __name__ == "__main__":
     unittest.main()
-

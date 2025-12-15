@@ -7,6 +7,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
 from supabash.audit import AuditOrchestrator
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class FakeScanner:
@@ -51,7 +52,7 @@ class TestAuditOrchestrator(unittest.TestCase):
                 return '{"summary":"ok","findings":[]}'
 
         orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
-        output = Path("/tmp/audit_test.json")
+        output = artifact_path("audit_test.json")
         report = orchestrator.run("example.com", output, container_image="alpine:latest")
         self.assertTrue(output.exists())
         data = json.loads(output.read_text())
@@ -64,7 +65,7 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertIn("trivy", tool_names)
         self.assertIn("findings", data)
         self.assertGreaterEqual(len(data["findings"]), 1)
-        output.unlink()
+        cleanup_artifact(output)
 
     def test_web_targets_include_http_service_on_nonstandard_port(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
@@ -99,14 +100,14 @@ class TestAuditOrchestrator(unittest.TestCase):
                 return '{"summary":"ok","findings":[]}'
 
         orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
-        output = Path("/tmp/audit_fail.json")
+        output = artifact_path("audit_fail.json")
         report = orchestrator.run("example.com", output)
         failures = [r for r in report["results"] if not r["success"]]
         self.assertTrue(failures)
         nmap_entry = next((r for r in report["results"] if r.get("tool") == "nmap"), None)
         self.assertIsNotNone(nmap_entry)
         self.assertEqual(nmap_entry.get("error"), "fail")
-        output.unlink()
+        cleanup_artifact(output)
 
 
 if __name__ == "__main__":

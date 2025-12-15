@@ -42,6 +42,12 @@ class ReActOrchestrator(AuditOrchestrator):
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
         llm_plan: bool = False,
+        run_hydra: bool = False,
+        hydra_usernames: Optional[str] = None,
+        hydra_passwords: Optional[str] = None,
+        hydra_services: Optional[str] = None,
+        hydra_threads: int = 4,
+        hydra_options: Optional[str] = None,
         remediate: bool = False,
         max_remediations: int = 5,
         min_remediation_severity: str = "MEDIUM",
@@ -91,6 +97,9 @@ class ReActOrchestrator(AuditOrchestrator):
                 "nuclei_rate_limit": nuclei_rate_limit or None,
                 "gobuster_threads": gobuster_threads,
                 "gobuster_wordlist": gobuster_wordlist,
+                "hydra_enabled": bool(run_hydra),
+                "hydra_services": hydra_services,
+                "hydra_threads": int(hydra_threads),
             },
             "safety": {"aggressive_caps": caps_meta},
         }
@@ -389,7 +398,10 @@ class ReActOrchestrator(AuditOrchestrator):
                 pass
 
             # Normalize actions like "hydra:ssh"
-            base = str(action).split(":", 1)[0].strip().lower()
+            action_str = str(action)
+            base, _, suffix = action_str.partition(":")
+            base = base.strip().lower()
+            suffix = suffix.strip().lower()
 
             if base == "whatweb":
                 if not web_targets:
@@ -488,7 +500,62 @@ class ReActOrchestrator(AuditOrchestrator):
                 continue
 
             if base == "hydra":
-                agg["results"].append(self._skip_tool("hydra", "Requires explicit usernames/passwords inputs; run manually"))
+                if not run_hydra:
+                    agg["results"].append(
+                        self._skip_tool(
+                            "hydra",
+                            "Opt-in only; re-run with --hydra --hydra-usernames PATH --hydra-passwords PATH",
+                        )
+                    )
+                    continue
+                if not hydra_usernames or not hydra_passwords:
+                    agg["results"].append(self._skip_tool("hydra", "Missing --hydra-usernames/--hydra-passwords"))
+                    continue
+                if not self._has_scanner("hydra"):
+                    agg["results"].append(self._skip_tool("hydra", "Scanner not available"))
+                    continue
+
+                svc = suffix or "ssh"
+                allowed = hydra_services or "ssh,ftp"
+                allowed_list = [s.strip().lower() for s in str(allowed).replace(";", ",").split(",") if s.strip()]
+                if allowed_list and svc not in allowed_list:
+                    agg["results"].append(self._skip_tool("hydra", f"Service '{svc}' not enabled (allowed: {', '.join(allowed_list)})"))
+                    continue
+
+                svc_ports: List[int] = []
+                if nmap_entry.get("success"):
+                    for host in nmap_entry.get("data", {}).get("scan_data", {}).get("hosts", []):
+                        for p in host.get("ports", []) or []:
+                            try:
+                                if str(p.get("state", "")).lower() != "open":
+                                    continue
+                                if str(p.get("service", "")).strip().lower() != svc:
+                                    continue
+                                svc_ports.append(int(p.get("port")))
+                            except Exception:
+                                continue
+                svc_ports = sorted(set(svc_ports))
+                if not svc_ports:
+                    agg["results"].append(self._skip_tool("hydra", f"No {svc} service detected by nmap"))
+                    continue
+
+                port = svc_ports[0]
+                extra = hydra_options or ""
+                opt = f"-s {port} -t {int(hydra_threads)} {extra}".strip()
+                agg["results"].append(
+                    run_or_skip(
+                        "hydra",
+                        lambda: self.scanners["hydra"].run(
+                            scan_host,
+                            svc,
+                            hydra_usernames,
+                            hydra_passwords,
+                            options=opt,
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("hydra"),
+                        ),
+                    )
+                )
                 continue
 
             if base == "dnsenum":

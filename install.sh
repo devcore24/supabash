@@ -20,6 +20,8 @@ RUSTSCAN_VERSION="${RUSTSCAN_VERSION:-2.4.1}"
 RUSTSCAN_REPO="${RUSTSCAN_REPO:-bee-san/RustScan}"
 ENUM4LINUX_NG_VERSION="${ENUM4LINUX_NG_VERSION:-v1.3.7}"
 ENUM4LINUX_NG_REPO="${ENUM4LINUX_NG_REPO:-cddmp/enum4linux-ng}"
+# Optional: update nuclei templates for the invoking (non-root) user after install
+SUPABASH_UPDATE_NUCLEI_TEMPLATES="${SUPABASH_UPDATE_NUCLEI_TEMPLATES:-1}"
 # Optional: install PDF/HTML report export dependencies (WeasyPrint)
 SUPABASH_PDF_EXPORT="${SUPABASH_PDF_EXPORT:-0}"
 
@@ -157,12 +159,39 @@ install_external_tools() {
     # Install Nuclei (ProjectDiscovery)
     if ! command -v nuclei &> /dev/null; then
         info "Installing Nuclei..."
-        # Download latest release binary (simplified for amd64 linux)
-        wget -q https://github.com/projectdiscovery/nuclei/releases/download/v2.9.8/nuclei_2.9.8_linux_amd64.zip
-        unzip -q nuclei_2.9.8_linux_amd64.zip
-        $SUDO mv nuclei /usr/local/bin/
-        rm nuclei_2.9.8_linux_amd64.zip
-        success "Nuclei installed."
+        arch="$(uname -m)"
+        if [[ "$arch" != "x86_64" && "$arch" != "amd64" ]]; then
+            warn "Nuclei auto-install currently supports x86_64/amd64 only (arch=$arch). Install manually: https://github.com/projectdiscovery/nuclei/releases"
+        else
+            tmpdir="$(mktemp -d)"
+            nuclei_zip="nuclei_2.9.8_linux_amd64.zip"
+            nuclei_url="https://github.com/projectdiscovery/nuclei/releases/download/v2.9.8/${nuclei_zip}"
+            if download_url_to_tmp "$nuclei_url" "$tmpdir" "$nuclei_zip"; then
+                unzip -q "${tmpdir}/${nuclei_zip}" -d "$tmpdir"
+                if [ -f "${tmpdir}/nuclei" ]; then
+                    $SUDO install -m 0755 "${tmpdir}/nuclei" /usr/local/bin/nuclei
+                    success "Nuclei installed."
+                else
+                    warn "Nuclei archive did not contain expected binary (skipping)."
+                fi
+            else
+                warn "Failed to download Nuclei from ${nuclei_url} (skipping)."
+            fi
+            rm -rf "$tmpdir"
+        fi
+
+        if command -v nuclei &> /dev/null; then
+            if [ "$SUPABASH_UPDATE_NUCLEI_TEMPLATES" = "1" ]; then
+                info "Updating Nuclei templates for the invoking user (best-effort)..."
+                if [ -n "${SUDO_USER:-}" ] && command -v sudo &> /dev/null; then
+                    sudo -u "$SUDO_USER" -H nuclei -update-templates >/dev/null 2>&1 || warn "Nuclei template update failed; run: nuclei -update-templates"
+                else
+                    nuclei -update-templates >/dev/null 2>&1 || warn "Nuclei template update failed; run: nuclei -update-templates"
+                fi
+            else
+                info "Skipping Nuclei template update (set SUPABASH_UPDATE_NUCLEI_TEMPLATES=1 to enable)."
+            fi
+        fi
     else
         info "Nuclei is already installed."
     fi
@@ -171,8 +200,14 @@ install_external_tools() {
     if ! command -v trivy &> /dev/null; then
         info "Installing Trivy..."
         $SUDO apt-get install -y wget apt-transport-https gnupg lsb-release
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | $SUDO apt-key add -
-        echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | $SUDO tee -a /etc/apt/sources.list.d/trivy.list
+        $SUDO install -m 0755 -d /etc/apt/keyrings
+        if command -v curl &> /dev/null; then
+            curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key | $SUDO gpg --dearmor -o /etc/apt/keyrings/trivy.gpg
+        else
+            wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | $SUDO gpg --dearmor -o /etc/apt/keyrings/trivy.gpg
+        fi
+        $SUDO chmod a+r /etc/apt/keyrings/trivy.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | $SUDO tee /etc/apt/sources.list.d/trivy.list >/dev/null
         $SUDO apt-get update
         $SUDO apt-get install -y trivy
         success "Trivy installed."

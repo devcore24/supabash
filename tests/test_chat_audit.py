@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from supabash.chat import ChatSession
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class DummyConfigManager:
@@ -63,9 +64,10 @@ class TestChatAudit(unittest.TestCase):
         fake = FakeAuditOrchestrator()
         session = ChatSession(scanners={}, llm=None, config_manager=DummyConfigManager())
         session.audit_orchestrator_factory = lambda: fake
-        out = Path("/tmp/chat_audit.json")
+        out = artifact_path("chat_audit.json")
         report = session.run_audit("10.0.0.2", output=out)
         self.assertEqual(report.get("saved_to"), str(out))
+        cleanup_artifact(out)
 
 
 if __name__ == "__main__":

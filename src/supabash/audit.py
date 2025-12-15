@@ -14,6 +14,7 @@ from supabash.tools import (
     NucleiScanner,
     GobusterScanner,
     SqlmapScanner,
+    HydraRunner,
     NiktoScanner,
     SslscanScanner,
     DnsenumScanner,
@@ -48,6 +49,7 @@ class AuditOrchestrator:
             "nuclei": NucleiScanner(),
             "gobuster": GobusterScanner(),
             "sqlmap": SqlmapScanner(),
+            "hydra": HydraRunner(),
             "nikto": NiktoScanner(),
             "sslscan": SslscanScanner(),
             "dnsenum": DnsenumScanner(),
@@ -327,6 +329,18 @@ class AuditOrchestrator:
 
     def _collect_findings(self, agg: Dict[str, Any]) -> List[Dict[str, Any]]:
         findings: List[Dict[str, Any]] = []
+
+        def redact_secret(value: Any) -> str:
+            s = "" if value is None else str(value)
+            s = s.strip()
+            if not s:
+                return ""
+            if len(s) <= 2:
+                return "***"
+            if len(s) <= 6:
+                return s[0] + "***" + s[-1]
+            return s[:2] + "***" + s[-2:]
+
         for entry in agg.get("results", []):
             tool = entry.get("tool")
             data = entry.get("data", {})
@@ -360,6 +374,25 @@ class AuditOrchestrator:
                         "title": "SQL Injection",
                         "evidence": f.get("detail", ""),
                         "tool": "sqlmap",
+                    })
+            # Hydra valid credentials (high risk)
+            if tool == "hydra":
+                for c in data.get("found_credentials", []) or []:
+                    if not isinstance(c, dict):
+                        continue
+                    svc = (c.get("service") or data.get("service") or "").strip().lower() or "service"
+                    host = (c.get("host") or data.get("target") or "").strip() or "host"
+                    port = (c.get("port") or "").strip()
+                    login = (c.get("login") or "").strip()
+                    password = redact_secret(c.get("password"))
+                    where = f"{svc}://{host}"
+                    if port:
+                        where = f"{where}:{port}"
+                    findings.append({
+                        "severity": "HIGH",
+                        "title": "Valid credentials discovered (bruteforce)",
+                        "evidence": f"{where} login={login} password={password}".strip(),
+                        "tool": "hydra",
                     })
             # Trivy container CVEs
             if tool == "trivy":
@@ -480,6 +513,12 @@ class AuditOrchestrator:
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
         run_nikto: bool = False,
+        run_hydra: bool = False,
+        hydra_usernames: Optional[str] = None,
+        hydra_passwords: Optional[str] = None,
+        hydra_services: Optional[str] = None,
+        hydra_threads: int = 4,
+        hydra_options: Optional[str] = None,
         remediate: bool = False,
         max_remediations: int = 5,
         min_remediation_severity: str = "MEDIUM",
@@ -520,6 +559,9 @@ class AuditOrchestrator:
                 "gobuster_threads": gobuster_threads,
                 "gobuster_wordlist": gobuster_wordlist,
                 "nikto_enabled": bool(run_nikto),
+                "hydra_enabled": bool(run_hydra),
+                "hydra_services": hydra_services,
+                "hydra_threads": int(hydra_threads),
             },
             "safety": {"aggressive_caps": caps_meta},
         }
@@ -546,6 +588,64 @@ class AuditOrchestrator:
                     timeout_seconds=self._tool_timeout_seconds("nmap"),
                 ),
             )
+
+        def run_hydra_from_nmap(nmap_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+            if not run_hydra:
+                return []
+            if not hydra_usernames or not hydra_passwords:
+                return [self._skip_tool("hydra", "Missing --hydra-usernames/--hydra-passwords")]
+            if not self._has_scanner("hydra"):
+                return [self._skip_tool("hydra", "Scanner not available")]
+            if not nmap_entry or not nmap_entry.get("success"):
+                return [self._skip_tool("hydra", "No nmap results to derive services/ports")]
+
+            services = hydra_services or "ssh,ftp"
+            service_list = [s.strip().lower() for s in str(services).replace(";", ",").split(",") if s.strip()]
+            if not service_list:
+                service_list = ["ssh", "ftp"]
+
+            scan_data = nmap_entry.get("data", {}).get("scan_data", {})
+            ports_by_service: Dict[str, List[int]] = {s: [] for s in service_list}
+            for host in (scan_data or {}).get("hosts", []) or []:
+                for p in host.get("ports", []) or []:
+                    try:
+                        if str(p.get("state", "")).lower() != "open":
+                            continue
+                        svc = str(p.get("service", "")).strip().lower()
+                        port = int(p.get("port"))
+                        if svc in ports_by_service:
+                            ports_by_service[svc].append(port)
+                    except Exception:
+                        continue
+
+            results: List[Dict[str, Any]] = []
+            for svc in service_list:
+                ports = sorted(set(ports_by_service.get(svc, []) or []))
+                if not ports:
+                    results.append(self._skip_tool("hydra", f"No {svc} service detected by nmap"))
+                    continue
+                for port in ports[:2]:
+                    extra = hydra_options or ""
+                    opt = f"-s {port} -t {int(hydra_threads)} {extra}".strip()
+                    note("tool_start", "hydra", f"Running hydra ({svc}) on port {port}")
+                    results.append(
+                        self._run_tool(
+                            "hydra",
+                            lambda svc=svc, port=port, opt=opt: self.scanners["hydra"].run(
+                                scan_host,
+                                svc,
+                                hydra_usernames,
+                                hydra_passwords,
+                                options=opt,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("hydra"),
+                            ),
+                        )
+                    )
+                    note("tool_end", "hydra", f"Finished hydra ({svc}) on port {port}")
+                    if canceled():
+                        return results
+            return results
 
         def run_web_tools(web_target: str) -> List[Dict[str, Any]]:
             if not parallel_web:
@@ -722,6 +822,8 @@ class AuditOrchestrator:
             if nmap_entry and nmap_entry.get("success"):
                 open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {}))
                 agg["open_ports"] = open_ports
+                for entry in run_hydra_from_nmap(nmap_entry):
+                    agg["results"].append(entry)
 
                 if self._should_run_dnsenum(scan_host):
                     if self._has_scanner("dnsenum"):
@@ -828,6 +930,8 @@ class AuditOrchestrator:
             if nmap_entry.get("success"):
                 open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {}))
                 agg["open_ports"] = open_ports
+                for entry in run_hydra_from_nmap(nmap_entry):
+                    agg["results"].append(entry)
 
                 # DNS enumeration (domain targets)
                 if self._should_run_dnsenum(scan_host):

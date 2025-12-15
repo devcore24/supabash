@@ -3,6 +3,7 @@ from pathlib import Path
 
 from supabash.audit import AuditOrchestrator
 from supabash.react import ReActOrchestrator
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class BombLLM:
@@ -45,12 +46,12 @@ class TestNoLLMMode(unittest.TestCase):
             "supabase_rls": type("Noop", (), {"check": lambda self, url, **kw: {"success": True, "data": {}, "command": "rls"}})(),
         }
         orch = AuditOrchestrator(scanners=scanners, llm_client=BombLLM())
-        out = Path("/tmp/no_llm_audit.json")
+        out = artifact_path("no_llm_audit.json")
         report = orch.run("t", out, remediate=True, use_llm=False)
         self.assertTrue(out.exists())
         self.assertNotIn("summary", report)
         self.assertEqual(report.get("llm", {}).get("enabled"), False)
-        out.unlink(missing_ok=True)
+        cleanup_artifact(out)
 
     def test_react_no_llm_falls_back_from_llm_plan(self):
         scanners = {
@@ -58,15 +59,14 @@ class TestNoLLMMode(unittest.TestCase):
             "whatweb": FakeScanner("whatweb", {"success": True, "scan_data": [], "command": "whatweb t"}),
         }
         orch = ReActOrchestrator(scanners=scanners, llm_client=BombLLM(), planner=FakePlanner())
-        out = Path("/tmp/no_llm_react.json")
+        out = artifact_path("no_llm_react.json")
         report = orch.run("t", out, llm_plan=True, use_llm=False, max_actions=2)
         self.assertTrue(out.exists())
         planner = report.get("react", {}).get("planner", {})
         self.assertEqual(planner.get("type"), "heuristic")
         self.assertEqual(report.get("llm", {}).get("enabled"), False)
-        out.unlink(missing_ok=True)
+        cleanup_artifact(out)
 
 
 if __name__ == "__main__":
     unittest.main()
-

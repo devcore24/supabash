@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from supabash.audit import AuditOrchestrator
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class DummyConfigManager:
@@ -67,10 +68,10 @@ class TestToolRegistry(unittest.TestCase):
             llm_client=FakeLLM(cfg),
         )
 
-        out = Path("/tmp/tool_registry_test.json")
+        out = artifact_path("tool_registry_test.json")
         report = orch.run("example.com", out)
         self.assertTrue(out.exists())
-        out.unlink(missing_ok=True)
+        cleanup_artifact(out)
 
         self.assertEqual(nmap.calls, 1)
         self.assertEqual(whatweb.calls, 0)
@@ -82,4 +83,3 @@ class TestToolRegistry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

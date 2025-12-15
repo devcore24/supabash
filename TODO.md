@@ -18,6 +18,8 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Write Bash script to detect OS (Debian/Ubuntu/Kali).
     - [x] Implement `apt-get` logic for system binaries (nmap, nikto, sqlmap, etc.).
     - [x] Add specific installation logic for external tools (Nuclei, Trivy).
+    - [x] Update Nuclei templates post-install (best-effort, non-root user).
+    - [x] Install Trivy repository key via `/etc/apt/keyrings` (no `apt-key`).
     - [x] Add Python dependency installation step.
     - [x] Create the global entry point (symlink `supabash` to `/usr/local/bin`).
 - [x] **CLI Skeleton (Python)**
@@ -189,4 +191,4 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] **dnsenum:** DNS enumeration (run only for domain targets).
 - [x] **enum4linux-ng:** SMB enumeration helper (run only when 445/139 are open).
 - [x] Wire **Nikto** into the audit flow (opt-in via `--nikto`, runs on discovered web targets).
-- [ ] Wire **Hydra** into the workflow (opt-in; requires explicit user-provided credential lists).
+- [x] Wire **Hydra** into the workflow (opt-in; requires explicit user-provided credential lists).

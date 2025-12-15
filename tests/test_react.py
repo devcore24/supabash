@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from supabash.react import ReActOrchestrator
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class FakeScanner:
@@ -47,6 +48,25 @@ class FakePlanner:
         return {"next_steps": ["whatweb", "nuclei", "gobuster"], "notes": "web"}
 
 
+class FakePlannerHydra:
+    def suggest(self, state):
+        return {"next_steps": ["hydra:ssh"], "notes": "ssh"}
+
+
+class FakeHydra:
+    def __init__(self):
+        self.calls = []
+
+    def run(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return {
+            "success": True,
+            "raw_output": "[22][ssh] host: 127.0.0.1   login: root   password: toor",
+            "found_credentials": [{"host": "127.0.0.1", "login": "root", "password": "toor", "service": "ssh", "port": "22"}],
+            "command": "hydra ...",
+        }
+
+
 class TestReAct(unittest.TestCase):
     def test_react_runs_planned_web_tools(self):
         scanners = {
@@ -59,7 +79,7 @@ class TestReAct(unittest.TestCase):
             "supabase_rls": FakeScanner("supabase_rls"),
         }
         orch = ReActOrchestrator(scanners=scanners, llm_client=FakeLLM(), planner=FakePlanner())
-        out = Path("/tmp/react_report.json")
+        out = artifact_path("react_report.json")
         report = orch.run("example.com", out, max_actions=5)
         self.assertTrue(out.exists())
         self.assertIn("react", report)
@@ -71,8 +91,50 @@ class TestReAct(unittest.TestCase):
         self.assertIn("whatweb", tools)
         self.assertIn("nuclei", tools)
         self.assertIn("gobuster", tools)
-        out.unlink()
+        cleanup_artifact(out)
 
+    def test_react_runs_hydra_when_opted_in(self):
+        class NmapWithSsh(FakeScanner):
+            def scan(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return {
+                    "success": True,
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 22, "protocol": "tcp", "service": "ssh", "product": "", "version": "", "state": "open"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        scanners = {
+            "nmap": NmapWithSsh("nmap"),
+            "hydra": FakeHydra(),
+            "sqlmap": FakeScanner("sqlmap"),
+            "trivy": FakeScanner("trivy"),
+            "supabase_rls": FakeScanner("supabase_rls"),
+        }
+        orch = ReActOrchestrator(scanners=scanners, llm_client=FakeLLM(), planner=FakePlannerHydra())
+        out = artifact_path("react_hydra_test.json")
+        report = orch.run(
+            "127.0.0.1",
+            out,
+            max_actions=3,
+            run_hydra=True,
+            hydra_usernames="users.txt",
+            hydra_passwords="pass.txt",
+            hydra_services="ssh",
+        )
+        self.assertTrue(out.exists())
+        tools = [r.get("tool") for r in report.get("results", [])]
+        self.assertIn("hydra", tools)
+        hydra_entry = next((r for r in report.get("results", []) if r.get("tool") == "hydra"), None)
+        self.assertIsNotNone(hydra_entry)
+        self.assertTrue(hydra_entry.get("success"))
+        cleanup_artifact(out)
 
 if __name__ == "__main__":
     unittest.main()

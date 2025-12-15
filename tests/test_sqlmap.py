@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../s
 
 from supabash.tools.sqlmap import SqlmapScanner
 from supabash.runner import CommandResult
+from tests.test_artifacts import artifacts_dir
 
 SAMPLE_OUT = """
 [INFO] GET parameter 'id' appears to be 'UNION query' injectable
@@ -29,7 +30,8 @@ class TestSqlmapScanner(unittest.TestCase):
         self.mock_runner.run.return_value = CommandResult(
             command="", return_code=0, stdout=SAMPLE_OUT, stderr="", success=True
         )
-        self.scanner.scan("http://example.com/?id=1", arguments="--risk=1", output_dir="/tmp/out")
+        out_dir = str(artifacts_dir() / "sqlmap-out")
+        self.scanner.scan("http://example.com/?id=1", arguments="--risk=1", output_dir=out_dir)
         self.mock_runner.run.assert_called_once()
         args, kwargs = self.mock_runner.run.call_args
         cmd = args[0]
@@ -37,7 +39,7 @@ class TestSqlmapScanner(unittest.TestCase):
         self.assertIn("-u", cmd)
         self.assertIn("http://example.com/?id=1", cmd)
         self.assertIn("--risk=1", cmd)
-        self.assertIn("--output-dir=/tmp/out", cmd)
+        self.assertIn(f"--output-dir={out_dir}", cmd)
 
     def test_scan_failure(self):
         self.mock_runner.run.return_value = CommandResult(

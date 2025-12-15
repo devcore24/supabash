@@ -17,7 +17,7 @@
 ![Status](https://img.shields.io/badge/Status-WIP-orange)
 
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.  
-> Progress: `[███████████████████-]` **97%**
+> Progress: `[███████████████████▉]` **98%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -106,6 +106,10 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
+Notes:
+- The installer can update **Nuclei templates** for your (non-root) user after installing `nuclei` (recommended). Disable with `SUPABASH_UPDATE_NUCLEI_TEMPLATES=0 sudo ./install.sh`.
+- If Nuclei ever fails due to missing templates, run `nuclei -update-templates`.
+
 ### Optional: PDF/HTML Report Export (WeasyPrint)
 
 If you want Supabash to export reports to **HTML/PDF** (in addition to JSON/Markdown), you’ll need extra dependencies.
@@ -175,6 +179,8 @@ supabash audit "http://192.168.1.10/?id=1" --yes
 supabash audit 192.168.1.10 --yes --remediate --max-remediations 5 --min-remediation-severity HIGH
 # opt-in: run nikto too (slow)
 supabash audit "http://192.168.1.10" --yes --nikto
+# opt-in: credential bruteforce (high impact/noisy; requires explicit authorization + wordlists)
+supabash audit 192.168.1.10 --yes --hydra --hydra-services ssh --hydra-usernames users.txt --hydra-passwords passwords.txt
 ```
 Note: by default Supabash writes `reports/report-YYYYmmdd-HHMMSS.json` and `reports/report-YYYYmmdd-HHMMSS.md`. Avoid running `supabash audit` with `sudo` unless you need root-only scan modes; otherwise your report files may be owned by root.
 If web tools show `Executable not found`, install system requirements via `install.sh` or `docs/system-requirements.md`.
@@ -187,6 +193,8 @@ supabash react "http://192.168.1.10" --yes --remediate
 supabash react 192.168.1.10 --output reports/my-react.json --yes
 supabash react localhost --yes --status-file reports/react_status.json
 supabash react localhost --yes --llm-plan   # LLM-driven planning (requires configured provider/key)
+# opt-in: allow planned hydra steps to execute (requires explicit authorization + wordlists)
+supabash react 192.168.1.10 --yes --hydra --hydra-usernames users.txt --hydra-passwords passwords.txt
 ```
 Note: ReAct writes `reports/react-YYYYmmdd-HHMMSS.json` and `reports/react-YYYYmmdd-HHMMSS.md` by default.
 

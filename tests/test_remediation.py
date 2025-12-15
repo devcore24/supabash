@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from supabash.audit import AuditOrchestrator
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class FakeScanner:
@@ -54,7 +55,7 @@ class TestRemediation(unittest.TestCase):
             "supabase_rls": FakeScanner("supabase_rls"),
         }
         orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
-        out = Path("/tmp/remediation_report.json")
+        out = artifact_path("remediation_report.json")
         report = orchestrator.run("example.com", out, remediate=True, max_remediations=1, min_remediation_severity="HIGH")
         self.assertTrue(out.exists())
         self.assertIn("findings", report)
@@ -65,9 +66,8 @@ class TestRemediation(unittest.TestCase):
         # Ensure llm call metadata is tracked
         self.assertIn("llm", report)
         self.assertIsInstance(report["llm"].get("calls"), list)
-        out.unlink()
+        cleanup_artifact(out)
 
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -56,5 +56,14 @@ openai_key.txt
 report.json
 react_report.json
 chat_report.json
+report.md
+report.html
+report.pdf
+react_report.md
+react_report.html
+react_report.pdf
+chat_report.md
+chat_report.html
+chat_report.pdf
 reports/*
 !reports/.gitkeep

@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
 from supabash.report import generate_markdown, write_markdown
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class TestReport(unittest.TestCase):
@@ -40,10 +41,10 @@ class TestReport(unittest.TestCase):
 
     def test_write_markdown(self):
         report = {"target": "t", "results": []}
-        path = Path("/tmp/test_md_report.md")
+        path = artifact_path("test_md_report.md")
         written = write_markdown(report, path)
         self.assertTrue(Path(written).exists())
-        Path(written).unlink()
+        cleanup_artifact(Path(written))
 
 
 if __name__ == "__main__":

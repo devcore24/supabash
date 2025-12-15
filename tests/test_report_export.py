@@ -4,19 +4,20 @@ import unittest
 from pathlib import Path
 
 from supabash.report_export import export_from_markdown_file
+from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class TestReportExport(unittest.TestCase):
     def test_export_is_noop_when_disabled(self):
-        p = Path("/tmp/report_export_noop.md")
+        p = artifact_path("report_export_noop.md")
         p.write_text("# Hi", encoding="utf-8")
         out = export_from_markdown_file(p, config={"core": {"report_exports": {"html": False, "pdf": False}}})
         self.assertIsNone(out.html_path)
         self.assertIsNone(out.pdf_path)
-        p.unlink(missing_ok=True)
+        cleanup_artifact(p)
 
     def test_export_writes_html_and_pdf_with_fake_modules(self):
-        p = Path("/tmp/report_export.md")
+        p = artifact_path("report_export.md")
         p.write_text("# Title\n\n| A | B |\n|---|---|\n| 1 | 2 |\n", encoding="utf-8")
 
         fake_markdown = types.SimpleNamespace(markdown=lambda text, extensions=None, output_format=None: "<h1>Title</h1>")
@@ -53,11 +54,10 @@ class TestReportExport(unittest.TestCase):
                 sys.modules.pop("weasyprint", None)
             else:
                 sys.modules["weasyprint"] = old_wp
-            p.unlink(missing_ok=True)
-            p.with_suffix(".html").unlink(missing_ok=True)
-            p.with_suffix(".pdf").unlink(missing_ok=True)
+            cleanup_artifact(p)
+            cleanup_artifact(p.with_suffix(".html"))
+            cleanup_artifact(p.with_suffix(".pdf"))
 
 
 if __name__ == "__main__":
     unittest.main()
-

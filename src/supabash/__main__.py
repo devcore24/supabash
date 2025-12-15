@@ -228,6 +228,12 @@ def audit(
     parallel_web: bool = typer.Option(False, "--parallel-web", help="Run web tools in parallel (URL targets can overlap with recon)"),
     max_workers: int = typer.Option(3, "--max-workers", help="Max concurrent workers when --parallel-web is enabled"),
     nikto: bool = typer.Option(False, "--nikto", help="Run Nikto web scan (slow; opt-in)"),
+    hydra: bool = typer.Option(False, "--hydra", help="Run Hydra bruteforce (opt-in; requires explicit wordlists)"),
+    hydra_usernames: Optional[str] = typer.Option(None, "--hydra-usernames", help="Hydra usernames (path to file or single username)"),
+    hydra_passwords: Optional[str] = typer.Option(None, "--hydra-passwords", help="Hydra passwords (path to file or single password)"),
+    hydra_services: str = typer.Option("ssh,ftp", "--hydra-services", help="Comma-separated hydra services (e.g. ssh,ftp)"),
+    hydra_threads: int = typer.Option(4, "--hydra-threads", help="Hydra parallel tasks (-t)"),
+    hydra_options: Optional[str] = typer.Option(None, "--hydra-options", help="Extra Hydra CLI options (advanced)"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
     max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
@@ -260,6 +266,10 @@ def audit(
     if container_image:
         console.print(f"[dim]Including container image: {container_image}[/dim]")
 
+    if hydra and (not hydra_usernames or not hydra_passwords):
+        console.print("[red]--hydra requires --hydra-usernames and --hydra-passwords[/red]")
+        raise typer.Exit(code=1)
+
     out_path, md_path = build_report_paths(output, markdown)
 
     console.print(f"[dim]Results will be saved to {out_path}[/dim]")
@@ -277,6 +287,12 @@ def audit(
             parallel_web=parallel_web,
             max_workers=max_workers,
             run_nikto=nikto,
+            run_hydra=hydra,
+            hydra_usernames=hydra_usernames,
+            hydra_passwords=hydra_passwords,
+            hydra_services=hydra_services,
+            hydra_threads=hydra_threads,
+            hydra_options=hydra_options,
             remediate=remediate,
             use_llm=not no_llm,
             max_remediations=max_remediations,
@@ -325,6 +341,12 @@ def react(
     nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
     gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
     gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
+    hydra: bool = typer.Option(False, "--hydra", help="Run Hydra bruteforce (opt-in; requires explicit wordlists)"),
+    hydra_usernames: Optional[str] = typer.Option(None, "--hydra-usernames", help="Hydra usernames (path to file or single username)"),
+    hydra_passwords: Optional[str] = typer.Option(None, "--hydra-passwords", help="Hydra passwords (path to file or single password)"),
+    hydra_services: str = typer.Option("ssh,ftp", "--hydra-services", help="Comma-separated hydra services (e.g. ssh,ftp)"),
+    hydra_threads: int = typer.Option(4, "--hydra-threads", help="Hydra parallel tasks (-t)"),
+    hydra_options: Optional[str] = typer.Option(None, "--hydra-options", help="Extra Hydra CLI options (advanced)"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate remediation steps + code snippets"),
     max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
     min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
@@ -353,6 +375,10 @@ def react(
     from supabash.safety import ensure_consent
     if not ensure_consent(config_manager, assume_yes=consent):
         console.print("[yellow]Consent not confirmed. Aborting.[/yellow]")
+        raise typer.Exit(code=1)
+
+    if hydra and (not hydra_usernames or not hydra_passwords):
+        console.print("[red]--hydra requires --hydra-usernames and --hydra-passwords[/red]")
         raise typer.Exit(code=1)
 
     out_path, md_path = build_report_paths(output, markdown, default_basename="react")
@@ -451,6 +477,12 @@ def react(
             nuclei_rate_limit=nuclei_rate_limit,
             gobuster_threads=gobuster_threads,
             gobuster_wordlist=gobuster_wordlist,
+            run_hydra=hydra,
+            hydra_usernames=hydra_usernames,
+            hydra_passwords=hydra_passwords,
+            hydra_services=hydra_services,
+            hydra_threads=hydra_threads,
+            hydra_options=hydra_options,
             remediate=remediate,
             max_remediations=max_remediations,
             min_remediation_severity=min_remediation_severity,
