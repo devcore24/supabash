@@ -95,6 +95,14 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
         - Keep safety checks in-line: enforce allowed-hosts/rate limits; block out-of-scope requests.
     - [x] Allow resume if disconnected (reload last scan/audit state from disk).
     - [x] Show progress feedback in chat for long-running actions (LLM “Thinking…” + job running hints).
+    - [x] **Chat Memory & Context Awareness**
+        - [x] Conversation history: persist `messages[]` (user/assistant/tool events) in chat state.
+        - [x] Include the last N turns in every LLM call (configurable via `chat.llm_history_turns`).
+        - [x] Rolling summary memory: maintain `conversation_summary` updated every few turns to stay context-aware.
+        - [x] Tool-context weaving: attach current target + scope + last results + current plan into prompts.
+        - [x] Agent loop UX: freeform chat proposes a command; runs only after explicit confirmation (`y/yes`).
+        - [x] Safety/privacy: redact secrets in chat history; optional local-only LLM mode (`llm.local_only=true`).
+        - [x] Show context window usage (%) for each LLM call (best-effort; set `llm.max_input_tokens` for local models).
 - [x] **The "ReAct" Loop (Reason + Act)**
     - [x] Implement the main agent loop:
         1.  Analyze Goal.

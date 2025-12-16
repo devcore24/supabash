@@ -731,6 +731,40 @@ def chat():
     loaded = session.load_state(state_path)
     if loaded.get("success"):
         console.print(f"[dim]Resumed last session state from {loaded.get('path')}[/dim]")
+        try:
+            if getattr(session, "conversation_summary", ""):
+                console.print("[dim]Conversation memory summary loaded.[/dim]")
+        except Exception:
+            pass
+
+    def show_llm_usage(meta: dict):
+        if not isinstance(meta, dict):
+            return
+        parts = []
+        usage = meta.get("usage")
+        if isinstance(usage, dict):
+            total = usage.get("total_tokens")
+            prompt = usage.get("prompt_tokens")
+            completion = usage.get("completion_tokens")
+            if total is not None:
+                parts.append(f"tokens={total}")
+            if prompt is not None and completion is not None:
+                parts.append(f"prompt={prompt} completion={completion}")
+        cost = meta.get("cost_usd")
+        if cost is not None:
+            parts.append(f"cost_usd={cost:.6f}" if isinstance(cost, (int, float)) else f"cost_usd={cost}")
+        est = meta.get("estimated_prompt_tokens")
+        max_in = meta.get("max_input_tokens")
+        pct = meta.get("context_usage_pct")
+        if est is not None:
+            if max_in is not None and pct is not None:
+                parts.append(f"context≈{est}/{max_in} ({pct}%)")
+            elif max_in is not None:
+                parts.append(f"context≈{est}/{max_in}")
+            else:
+                parts.append(f"context≈{est} tokens")
+        if parts:
+            console.print(f"[dim]LLM usage: {' | '.join(parts)}[/dim]")
 
     def show_scan(result):
         if not result.get("success"):
@@ -813,6 +847,44 @@ def chat():
             continue
         if user_input.strip().lower() in ("exit", "quit"):
             break
+        # Record user message for chat memory.
+        try:
+            session.add_message("user", user_input)
+        except Exception:
+            pass
+
+        # If a suggested command is pending, treat y/n as confirmation.
+        try:
+            pending = getattr(session, "pending_action", None)
+        except Exception:
+            pending = None
+        if isinstance(pending, dict) and pending.get("command"):
+            if user_input.strip().startswith("/"):
+                # User chose to drive manually; drop any pending proposal.
+                session.pending_action = None
+            else:
+                low = user_input.strip().lower()
+                if low in ("y", "yes"):
+                    cmd = str(pending.get("command"))
+                    session.pending_action = None
+                    console.print(f"[cyan]Running proposed command:[/cyan] {cmd}")
+                    try:
+                        session.add_message("assistant", f"Running proposed command: {cmd}")
+                    except Exception:
+                        pass
+                    user_input = cmd
+                elif low in ("n", "no"):
+                    session.pending_action = None
+                    console.print("[dim]Canceled proposed command.[/dim]")
+                    try:
+                        session.add_message("assistant", "Canceled proposed command.")
+                    except Exception:
+                        pass
+                    session.save_state(state_path)
+                    continue
+                else:
+                    # Safety: avoid executing a stale proposal later.
+                    session.pending_action = None
         if user_input.startswith("/clear-state"):
             if clear_session_state(state_path):
                 session.last_scan_result = None
@@ -821,6 +893,13 @@ def chat():
                 session.last_result_kind = None
                 session.last_llm_meta = None
                 session.last_clarifier = None
+                try:
+                    session.messages = []
+                    session.conversation_summary = ""
+                    session.turns_since_summary = 0
+                    session.pending_action = None
+                except Exception:
+                    pass
                 console.print("[green]Cleared chat state.[/green]")
             else:
                 console.print("[yellow]Failed to clear state.[/yellow]")
@@ -920,15 +999,37 @@ def chat():
                 continue
             if bg:
                 try:
+                    try:
+                        session.add_tool_event(scanner_name, "job_start", f"profile={profile} target={target}")
+                    except Exception:
+                        pass
                     job = session.start_scan_job(target, profile=profile, scanner_name=scanner_name, allow_public=allow_public)
                     console.print(f"[cyan]Scan job started (id={job.job_id}). Use /status or /stop.[/cyan]")
+                    try:
+                        session.add_message(
+                            "assistant",
+                            f"Scan job started: scanner={scanner_name} profile={profile} target={target} (id={job.job_id})",
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
                     console.print(f"[red]Failed to start job:[/red] {e}")
             else:
                 console.print(f"[cyan]Starting scan ({profile}) with {scanner_name} against {target}...[/cyan]")
+                try:
+                    session.add_tool_event(scanner_name, "start", f"profile={profile} target={target}")
+                except Exception:
+                    pass
                 with console.status("[green]Running scan...[/green]"):
                     res = session.run_scan(target, profile=profile, scanner_name=scanner_name, allow_public=allow_public)
                 show_scan(res)
+                try:
+                    if res.get("success"):
+                        session.add_tool_event(scanner_name, "end", "success")
+                    else:
+                        session.add_tool_event(scanner_name, "end", f"failed: {res.get('error','')}")
+                except Exception:
+                    pass
                 session.save_state(state_path)
             continue
 
@@ -1040,6 +1141,10 @@ def chat():
 
             if bg:
                 try:
+                    try:
+                        session.add_tool_event("audit", "job_start", f"mode={mode} target={target}")
+                    except Exception:
+                        pass
                     job = session.start_audit_job(
                         target,
                         mode=mode,
@@ -1058,10 +1163,21 @@ def chat():
                         markdown=md_path,
                     )
                     console.print(f"[cyan]Audit job started (id={job.job_id}). Use /status or /stop.[/cyan]")
+                    try:
+                        session.add_message(
+                            "assistant",
+                            f"Audit job started: mode={mode} target={target} (id={job.job_id})",
+                        )
+                    except Exception:
+                        pass
                 except Exception as e:
                     console.print(f"[red]Failed to start job:[/red] {e}")
             else:
                 console.print(f"[cyan]Starting audit ({mode}) against {target}...[/cyan]")
+                try:
+                    session.add_tool_event("audit", "start", f"mode={mode} target={target}")
+                except Exception:
+                    pass
                 with console.status("[green]Running audit...[/green]"):
                     rep = session.run_audit(
                         target,
@@ -1081,6 +1197,13 @@ def chat():
                         markdown=md_path,
                     )
                 show_audit(rep)
+                try:
+                    if isinstance(rep, dict) and rep.get("error") and not rep.get("target"):
+                        session.add_tool_event("audit", "end", f"failed: {rep.get('error','')}")
+                    else:
+                        session.add_tool_event("audit", "end", "success")
+                except Exception:
+                    pass
                 session.save_state(state_path)
             continue
 
@@ -1114,22 +1237,13 @@ def chat():
                 summary = session.summarize_findings()
             if summary:
                 console.print(Panel(summary, title="LLM Summary", border_style="cyan"))
+                try:
+                    session.add_message("assistant", summary, meta={"source": "llm", "kind": "summary"})
+                except Exception:
+                    pass
                 meta = getattr(session, "last_llm_meta", None) or {}
-                usage = meta.get("usage") if isinstance(meta, dict) else None
-                if isinstance(usage, dict):
-                    total = usage.get("total_tokens")
-                    prompt = usage.get("prompt_tokens")
-                    completion = usage.get("completion_tokens")
-                    cost = meta.get("cost_usd")
-                    parts = []
-                    if total is not None:
-                        parts.append(f"tokens={total}")
-                    if prompt is not None and completion is not None:
-                        parts.append(f"prompt={prompt} completion={completion}")
-                    if cost is not None:
-                        parts.append(f"cost_usd={cost:.6f}" if isinstance(cost, (int, float)) else f"cost_usd={cost}")
-                    if parts:
-                        console.print(f"[dim]LLM usage: {' | '.join(parts)}[/dim]")
+                show_llm_usage(meta if isinstance(meta, dict) else {})
+                session.save_state(state_path)
             else:
                 console.print("[yellow]No summary available (no data or LLM error).[/yellow]")
             continue
@@ -1145,22 +1259,13 @@ def chat():
                 resp = session.remediate(title=title, evidence=evidence)
             if resp:
                 console.print(Panel(resp, title="LLM Fix", border_style="green"))
+                try:
+                    session.add_message("assistant", resp, meta={"source": "llm", "kind": "fix"})
+                except Exception:
+                    pass
                 meta = getattr(session, "last_llm_meta", None) or {}
-                usage = meta.get("usage") if isinstance(meta, dict) else None
-                if isinstance(usage, dict):
-                    total = usage.get("total_tokens")
-                    prompt = usage.get("prompt_tokens")
-                    completion = usage.get("completion_tokens")
-                    cost = meta.get("cost_usd")
-                    parts = []
-                    if total is not None:
-                        parts.append(f"tokens={total}")
-                    if prompt is not None and completion is not None:
-                        parts.append(f"prompt={prompt} completion={completion}")
-                    if cost is not None:
-                        parts.append(f"cost_usd={cost:.6f}" if isinstance(cost, (int, float)) else f"cost_usd={cost}")
-                    if parts:
-                        console.print(f"[dim]LLM usage: {' | '.join(parts)}[/dim]")
+                show_llm_usage(meta if isinstance(meta, dict) else {})
+                session.save_state(state_path)
             else:
                 console.print("[yellow]No fix available (LLM error).[/yellow]")
             continue
@@ -1224,8 +1329,47 @@ def chat():
 
         if not lines:
             console.print("[yellow]No suggestions available. Use slash commands: /scan, /audit, /details, /report, /test, /summary, /fix, /plan[/yellow]")
+            try:
+                session.add_message(
+                    "assistant",
+                    "No suggestions available. Use slash commands: /scan, /audit, /details, /report, /test, /summary, /fix, /plan",
+                    meta={"source": "llm", "kind": "planner"},
+                )
+            except Exception:
+                pass
+            session.save_state(state_path)
         else:
             console.print(Panel("\n".join(lines), title="Engagement Planner", border_style="cyan"))
+            try:
+                mem_lines = []
+                if questions:
+                    mem_lines.append("Questions:")
+                    mem_lines.extend([f"- {q}" for q in questions[:8]])
+                if suggested:
+                    mem_lines.append("Suggested Commands:")
+                    mem_lines.extend([f"- {c}" for c in suggested[:8]])
+                if safety:
+                    mem_lines.append("Safety:")
+                    mem_lines.extend([f"- {s}" for s in safety[:6]])
+                if notes:
+                    mem_lines.append(f"Notes: {notes}")
+                session.add_message("assistant", "\n".join(mem_lines), meta={"source": "llm", "kind": "planner"})
+            except Exception:
+                pass
+
+            meta = getattr(session, "last_llm_meta", None) or {}
+            show_llm_usage(meta if isinstance(meta, dict) else {})
+
+            # Propose the first suggested command and require explicit confirmation.
+            try:
+                if suggested:
+                    proposal = str(suggested[0]).strip()
+                    if proposal:
+                        session.pending_action = {"command": proposal, "ts": datetime.now().isoformat(timespec="seconds")}
+                        console.print(f"[cyan]Proposed:[/cyan] {proposal}  [dim](run? y/N)[/dim]")
+            except Exception:
+                pass
+            session.save_state(state_path)
 
 @app.command()
 def doctor(

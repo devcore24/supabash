@@ -240,6 +240,12 @@ supabash chat
 I want to audit my staging app for common web vulns
 ```
 
+Chat memory & context awareness:
+- Chat state is persisted to `.supabash/chat_state.json` (last results + message history + rolling summary).
+- Freeform chat may propose a slash command; type `y/yes` to run the proposed command.
+- LLM calls print token/cost metadata plus a best-effort context-window estimate (e.g. `context≈1200/8192 (14.6%)`).
+- Secrets (API keys/tokens/passwords) are redacted from saved chat history.
+
 ### Scanner Engine Selection
 Choose your recon engine with `--scanner`:
 ```bash
@@ -260,6 +266,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`react`.
+- Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
 - Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
 - Edit allowed hosts via CLI: `supabash config --allow-host 10.0.0.0/24`, `supabash config --remove-host 10.0.0.0/24`, `supabash config --list-allowed-hosts`.
@@ -268,6 +275,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Local models (LM Studio): `supabash config --provider lmstudio --model local-model --api-base http://localhost:1234/v1` (no API key required; uses OpenAI-compatible API).
 - Manage scan safety: consent prompts are remembered in `core.consent_accepted` after the first interactive acceptance (use `supabash config --reset-consent` to re-prompt); `--yes` skips prompting for a single run.
 - LLM context/cost controls: set `llm.max_input_chars` to cap tool output sent to the LLM; LLM token usage + estimated USD cost are recorded in audit reports.
+- Chat memory controls: `chat.llm_history_turns`, `chat.summary_every_turns`, `chat.history_max_messages`. For local models, set `llm.max_input_tokens` if you want accurate context % reporting.
 - LLM caching (optional): enable with `llm.cache_enabled=true` (and optionally set `llm.cache_ttl_seconds`, `llm.cache_max_entries`, `llm.cache_dir`) to reuse identical LLM responses and reduce cost.
 - Tune web tooling: `supabash audit ... --nuclei-rate 10 --gobuster-threads 20` (and optionally `--gobuster-wordlist /path/to/list`).
 - Parallelize web tools: `supabash audit ... --parallel-web --max-workers 3` (URL targets can overlap recon with web tooling).

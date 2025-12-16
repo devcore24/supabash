@@ -44,6 +44,11 @@ class LLMClient:
 
         # Local/OpenAI-compatible backends that don't require an API key.
         keyless_providers = {"ollama", "lmstudio"}
+        local_only = bool(cfg.get("local_only", False))
+        if local_only and provider not in keyless_providers:
+            raise ValueError(
+                "llm.local_only=true is enabled; only local providers are allowed (ollama, lmstudio)."
+            )
 
         def normalize_key(value: Any) -> Optional[str]:
             if value is None:
@@ -72,6 +77,66 @@ class LLMClient:
             "api_key": api_key,
             "api_base": api_base,
         }
+
+    def max_input_tokens(self) -> Optional[int]:
+        """
+        Best-effort max input token window for the active model.
+        Returns None when unknown.
+        """
+        cfg = self.config.config.get("llm", {})
+        try:
+            fallback = int(cfg.get("max_input_tokens", 0) or 0)
+        except Exception:
+            fallback = 0
+
+        try:
+            settings = self._active_settings()
+            model = settings.get("model")
+            if model:
+                info = litellm.get_model_info(model)
+                if isinstance(info, dict):
+                    val = info.get("max_input_tokens") or info.get("max_tokens")
+                    if val is not None:
+                        return int(val)
+        except Exception:
+            pass
+
+        return fallback if fallback > 0 else None
+
+    def estimate_prompt_tokens(self, messages: List[Dict[str, str]]) -> Optional[int]:
+        """
+        Best-effort prompt token estimate for the active model/messages.
+        Returns None when token counting fails.
+        """
+        try:
+            settings = self._active_settings()
+            model = settings.get("model") or ""
+            if not model:
+                return None
+            token_counter = getattr(litellm, "token_counter", None)
+            if callable(token_counter):
+                return int(token_counter(model=model, messages=messages))
+        except Exception:
+            return None
+        return None
+
+    def context_window_usage(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        """
+        Returns a dict with estimated prompt tokens and context usage percentage when possible.
+        """
+        est = self.estimate_prompt_tokens(messages)
+        max_in = self.max_input_tokens()
+        out: Dict[str, Any] = {}
+        if est is not None:
+            out["estimated_prompt_tokens"] = est
+        if max_in is not None:
+            out["max_input_tokens"] = max_in
+        if est is not None and max_in:
+            try:
+                out["context_usage_pct"] = round((float(est) / float(max_in)) * 100.0, 2)
+            except Exception:
+                pass
+        return out
 
     def _normalize_usage(self, usage: Any) -> Dict[str, Any]:
         if usage is None:

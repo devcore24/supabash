@@ -40,6 +40,20 @@ DEFAULT_CONFIG = {
             "pdf": False,
         },
     },
+    # Chat UX + memory controls (used by `supabash chat`)
+    "chat": {
+        # Persist a bounded message history to `.supabash/chat_state.json`.
+        "history_max_messages": 80,
+        "max_message_chars": 4000,
+        # Include last N user/assistant turns in each LLM call.
+        "llm_history_turns": 6,
+        # Rolling summary memory (0 disables auto-summarization).
+        "summary_every_turns": 4,
+        "summary_keep_last_messages": 24,
+        "max_summary_chars": 1200,
+        # Redact secrets from chat history/state.
+        "redact_secrets": True,
+    },
     # Tool registry (enable/disable tools globally)
     # Note: some tools are also conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL).
     "tools": {
@@ -65,7 +79,12 @@ DEFAULT_CONFIG = {
     "llm": {
         # Global kill-switch: disable all LLM calls (offline/no-LLM mode).
         "enabled": True,
+        # Optional privacy guard: when true, only local providers are allowed (ollama/lmstudio).
+        "local_only": False,
         "max_input_chars": 12000,
+        # Optional fallback for context-window display in chat (used when model info is unknown).
+        # Set this for local models (e.g. LM Studio) if you want accurate % reporting.
+        "max_input_tokens": 0,
         "cache_enabled": False,
         "cache_ttl_seconds": 3600,
         "cache_max_entries": 500,
@@ -153,6 +172,15 @@ class ConfigManager:
                             loaded["llm"].setdefault(k, v)
                         else:
                             loaded["llm"].setdefault(k, v)
+                if "chat" not in loaded:
+                    loaded["chat"] = DEFAULT_CONFIG.get("chat", {})
+                else:
+                    default_chat = DEFAULT_CONFIG.get("chat", {})
+                    if isinstance(default_chat, dict) and isinstance(loaded.get("chat"), dict):
+                        for k, v in default_chat.items():
+                            loaded["chat"].setdefault(k, v)
+                    else:
+                        loaded["chat"] = DEFAULT_CONFIG.get("chat", {})
                 if "tools" not in loaded:
                     loaded["tools"] = DEFAULT_CONFIG["tools"]
                 else:

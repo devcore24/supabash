@@ -11,6 +11,9 @@ core:
   consent_accepted: true
   allow_public_ips: false
 llm:
+  enabled: true
+  # When true, only local providers are allowed (ollama/lmstudio).
+  local_only: false
   provider: openai
   anthropic:
     api_key: YOUR_ANTHROPIC_KEY
@@ -27,6 +30,8 @@ llm:
     model: mistral-large-2512
     api_base: https://api.mistral.ai/v1
   max_input_chars: 12000
+  # Optional fallback for chat context % (useful for local models).
+  max_input_tokens: 0
   cache_enabled: false
   cache_ttl_seconds: 3600
   cache_max_entries: 500
@@ -38,3 +43,12 @@ llm:
     api_key: null
     model: local-model
     api_base: http://localhost:1234/v1
+
+chat:
+  history_max_messages: 80
+  max_message_chars: 4000
+  llm_history_turns: 6
+  summary_every_turns: 4
+  summary_keep_last_messages: 24
+  max_summary_chars: 1200
+  redact_secrets: true
