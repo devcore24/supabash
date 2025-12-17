@@ -194,7 +194,16 @@ supabash audit 192.168.1.10 --yes --hydra --hydra-services ssh --hydra-usernames
 Note: by default Supabash writes `reports/report-YYYYmmdd-HHMMSS.json` and `reports/report-YYYYmmdd-HHMMSS.md`. Avoid running `supabash audit` with `sudo` unless you need root-only scan modes; otherwise your report files may be owned by root.
 If web tools show `Executable not found`, install system requirements via `install.sh` or `docs/system-requirements.md`.
 
-### 2b. ReAct Loop (Plan → Act)
+### 2b. AI Audit (Baseline + Agentic Expansion)
+AI audit combines the deterministic `audit` pipeline with a bounded expansion phase (useful when Nmap finds multiple web ports). It produces one unified report.
+```bash
+supabash ai-audit 192.168.1.10 --yes
+supabash audit 192.168.1.10 --agentic --yes   # alias
+supabash ai-audit "http://192.168.1.10" --yes --llm-plan --max-actions 8
+```
+Note: AI audit writes `reports/ai-audit-YYYYmmdd-HHMMSS.json` and `reports/ai-audit-YYYYmmdd-HHMMSS.md` by default (and exits non-zero if `--llm-plan` planning fails).
+
+### 2c. ReAct Loop (Plan → Act)
 Run an iterative ReAct loop that plans next tools based on recon results.
 ```bash
 supabash react 192.168.1.10 --yes --max-actions 10
@@ -304,8 +313,25 @@ supabash audit [OPTIONS] TARGET
   - `--hydra-options` — extra hydra CLI options (advanced)
   - `--remediate` — LLM remediation (steps + code snippets)
   - `--no-llm` — disable LLM for this run
+  - `--agentic`, `--react` — agentic audit mode (baseline + bounded expansion)
+  - `--llm-plan` — LLM plans agentic expansion steps (only with `--agentic`)
+  - `--max-actions` (default: `10`) — cap agentic expansion length (only with `--agentic`)
   - `--max-remediations` (default: `5`) — cost control
   - `--min-remediation-severity` (default: `MEDIUM`) — `CRITICAL|HIGH|MEDIUM|LOW|INFO`
+</details>
+
+<details>
+<summary><strong>ai-audit</strong> — Agentic audit (alias for audit --agentic)</summary>
+
+```bash
+supabash ai-audit [OPTIONS] TARGET
+```
+
+- Arguments: `TARGET` (required) — IP / hostname / URL / container ID
+- Options: same as `audit`, plus:
+  - default output is `reports/ai-audit-YYYYmmdd-HHMMSS.json` (+ `.md`)
+  - `--llm-plan` — LLM plans agentic expansion steps (fails run if planning fails)
+  - `--max-actions` (default: `10`) — cap agentic expansion length
 </details>
 
 <details>
@@ -397,7 +423,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `~/.supabash/logs/debug.log`.
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
-- Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`react`.
+- Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`/`react`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
 - Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
@@ -417,6 +443,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 
 ## ✅ Implemented Wrappers (Beta)
 - **Audit pipeline (runs by default):** Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase RLS/Trivy)
+- **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.
 - **Recon engines (scan mode):** Nmap, Masscan, Rustscan
 - **Wrappers implemented:** Nikto (opt-in via `--nikto`), Hydra (opt-in via `--hydra` + explicit wordlists)
 - **LLM integration:** litellm-based client with config-driven provider/model selection

@@ -8,6 +8,9 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     target = report.get("target", "unknown")
     lines.append(f"# Supabash Audit Report\n")
     lines.append(f"**Target:** {target}")
+    report_kind = report.get("report_kind")
+    if isinstance(report_kind, str) and report_kind.strip():
+        lines.append(f"**Run Type:** {report_kind.strip().replace('_', '-')}")
     if report.get("container_image"):
         lines.append(f"**Container Image:** {report['container_image']}")
 
@@ -42,12 +45,16 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     lines.append("\n## Table of Contents")
     toc = [
         ("Summary", "#summary"),
+        ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Findings Overview", "#findings-overview"),
         ("Findings (Detailed)", "#findings-detailed"),
         ("Tools Run", "#tools-run"),
         ("Commands Executed", "#commands-executed"),
     ]
-    for title, anchor in toc:
+    for item in toc:
+        if not item:
+            continue
+        title, anchor = item
         lines.append(f"- [{title}]({anchor})")
 
     # Errors (if any)
@@ -58,6 +65,13 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     react = report.get("react")
     if isinstance(react, dict):
         planner = react.get("planner")
+        if isinstance(planner, dict):
+            perr = planner.get("error")
+            if isinstance(perr, str) and perr.strip() and perr.strip() not in errors:
+                errors.append(perr.strip())
+    ai = report.get("ai_audit")
+    if isinstance(ai, dict):
+        planner = ai.get("planner")
         if isinstance(planner, dict):
             perr = planner.get("error")
             if isinstance(perr, str) and perr.strip() and perr.strip() not in errors:
@@ -136,6 +150,48 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         else:
             lines.append("\n## Summary")
             lines.append(str(summary))
+
+    # Agentic expansion details (if present)
+    ai = report.get("ai_audit")
+    if isinstance(ai, dict):
+        lines.append("\n## Agentic Expansion")
+        phase = ai.get("phase")
+        if isinstance(phase, str) and phase.strip():
+            lines.append(f"- phase: {phase.strip()}")
+        baseline_finished = fmt_ts(ai.get("baseline_finished_at"))
+        if baseline_finished:
+            lines.append(f"- baseline_finished_at: {baseline_finished}")
+        max_actions = ai.get("max_actions")
+        if isinstance(max_actions, int):
+            lines.append(f"- max_actions: {max_actions}")
+        notes = ai.get("notes")
+        if isinstance(notes, str) and notes.strip():
+            lines.append(f"- notes: {notes.strip()}")
+        planner = ai.get("planner")
+        if isinstance(planner, dict):
+            ptype = planner.get("type")
+            if isinstance(ptype, str) and ptype.strip():
+                lines.append(f"- planner: {ptype.strip()}")
+            warn = planner.get("warning")
+            if isinstance(warn, str) and warn.strip():
+                lines.append(f"- planner_warning: {warn.strip()}")
+            perr = planner.get("error")
+            if isinstance(perr, str) and perr.strip():
+                lines.append(f"- planner_error: {perr.strip()}")
+        actions = ai.get("actions")
+        if isinstance(actions, list) and actions:
+            lines.append("\n### Actions")
+            for a in actions[:50]:
+                if not isinstance(a, dict):
+                    continue
+                action = a.get("action") or ""
+                status = "skipped" if a.get("skipped") else ("success" if a.get("success") else "failed")
+                err = a.get("error")
+                if isinstance(action, str) and action.strip():
+                    line = f"- `{action.strip()}`: {status}"
+                    if isinstance(err, str) and err.strip():
+                        line = f"{line} — {err.strip()}"
+                    lines.append(line)
 
     # Findings overview table
     sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]

@@ -116,6 +116,12 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] ReAct: avoid report permission errors (fallback path when output not writable).
     - [x] ReAct: default timestamped report filenames (JSON + Markdown).
     - [x] ReAct: `--llm-plan` (LLM suggests actions iteratively; aborts on planning failure and writes error to report).
+- [x] **AI Audit (Baseline + Agentic Expansion)**
+    - [x] Add `supabash ai-audit` command (and `audit --agentic/--react` alias).
+    - [x] Run baseline audit without LLM for determinism.
+    - [x] Add bounded agentic expansion phase (covers additional discovered web targets).
+    - [x] Report includes run type + agentic expansion section.
+    - [x] Add unit tests for `ai-audit` and the alias flags.
 - [x] **Context & Cost Management**
     - [x] Implement a token limiter to ensure tool output doesn't crash the LLM context window (truncate large Nmap results).
     - [x] Implement token usage tracking and cost estimation.

@@ -20,6 +20,7 @@ from supabash.tools.rustscan import RustscanScanner
 from supabash.chat import ChatSession
 from supabash.safety import is_allowed_target, is_public_ip_target
 from supabash.audit import AuditOrchestrator
+from supabash.ai_audit import AIAuditOrchestrator
 from supabash.session_state import default_chat_state_path, clear_state as clear_session_state
 from supabash.react import ReActOrchestrator
 from supabash.report_paths import build_report_paths
@@ -380,6 +381,9 @@ def audit(
     hydra_options: Optional[str] = typer.Option(None, "--hydra-options", help="Extra Hydra CLI options (advanced)"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
+    agentic: bool = typer.Option(False, "--agentic", "--react", help="Run an agentic audit (baseline + ReAct-style expansion)"),
+    llm_plan: bool = typer.Option(False, "--llm-plan", help="Use the LLM to plan agentic expansion steps (requires LLM enabled)"),
+    max_actions: int = typer.Option(10, "--max-actions", help="Maximum agentic expansion actions (only with --agentic)"),
     max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
     min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
 ):
@@ -405,8 +409,11 @@ def audit(
     if not ensure_consent(config_manager, assume_yes=consent):
         console.print("[yellow]Consent not confirmed. Aborting.[/yellow]")
         raise typer.Exit(code=1)
-    logger.info(f"Command 'audit' triggered for target: {target}")
-    console.print(f"[bold red][*] initializing full audit protocol for {target}...[/bold red]")
+    logger.info(f"Command 'audit' triggered for target: {target}" + (" (agentic)" if agentic else ""))
+    if agentic:
+        console.print(f"[bold red][*] initializing AI audit protocol for {target}...[/bold red]")
+    else:
+        console.print(f"[bold red][*] initializing full audit protocol for {target}...[/bold red]")
     if container_image:
         console.print(f"[dim]Including container image: {container_image}[/dim]")
 
@@ -414,42 +421,54 @@ def audit(
         console.print("[red]--hydra requires --hydra-usernames and --hydra-passwords[/red]")
         raise typer.Exit(code=1)
 
-    out_path, md_path = build_report_paths(output, markdown)
+    default_base = "ai-audit" if agentic and not output else "report"
+    out_path, md_path = build_report_paths(output, markdown, default_basename=default_base)
 
     console.print(f"[dim]Results will be saved to {out_path}[/dim]")
 
-    orchestrator = AuditOrchestrator()
-    with console.status("[bold green]Running audit steps...[/bold green]"):
-        report = orchestrator.run(
-            target,
-            out_path,
-            container_image=container_image,
-            mode=mode,
-            nuclei_rate_limit=nuclei_rate_limit,
-            gobuster_threads=gobuster_threads,
-            gobuster_wordlist=gobuster_wordlist,
-            parallel_web=parallel_web,
-            max_workers=max_workers,
-            run_nikto=nikto,
-            run_hydra=hydra,
-            hydra_usernames=hydra_usernames,
-            hydra_passwords=hydra_passwords,
-            hydra_services=hydra_services,
-            hydra_threads=hydra_threads,
-            hydra_options=hydra_options,
-            remediate=remediate,
-            use_llm=not no_llm,
-            max_remediations=max_remediations,
-            min_remediation_severity=min_remediation_severity,
-        )
+    orchestrator = AIAuditOrchestrator() if agentic else AuditOrchestrator()
+    run_kwargs = dict(
+        container_image=container_image,
+        mode=mode,
+        nuclei_rate_limit=nuclei_rate_limit,
+        gobuster_threads=gobuster_threads,
+        gobuster_wordlist=gobuster_wordlist,
+        parallel_web=parallel_web,
+        max_workers=max_workers,
+        run_nikto=nikto,
+        run_hydra=hydra,
+        hydra_usernames=hydra_usernames,
+        hydra_passwords=hydra_passwords,
+        hydra_services=hydra_services,
+        hydra_threads=hydra_threads,
+        hydra_options=hydra_options,
+        remediate=remediate,
+        use_llm=not no_llm,
+        max_remediations=max_remediations,
+        min_remediation_severity=min_remediation_severity,
+    )
+    if agentic:
+        run_kwargs["llm_plan"] = bool(llm_plan)
+        run_kwargs["max_actions"] = int(max_actions)
+
+    with console.status("[bold green]Running AI audit steps...[/bold green]" if agentic else "[bold green]Running audit steps...[/bold green]"):
+        report = orchestrator.run(target, out_path, **run_kwargs)
 
     saved_path = report.get("saved_to")
+    run_error = report.get("run_error")
     if saved_path:
-        console.print(f"[bold green]Audit complete.[/bold green] Report saved to [cyan]{saved_path}[/cyan]")
+        if agentic and run_error:
+            console.print(f"[bold red]AI Audit FAILED.[/bold red] Report saved to [cyan]{saved_path}[/cyan]")
+        elif agentic:
+            console.print(f"[bold green]AI Audit complete.[/bold green] Report saved to [cyan]{saved_path}[/cyan]")
+        else:
+            console.print(f"[bold green]Audit complete.[/bold green] Report saved to [cyan]{saved_path}[/cyan]")
     else:
         console.print("[yellow]Audit completed but failed to write report file.[/yellow]")
         if "write_error" in report:
             console.print(f"[red]{report['write_error']}[/red]")
+        if run_error:
+            console.print(f"[red]{run_error}[/red]")
 
     if saved_path:
         try:
@@ -468,6 +487,84 @@ def audit(
                 console.print(f"[yellow]PDF export skipped:[/yellow] {exports.pdf_error}")
         except Exception as e:
             console.print(f"[yellow]Failed to write Markdown report:[/yellow] {e}")
+
+    if agentic and run_error:
+        raise typer.Exit(code=1)
+
+
+@app.command("ai-audit")
+def ai_audit(
+    target: str = typer.Argument(..., help="Target IP, URL, or Container ID"),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output JSON path (default: reports/ai-audit-YYYYmmdd-HHMMSS.json)",
+    ),
+    container_image: str = typer.Option(None, "--container-image", "-c", help="Optional container image to scan with Trivy"),
+    markdown: Optional[str] = typer.Option(
+        None,
+        "--markdown",
+        "-m",
+        help="Output Markdown path (default: derived from --output with .md)",
+    ),
+    allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
+    allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
+    consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
+    mode: str = typer.Option("normal", "--mode", help="Scan mode: normal|stealth|aggressive"),
+    nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
+    gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
+    gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
+    parallel_web: bool = typer.Option(False, "--parallel-web", help="Run web tools in parallel (URL targets can overlap with recon)"),
+    max_workers: int = typer.Option(3, "--max-workers", help="Max concurrent workers when --parallel-web is enabled"),
+    nikto: bool = typer.Option(False, "--nikto", help="Run Nikto web scan (slow; opt-in)"),
+    hydra: bool = typer.Option(False, "--hydra", help="Run Hydra bruteforce (opt-in; requires explicit wordlists)"),
+    hydra_usernames: Optional[str] = typer.Option(None, "--hydra-usernames", help="Hydra usernames (path to file or single username)"),
+    hydra_passwords: Optional[str] = typer.Option(None, "--hydra-passwords", help="Hydra passwords (path to file or single password)"),
+    hydra_services: str = typer.Option("ssh,ftp", "--hydra-services", help="Comma-separated hydra services (e.g. ssh,ftp)"),
+    hydra_threads: int = typer.Option(4, "--hydra-threads", help="Hydra parallel tasks (-t)"),
+    hydra_options: Optional[str] = typer.Option(None, "--hydra-options", help="Extra Hydra CLI options (advanced)"),
+    llm_plan: bool = typer.Option(False, "--llm-plan", help="Use the LLM to plan agentic expansion steps (requires LLM enabled)"),
+    max_actions: int = typer.Option(10, "--max-actions", help="Maximum agentic expansion actions"),
+    remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
+    max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
+    min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
+):
+    """
+    Agentic audit: baseline audit pipeline + optional ReAct-style expansion.
+
+    Alias for: `supabash audit --agentic ...`
+    """
+    return audit(
+        target=target,
+        output=output,
+        container_image=container_image,
+        markdown=markdown,
+        allow_unsafe=allow_unsafe,
+        allow_public=allow_public,
+        consent=consent,
+        mode=mode,
+        nuclei_rate_limit=nuclei_rate_limit,
+        gobuster_threads=gobuster_threads,
+        gobuster_wordlist=gobuster_wordlist,
+        parallel_web=parallel_web,
+        max_workers=max_workers,
+        nikto=nikto,
+        hydra=hydra,
+        hydra_usernames=hydra_usernames,
+        hydra_passwords=hydra_passwords,
+        hydra_services=hydra_services,
+        hydra_threads=hydra_threads,
+        hydra_options=hydra_options,
+        agentic=True,
+        llm_plan=llm_plan,
+        max_actions=max_actions,
+        remediate=remediate,
+        no_llm=no_llm,
+        max_remediations=max_remediations,
+        min_remediation_severity=min_remediation_severity,
+    )
 
 @app.command()
 def react(
