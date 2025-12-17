@@ -204,10 +204,16 @@ class AuditOrchestrator:
         if isinstance(calls, list):
             calls.append(meta)
 
-    def _summarize_with_llm(self, agg: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    def _summarize_with_llm(
+        self,
+        agg: Dict[str, Any],
+        *,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
         try:
             max_chars = self._llm_max_chars()
-            payload, truncated = prepare_json_payload(agg, max_chars=max_chars)
+            payload_obj = context if isinstance(context, dict) else agg
+            payload, truncated = prepare_json_payload(payload_obj, max_chars=max_chars)
             messages = [
                 {"role": "system", "content": prompts.ANALYZER_PROMPT},
                 {"role": "user", "content": payload},
@@ -238,6 +244,136 @@ class AuditOrchestrator:
         except Exception as e:
             logger.error(f"LLM summary failed: {e}")
             return None, None
+
+    def _build_llm_summary_context(self, agg: Dict[str, Any], findings: List[Dict[str, Any]]) -> Dict[str, Any]:
+        def norm_sev(value: Any) -> str:
+            s = str(value or "INFO").strip().upper()
+            return s or "INFO"
+
+        # Tool execution status (so the LLM knows what did/didn't run).
+        tool_runs: List[Dict[str, Any]] = []
+        for entry in agg.get("results", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            tool = str(entry.get("tool") or "").strip() or "unknown"
+            skipped = bool(entry.get("skipped"))
+            success = bool(entry.get("success")) if not skipped else False
+            status = "skipped" if skipped else ("success" if success else "failed")
+            run = {
+                "tool": tool,
+                "status": status,
+            }
+            cmd = entry.get("command")
+            if isinstance(cmd, str) and cmd.strip():
+                run["command"] = cmd.strip()
+            err = entry.get("error") if not skipped else entry.get("reason")
+            if isinstance(err, str) and err.strip():
+                run["error"] = err.strip()
+            phase = entry.get("phase")
+            if isinstance(phase, str) and phase.strip():
+                run["phase"] = phase.strip()
+            tgt = entry.get("target")
+            if isinstance(tgt, str) and tgt.strip():
+                run["target"] = tgt.strip()
+            tool_runs.append(run)
+
+        sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+        counts = {k: 0 for k in sev_order}
+        for f in findings or []:
+            if not isinstance(f, dict):
+                continue
+            sev = norm_sev(f.get("severity"))
+            if sev not in counts:
+                sev = "INFO"
+            counts[sev] += 1
+
+        # Dedupe + sort findings so important items survive truncation.
+        def f_key(f: Dict[str, Any]) -> tuple:
+            return (
+                norm_sev(f.get("severity")),
+                str(f.get("tool") or ""),
+                str(f.get("title") or ""),
+                str(f.get("evidence") or ""),
+            )
+
+        unique: List[Dict[str, Any]] = []
+        seen = set()
+        for f in findings or []:
+            if not isinstance(f, dict):
+                continue
+            k = f_key(f)
+            if k in seen:
+                continue
+            seen.add(k)
+            unique.append(f)
+
+        unique.sort(
+            key=lambda f: (
+                -self._severity_rank(norm_sev(f.get("severity"))),
+                str(f.get("tool") or ""),
+                str(f.get("title") or ""),
+            )
+        )
+
+        max_total = 60
+        max_info = 15
+        selected: List[Dict[str, Any]] = []
+        info_count = 0
+        for f in unique:
+            sev = norm_sev(f.get("severity"))
+            if sev == "INFO":
+                if info_count >= max_info:
+                    continue
+                info_count += 1
+            item = {
+                "severity": sev,
+                "title": str(f.get("title") or ""),
+                "evidence": str(f.get("evidence") or ""),
+                "tool": str(f.get("tool") or ""),
+            }
+            if f.get("type") is not None:
+                item["type"] = f.get("type")
+            if isinstance(f.get("recommendation"), str) and str(f.get("recommendation")).strip():
+                item["recommendation"] = str(f.get("recommendation")).strip()
+            selected.append(item)
+            if len(selected) >= max_total:
+                break
+
+        run_type = agg.get("report_kind")
+        if not isinstance(run_type, str) or not run_type.strip():
+            run_type = "react" if isinstance(agg.get("react"), dict) else "audit"
+
+        ctx: Dict[str, Any] = {
+            "run_type": str(run_type),
+            "target": agg.get("target"),
+            "scan_host": agg.get("scan_host"),
+            "mode": agg.get("mode"),
+            "open_ports": agg.get("open_ports"),
+            "web_targets": agg.get("web_targets"),
+            "tools": tool_runs,
+            "findings_overview": counts,
+            "findings": selected,
+        }
+
+        ai = agg.get("ai_audit")
+        if isinstance(ai, dict):
+            planner = ai.get("planner") if isinstance(ai.get("planner"), dict) else {}
+            ctx["agentic_expansion"] = {
+                "phase": ai.get("phase"),
+                "notes": ai.get("notes"),
+                "planner": planner.get("type"),
+                "planner_error": planner.get("error"),
+                "actions": [a.get("action") for a in (ai.get("actions") or []) if isinstance(a, dict)][:20],
+            }
+        react = agg.get("react")
+        if isinstance(react, dict):
+            ctx["react"] = {
+                "max_actions": react.get("max_actions"),
+                "actions": list(react.get("actions", []) or [])[:30],
+                "notes": react.get("notes"),
+            }
+
+        return ctx
 
     def _severity_rank(self, severity: str) -> int:
         sev = (severity or "").upper()
@@ -1129,9 +1265,11 @@ class AuditOrchestrator:
             agg["canceled"] = True
             agg["finished_at"] = time.time()
             return agg
+        findings = self._collect_findings(agg)
         if llm_enabled:
             note("llm_start", "summary", "Summarizing with LLM")
-            summary, llm_meta = self._summarize_with_llm(agg)
+            ctx = self._build_llm_summary_context(agg, findings)
+            summary, llm_meta = self._summarize_with_llm(agg, context=ctx)
             if llm_meta:
                 self._append_llm_call(agg, llm_meta)
             if summary:
@@ -1140,7 +1278,6 @@ class AuditOrchestrator:
             if remediate:
                 agg.setdefault("llm", {})["remediation_skipped"] = True
 
-        findings = self._collect_findings(agg)
         findings = self._apply_remediations(
             agg,
             findings,

@@ -70,19 +70,22 @@ def prepare_json_payload(
 
     max_string = 4000
     max_list = 200
+    # Keep shrinking until we fit, rather than falling back to an almost-empty payload.
+    # These floors are intentionally low so we can still produce *some* useful context.
+    min_string = 128
+    min_list = 1
     while True:
         shrunk = _shrink(obj, max_string=max_string, max_list=max_list, max_depth=max_depth)
         s = json.dumps(shrunk, ensure_ascii=False)
         if len(s) <= max_chars:
             return s, True
-        if max_string <= 256 and max_list <= 10:
+        if max_string <= min_string and max_list <= min_list:
             break
-        max_string = max(256, max_string // 2)
-        max_list = max(10, max_list // 2)
+        max_string = max(min_string, max_string // 2)
+        max_list = max(min_list, max_list // 2)
 
     minimal = {
         "note": "payload too large; truncated aggressively",
         "type": str(type(obj)),
     }
     return _truncate_str(json.dumps(minimal, ensure_ascii=False), max_chars), True
-

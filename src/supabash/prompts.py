@@ -1,10 +1,14 @@
-ANALYZER_PROMPT = """You are a security analyst. Given tool outputs, produce a concise summary of vulnerabilities with severity and evidence.
+ANALYZER_PROMPT = """You are a security analyst. Given tool outputs (or a condensed findings list), produce a concise summary of vulnerabilities with severity and evidence.
 
 Input format:
 - nmap: open ports/services
 - web: nuclei/nikto/gobuster/whatweb findings
 - sqlmap: injectable parameters
 - trivy: container CVEs
+- Alternatively, you may receive a compact structure with:
+  - tools: [{tool,status,command?,error?,phase?,target?}]
+  - findings_overview: {CRITICAL,HIGH,MEDIUM,LOW,INFO}
+  - findings: [{severity,title,evidence,tool,type?,recommendation?}]
 
 Output JSON:
 {

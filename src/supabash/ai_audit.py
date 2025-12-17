@@ -542,15 +542,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
         if not llm_enabled:
             agg["llm"] = {"enabled": False, "reason": "Disabled by config or --no-llm", "calls": []}
 
+        findings = self._collect_findings(agg)
         if llm_enabled:
             note("llm_start", "summary", "Summarizing with LLM", agg=agg)
-            summary, llm_meta = self._summarize_with_llm(agg)
+            ctx = self._build_llm_summary_context(agg, findings)
+            summary, llm_meta = self._summarize_with_llm(agg, context=ctx)
             if llm_meta:
                 self._append_llm_call(agg, llm_meta)
             if summary:
                 agg["summary"] = summary
 
-        findings = self._collect_findings(agg)
         findings = self._apply_remediations(
             agg,
             findings,

@@ -714,10 +714,12 @@ class ReActOrchestrator(AuditOrchestrator):
                 agg["saved_to"] = None
             return agg
 
+        findings = self._collect_findings(agg)
         # Summary + remediation
         if llm_enabled:
             note("llm_start", "summary", "Summarizing with LLM")
-            summary, llm_meta = self._summarize_with_llm(agg)
+            ctx = self._build_llm_summary_context(agg, findings)
+            summary, llm_meta = self._summarize_with_llm(agg, context=ctx)
             if llm_meta:
                 self._append_llm_call(agg, llm_meta)
             if summary:
@@ -726,7 +728,6 @@ class ReActOrchestrator(AuditOrchestrator):
             if remediate:
                 agg.setdefault("llm", {})["remediation_skipped"] = True
 
-        findings = self._collect_findings(agg)
         findings = self._apply_remediations(
             agg,
             findings,

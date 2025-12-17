@@ -21,7 +21,19 @@ class TestLLMContext(unittest.TestCase):
         self.assertIn("target", content)
         self.assertIn("truncated", content)
 
+    def test_prepare_json_payload_does_not_fallback_to_minimal_note(self):
+        # Regression: if the payload is only slightly too large after an initial shrink,
+        # we should keep shrinking (instead of returning a near-empty "payload too large" note).
+        obj = {
+            "target": "example",
+            "items": [{"k": "x" * 200} for _ in range(20)],
+        }
+        content, truncated = prepare_json_payload(obj, max_chars=2000)
+        self.assertTrue(truncated)
+        self.assertLessEqual(len(content), 2000)
+        self.assertIn("target", content)
+        self.assertNotIn("payload too large; truncated aggressively", content)
+
 
 if __name__ == "__main__":
     unittest.main()
-
