@@ -58,6 +58,130 @@ def print_banner():
     panel = Panel(text, border_style="bold blue", title="v0.1.0-beta", subtitle="AI Security Agent")
     console.print(panel)
 
+def _only_top_level_help_invocation(argv: list[str]) -> bool:
+    """
+    Return True when the user invoked only top-level help (e.g. `supabash --help`).
+    We intentionally do not intercept `supabash <command> --help`.
+    """
+    try:
+        args = list(argv[1:])
+    except Exception:
+        return False
+    if not args:
+        return False
+    if not any(a in ("--help", "-h") for a in args):
+        return False
+    # Any non-flag token implies a subcommand; do not intercept.
+    for a in args:
+        if a == "--":
+            continue
+        if a in ("--help", "-h"):
+            continue
+        if not str(a).startswith("-"):
+            return False
+    return True
+
+def _print_extended_help() -> None:
+    """
+    Print an extended top-level help that includes per-command parameters.
+    """
+    try:
+        import click
+        from typer.main import get_command as _get_typer_command
+    except Exception:
+        # Fall back to Typer's default help.
+        raise
+
+    root_cmd = _get_typer_command(app)
+    root_ctx = click.Context(root_cmd, info_name=str(getattr(root_cmd, "name", "supabash") or "supabash"))
+
+    console.print(f"[bold]Usage:[/bold] {root_ctx.info_name} [OPTIONS] COMMAND [ARGS]...\n")
+    if getattr(root_cmd, "help", None):
+        console.print(str(root_cmd.help).strip() + "\n")
+
+    # Global options (best-effort)
+    try:
+        opts_table = Table(title="Global Options", show_header=True, header_style="bold magenta")
+        opts_table.add_column("Option", style="cyan", no_wrap=True)
+        opts_table.add_column("Description")
+        for param in root_cmd.get_params(root_ctx):
+            rec = param.get_help_record(root_ctx)
+            if not rec:
+                continue
+            left, right = rec
+            opts_table.add_row(str(left), str(right or ""))
+        console.print(opts_table)
+        console.print()
+    except Exception:
+        pass
+
+    # Commands list
+    try:
+        commands = getattr(root_cmd, "commands", {}) or {}
+        cmd_table = Table(title="Commands", show_header=True, header_style="bold magenta")
+        cmd_table.add_column("Command", style="cyan", no_wrap=True)
+        cmd_table.add_column("Description")
+        for name in sorted(commands.keys()):
+            cmd = commands[name]
+            desc = ""
+            try:
+                desc = cmd.get_short_help_str(limit=90)
+            except Exception:
+                desc = (getattr(cmd, "help", "") or "").strip().splitlines()[0] if getattr(cmd, "help", None) else ""
+            cmd_table.add_row(str(name), str(desc))
+        console.print(cmd_table)
+        console.print()
+    except Exception:
+        commands = {}
+
+    # Per-command parameters
+    try:
+        if not commands:
+            return
+        console.print("[bold]Command Parameters[/bold]")
+        console.print("[dim]Tip: run `supabash <command> --help` for full per-command help text.[/dim]\n")
+        for name in sorted(commands.keys()):
+            cmd = commands[name]
+            title = f"{root_ctx.info_name} {name}"
+            panel_lines: list[str] = []
+            help_str = (getattr(cmd, "help", "") or "").strip()
+            if help_str:
+                panel_lines.append(help_str.splitlines()[0])
+
+            subctx = click.Context(cmd, info_name=title, parent=root_ctx)
+            params = cmd.get_params(subctx)
+
+            args = [p for p in params if getattr(p, "param_type_name", "") == "argument"]
+            opts = [p for p in params if getattr(p, "param_type_name", "") == "option"]
+
+            if args:
+                panel_lines.append("\nArguments:")
+                for a in args:
+                    arg_name = getattr(a, "name", "arg")
+                    required = " (required)" if getattr(a, "required", False) else ""
+                    panel_lines.append(f"- <{arg_name}>{required}")
+
+            if opts:
+                panel_lines.append("\nOptions:")
+                for o in opts:
+                    rec = o.get_help_record(subctx)
+                    if rec:
+                        left, right = rec
+                        panel_lines.append(f"- {left} — {right or ''}".rstrip())
+                    else:
+                        # Fallback formatting
+                        flags = []
+                        for f in getattr(o, "opts", []) + getattr(o, "secondary_opts", []):
+                            flags.append(f)
+                        panel_lines.append(f"- {', '.join(flags)}")
+
+            if not args and not opts:
+                panel_lines.append("\n(no parameters)")
+
+            console.print(Panel("\n".join(panel_lines).strip(), title=name, border_style="cyan"))
+    except Exception:
+        pass
+
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
     """
@@ -66,7 +190,27 @@ def main(ctx: typer.Context):
     if ctx.invoked_subcommand is None:
         print_banner()
         console.print("[bold green]Welcome to Supabash![/bold green]")
-        console.print("Use [bold cyan]--help[/bold cyan] to see available commands.")
+        console.print("Use [bold cyan]--help[/bold cyan] to see full list of commands and params.")
+
+        # Print a compact command list (best-effort).
+        try:
+            commands = getattr(ctx.command, "commands", {}) or {}
+            if isinstance(commands, dict) and commands:
+                table = Table(title="Commands", show_header=True, header_style="bold magenta")
+                table.add_column("Command", style="cyan", no_wrap=True)
+                table.add_column("Description")
+                for name in sorted(commands.keys()):
+                    cmd = commands[name]
+                    short = ""
+                    try:
+                        short = cmd.get_short_help_str(limit=80)
+                    except Exception:
+                        short = getattr(cmd, "help", "") or ""
+                        short = (short.strip().splitlines()[0] if isinstance(short, str) and short else "")
+                    table.add_row(str(name), str(short))
+                console.print(table)
+        except Exception:
+            pass
 
 @app.command()
 def scan(
@@ -1500,4 +1644,8 @@ def doctor(
     raise typer.Exit(code=1)
 
 if __name__ == "__main__":
+    # Intercept `supabash --help` to show an extended help view with per-command parameters.
+    if _only_top_level_help_invocation(sys.argv):
+        _print_extended_help()
+        raise SystemExit(0)
     app()

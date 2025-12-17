@@ -19,7 +19,7 @@
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.  
 > Progress: `[███████████████████▉]` **99%**
 
-**Supabash** is an autonomous AI Security Agent designed for developers, DevOps engineers, and pentesters (Red/Blue Teams) who want to **automate security audits** without sacrificing depth or understanding. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
+**Supabash** is an autonomous AI Security Agent designed for developers, pentesters, DevOps engineers, Red and Blue Teams who want to **automate security audits** without sacrificing depth or understanding. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
 **Don't just find the vulnerability. Bash it, understand it, and fix it.**
 
@@ -245,6 +245,138 @@ Chat memory & context awareness:
 - Freeform chat may propose a slash command; type `y/yes` to run the proposed command.
 - LLM calls print token/cost metadata plus a best-effort context-window estimate (e.g. `context≈1200/8192 (14.6%)`).
 - Secrets (API keys/tokens/passwords) are redacted from saved chat history.
+
+---
+
+## 📜 CLI Reference (Commands + Params)
+
+This is a quick, readable snapshot of the current CLI surface area. For the authoritative help (kept in sync with the code), run:
+```bash
+supabash --help
+supabash <command> --help
+```
+
+<details>
+<summary><strong>scan</strong> — Basic recon scan</summary>
+
+```bash
+supabash scan [OPTIONS] TARGET
+```
+
+- Arguments: `TARGET` (required)
+- Options:
+  - `--profile`, `-p` (default: `fast`) — `fast|full|stealth`
+  - `--scanner`, `-s` (default: `nmap`) — `nmap|masscan|rustscan`
+  - `--force` — bypass allowed-hosts check
+  - `--allow-public` — allow public IP targets (authorized only)
+  - `--yes` — skip consent prompt
+  - `--masscan-rate` — override masscan packets/sec (pps)
+  - `--rustscan-batch` — override rustscan batch size
+</details>
+
+<details>
+<summary><strong>audit</strong> — Full audit pipeline + report</summary>
+
+```bash
+supabash audit [OPTIONS] TARGET
+```
+
+- Arguments: `TARGET` (required) — IP / hostname / URL / container ID
+- Options:
+  - `--output`, `-o` — output JSON path (default: `reports/report-YYYYmmdd-HHMMSS.json`)
+  - `--markdown`, `-m` — output Markdown path (default: derived from `--output`)
+  - `--container-image`, `-c` — optional container image to scan with Trivy
+  - `--force` — bypass allowed-hosts check
+  - `--allow-public` — allow public IP targets (authorized only)
+  - `--yes` — skip consent prompt
+  - `--mode` (default: `normal`) — `normal|stealth|aggressive`
+  - `--nuclei-rate` (default: `0`) — nuclei rate-limit (requests/sec)
+  - `--gobuster-threads` (default: `10`) — gobuster threads
+  - `--gobuster-wordlist` — gobuster wordlist path
+  - `--parallel-web` — run web tools in parallel (URL targets can overlap recon)
+  - `--max-workers` (default: `3`) — max workers for `--parallel-web`
+  - `--nikto` — opt-in nikto scan (slow/noisy)
+  - `--hydra` — opt-in bruteforce (requires explicit wordlists + authorization)
+  - `--hydra-usernames` — usernames file or single username
+  - `--hydra-passwords` — passwords file or single password
+  - `--hydra-services` (default: `ssh,ftp`) — comma-separated services
+  - `--hydra-threads` (default: `4`) — hydra `-t` parallel tasks
+  - `--hydra-options` — extra hydra CLI options (advanced)
+  - `--remediate` — LLM remediation (steps + code snippets)
+  - `--no-llm` — disable LLM for this run
+  - `--max-remediations` (default: `5`) — cost control
+  - `--min-remediation-severity` (default: `MEDIUM`) — `CRITICAL|HIGH|MEDIUM|LOW|INFO`
+</details>
+
+<details>
+<summary><strong>react</strong> — ReAct loop (plan → act → summarize)</summary>
+
+```bash
+supabash react [OPTIONS] TARGET
+```
+
+- Arguments: `TARGET` (required) — IP / hostname / URL
+- Options:
+  - `--output`, `-o` — output JSON path (default: `reports/react-YYYYmmdd-HHMMSS.json`)
+  - `--markdown`, `-m` — output Markdown path (default: derived from `--output`)
+  - `--status/--no-status` (default: `--status`) — print live progress
+  - `--status-file` — write JSON status updates while running
+  - `--llm-plan` — LLM plans next actions iteratively (fails run if planning fails)
+  - `--no-llm` — disable LLM for this run
+  - `--force` — bypass allowed-hosts check
+  - `--allow-public` — allow public IP targets (authorized only)
+  - `--yes` — skip consent prompt
+  - `--mode` (default: `normal`) — `normal|stealth|aggressive`
+  - `--nuclei-rate` (default: `0`) — nuclei rate-limit (requests/sec)
+  - `--gobuster-threads` (default: `10`) — gobuster threads
+  - `--gobuster-wordlist` — gobuster wordlist path
+  - `--hydra` — opt-in bruteforce (requires explicit wordlists + authorization)
+  - `--hydra-usernames` — usernames file or single username
+  - `--hydra-passwords` — passwords file or single password
+  - `--hydra-services` (default: `ssh,ftp`) — comma-separated services
+  - `--hydra-threads` (default: `4`) — hydra `-t` parallel tasks
+  - `--hydra-options` — extra hydra CLI options (advanced)
+  - `--remediate` — LLM remediation (steps + code snippets)
+  - `--max-remediations` (default: `5`) — cost control
+  - `--min-remediation-severity` (default: `MEDIUM`) — `CRITICAL|HIGH|MEDIUM|LOW|INFO`
+  - `--max-actions` (default: `10`) — cap the loop length
+</details>
+
+<details>
+<summary><strong>chat</strong> — Interactive chat control plane</summary>
+
+```bash
+supabash chat
+```
+</details>
+
+<details>
+<summary><strong>doctor</strong> — Environment readiness checks</summary>
+
+```bash
+supabash doctor [--json] [--verbose]
+```
+</details>
+
+<details>
+<summary><strong>config</strong> — Configure provider, scope, consent</summary>
+
+```bash
+supabash config [OPTIONS]
+```
+
+- Options:
+  - `--provider`, `-p` — active LLM provider (e.g. `openai|ollama|lmstudio`)
+  - `--key`, `-k` — API key for the selected/active provider
+  - `--model`, `-m` — model for the selected/active provider
+  - `--api-base` — API base URL (OpenAI-compatible backends)
+  - `--allow-host` — add an allowed host/IP/CIDR entry
+  - `--remove-host` — remove an allowed host/IP/CIDR entry
+  - `--list-allowed-hosts` — show allowed hosts
+  - `--accept-consent` — persist `core.consent_accepted=true`
+  - `--reset-consent` — set `core.consent_accepted=false`
+  - `--allow-public-ips/--no-allow-public-ips` — toggle public-IP guardrail
+</details>
 
 ### Scanner Engine Selection
 Choose your recon engine with `--scanner`:
