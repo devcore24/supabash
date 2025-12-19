@@ -13,6 +13,10 @@ from .supabase_rls import SupabaseRLSChecker
 from .sslscan import SslscanScanner
 from .dnsenum import DnsenumScanner
 from .enum4linux_ng import Enum4linuxNgScanner
+from .ffuf import FfufScanner
+from .katana import KatanaScanner
+from .searchsploit import SearchsploitScanner
+from .subfinder import SubfinderScanner
 
 __all__ = [
     "NmapScanner",
@@ -30,4 +34,8 @@ __all__ = [
     "SslscanScanner",
     "DnsenumScanner",
     "Enum4linuxNgScanner",
+    "FfufScanner",
+    "KatanaScanner",
+    "SearchsploitScanner",
+    "SubfinderScanner",
 ]

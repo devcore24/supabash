@@ -20,6 +20,10 @@ RUSTSCAN_VERSION="${RUSTSCAN_VERSION:-2.4.1}"
 RUSTSCAN_REPO="${RUSTSCAN_REPO:-bee-san/RustScan}"
 HTTPX_VERSION="${HTTPX_VERSION:-latest}"
 HTTPX_REPO="${HTTPX_REPO:-projectdiscovery/httpx}"
+SUBFINDER_VERSION="${SUBFINDER_VERSION:-latest}"
+SUBFINDER_REPO="${SUBFINDER_REPO:-projectdiscovery/subfinder}"
+KATANA_VERSION="${KATANA_VERSION:-latest}"
+KATANA_REPO="${KATANA_REPO:-projectdiscovery/katana}"
 ENUM4LINUX_NG_VERSION="${ENUM4LINUX_NG_VERSION:-v1.3.7}"
 ENUM4LINUX_NG_REPO="${ENUM4LINUX_NG_REPO:-cddmp/enum4linux-ng}"
 # Optional: update nuclei templates for the invoking (non-root) user after install
@@ -116,6 +120,67 @@ download_url_to_tmp() {
     [ -s "${tmpdir}/${name}" ]
 }
 
+install_github_zip_binary() {
+    local name="$1"
+    local repo="$2"
+    local version="$3"
+    local pat_amd64="$4"
+    local pat_arm64="$5"
+
+    if command -v "$name" &> /dev/null; then
+        info "${name} is already installed."
+        return 0
+    fi
+
+    info "Installing ${name} from GitHub release..."
+    local arch asset_url asset_name tmpdir bin_path release_json
+    arch="$(uname -m)"
+    asset_url=""
+
+    if command -v jq &> /dev/null; then
+        release_json="$(fetch_github_release_json "$repo" "$version" || true)"
+        if [ -n "$release_json" ]; then
+            if [[ "$arch" == "x86_64" || "$arch" == "amd64" ]]; then
+                asset_url="$(pick_release_asset_url "$release_json" "$pat_amd64")"
+            elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+                asset_url="$(pick_release_asset_url "$release_json" "$pat_arm64")"
+            fi
+        fi
+    fi
+
+    if [ -z "$asset_url" ]; then
+        warn "Could not find a suitable ${name} release asset for arch=${arch} in repo=${repo} (version=${version})."
+        warn "Try installing manually: https://github.com/${repo}/releases"
+        return 1
+    fi
+
+    asset_name="$(basename "$asset_url")"
+    tmpdir="$(mktemp -d)"
+    download_url_to_tmp "$asset_url" "$tmpdir" "$asset_name" || true
+    if [ ! -s "${tmpdir}/${asset_name}" ]; then
+        warn "Failed to download ${name} package (${asset_name}). You may need to install it manually."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    unzip -q "${tmpdir}/${asset_name}" -d "${tmpdir}/${name}" || true
+    bin_path="$(find "${tmpdir}/${name}" -maxdepth 4 -type f -name "$name" | head -n 1)"
+    if [ -z "$bin_path" ]; then
+        warn "${name} archive did not contain a '${name}' binary (skipping)."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    $SUDO install -m 0755 "$bin_path" "/usr/local/bin/${name}"
+    rm -rf "$tmpdir"
+    if command -v "$name" &> /dev/null; then
+        success "${name} installed."
+        return 0
+    fi
+    warn "${name} install attempted, but ${name} is still not on PATH."
+    return 1
+}
+
 # 2. System Dependencies (APT)
 install_apt_deps() {
     info "Updating package lists..."
@@ -138,9 +203,11 @@ install_apt_deps() {
         sqlmap
         hydra
         gobuster
+        ffuf
         whatweb
         sslscan
         dnsenum
+        exploitdb
         # Add other standard tools here
     )
 
@@ -250,6 +317,12 @@ install_external_tools() {
     else
         info "httpx is already installed."
     fi
+
+    # Install subfinder (ProjectDiscovery subdomain discovery)
+    install_github_zip_binary "subfinder" "$SUBFINDER_REPO" "$SUBFINDER_VERSION" '^subfinder_.*_linux_amd64\\.zip$' '^subfinder_.*_linux_arm64\\.zip$' || true
+
+    # Install katana (ProjectDiscovery crawler)
+    install_github_zip_binary "katana" "$KATANA_REPO" "$KATANA_VERSION" '^katana_.*_linux_amd64\\.zip$' '^katana_.*_linux_arm64\\.zip$' || true
 
     # Install Trivy (Container Scanner)
     if ! command -v trivy &> /dev/null; then

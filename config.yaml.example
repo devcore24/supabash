@@ -52,3 +52,68 @@ chat:
   summary_keep_last_messages: 24
   max_summary_chars: 1200
   redact_secrets: true
+
+# Tool registry (enable/disable tools globally)
+# Notes:
+# - Some tools are conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL, nikto is slow/noisy).
+# - Both `enum4linux_ng` and `enum4linux-ng` key forms are accepted.
+tools:
+  nmap:
+    enabled: true
+    timeout_seconds: 600
+  masscan:
+    enabled: true
+    timeout_seconds: 600
+  rustscan:
+    enabled: true
+    timeout_seconds: 600
+  subfinder:
+    enabled: false
+    timeout_seconds: 600
+  httpx:
+    enabled: true
+    timeout_seconds: 300
+  whatweb:
+    enabled: true
+    timeout_seconds: 300
+  nuclei:
+    enabled: true
+    timeout_seconds: 1800
+  gobuster:
+    enabled: true
+    timeout_seconds: 1800
+  ffuf:
+    enabled: false
+    timeout_seconds: 1800
+  katana:
+    enabled: false
+    timeout_seconds: 1800
+    depth: 3
+    concurrency: 10
+  sqlmap:
+    enabled: true
+    timeout_seconds: 1800
+  nikto:
+    enabled: false
+    timeout_seconds: 1200
+  sslscan:
+    enabled: true
+    timeout_seconds: 600
+  dnsenum:
+    enabled: true
+    timeout_seconds: 900
+  enum4linux_ng:
+    enabled: true
+    timeout_seconds: 1200
+  searchsploit:
+    enabled: false
+    timeout_seconds: 120
+  trivy:
+    enabled: true
+    timeout_seconds: 1800
+  supabase_rls:
+    enabled: true
+    timeout_seconds: 10
+  hydra:
+    enabled: false
+    timeout_seconds: 3600

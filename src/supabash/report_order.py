@@ -8,11 +8,14 @@ DEFAULT_TOOL_ORDER: Tuple[str, ...] = (
     "nmap",
     "masscan",
     "rustscan",
+    "subfinder",
     # Web tooling
     "httpx",
     "whatweb",
     "nuclei",
     "gobuster",
+    "ffuf",
+    "katana",
     "nikto",
     # Conditional modules
     "dnsenum",
@@ -21,6 +24,7 @@ DEFAULT_TOOL_ORDER: Tuple[str, ...] = (
     # Optional / special
     "sqlmap",
     "hydra",
+    "searchsploit",
     "supabase_rls",
     "trivy",
 )

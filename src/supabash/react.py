@@ -187,6 +187,33 @@ class ReActOrchestrator(AuditOrchestrator):
             web_targets = [normalized["base_url"]]
         elif nmap_entry.get("success"):
             web_targets = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
+
+        # Optional domain expansion: subfinder can add candidates beyond nmap-derived ports.
+        if self._should_run_dnsenum(scan_host) and self._has_scanner("subfinder") and self._tool_enabled("subfinder", default=False):
+            try:
+                note("tool_start", "subfinder", "Running subfinder")
+            except Exception:
+                pass
+            sub_entry = self._run_tool(
+                "subfinder",
+                lambda: self.scanners["subfinder"].scan(
+                    scan_host,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("subfinder"),
+                ),
+            )
+            agg["results"].append(sub_entry)
+            try:
+                note("tool_end", "subfinder", "Finished subfinder")
+            except Exception:
+                pass
+            if sub_entry.get("success"):
+                hosts = sub_entry.get("data", {}).get("hosts")
+                if isinstance(hosts, list) and hosts:
+                    for h in [str(x).strip() for x in hosts[:50] if str(x).strip()]:
+                        for u in (f"http://{h}", f"https://{h}"):
+                            if u not in web_targets:
+                                web_targets.append(u)
         # Best-effort probe to validate endpoints before running web tools.
         if web_targets and self._has_scanner("httpx"):
             try:
@@ -244,14 +271,18 @@ class ReActOrchestrator(AuditOrchestrator):
 
         def llm_plan_next_steps(remaining: int) -> Dict[str, Any]:
             allowed_bases = [
+                "subfinder",
                 "httpx",
                 "whatweb",
                 "nuclei",
                 "gobuster",
+                "ffuf",
+                "katana",
                 "dnsenum",
                 "sslscan",
                 "enum4linux-ng",
                 "nikto",
+                "searchsploit",
                 "sqlmap",
                 "trivy",
                 "stop",
@@ -511,6 +542,42 @@ class ReActOrchestrator(AuditOrchestrator):
                         )
                 continue
 
+            if base == "ffuf":
+                if not web_targets:
+                    agg["results"].append(self._skip_tool("ffuf", "No web targets detected"))
+                else:
+                    agg["results"].append(
+                        run_or_skip(
+                            "ffuf",
+                            lambda: self.scanners["ffuf"].scan(
+                                web_targets[0],
+                                wordlist=gobuster_wordlist,
+                                threads=max(10, int(gobuster_threads)),
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("ffuf"),
+                            ),
+                        )
+                    )
+                continue
+
+            if base == "katana":
+                if not web_targets:
+                    agg["results"].append(self._skip_tool("katana", "No web targets detected"))
+                else:
+                    agg["results"].append(
+                        run_or_skip(
+                            "katana",
+                            lambda: self.scanners["katana"].crawl(
+                                web_targets[0],
+                                depth=int(self._tool_config("katana").get("depth", 3) or 3),
+                                concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("katana"),
+                            ),
+                        )
+                    )
+                continue
+
             if base == "sqlmap":
                 if normalized["sqlmap_url"]:
                     agg["results"].append(
@@ -525,6 +592,31 @@ class ReActOrchestrator(AuditOrchestrator):
                     )
                 else:
                     agg["results"].append(self._skip_tool("sqlmap", "No parameterized URL provided (include '?' in target URL)"))
+                continue
+
+            if base == "subfinder":
+                if not self._should_run_dnsenum(scan_host):
+                    agg["results"].append(self._skip_tool("subfinder", "Not a domain target"))
+                    continue
+                agg["results"].append(
+                    run_or_skip(
+                        "subfinder",
+                        lambda: self.scanners["subfinder"].scan(
+                            scan_host,
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("subfinder"),
+                        ),
+                    )
+                )
+                last = agg["results"][-1]
+                if last.get("success"):
+                    hosts = last.get("data", {}).get("hosts")
+                    if isinstance(hosts, list) and hosts:
+                        for h in [str(x).strip() for x in hosts[:50] if str(x).strip()]:
+                            for u in (f"http://{h}", f"https://{h}"):
+                                if u not in web_targets:
+                                    web_targets.append(u)
+                        agg["web_targets"] = web_targets
                 continue
 
             if base == "trivy":
@@ -652,6 +744,50 @@ class ReActOrchestrator(AuditOrchestrator):
                     )
                 else:
                     agg["results"].append(self._skip_tool("enum4linux-ng", "No SMB ports detected (139/445)"))
+                continue
+
+            if base == "searchsploit":
+                if not self._has_scanner("searchsploit"):
+                    agg["results"].append(self._skip_tool("searchsploit", "Scanner not available"))
+                    continue
+                if not nmap_entry.get("success"):
+                    agg["results"].append(self._skip_tool("searchsploit", "No nmap results to derive service fingerprints"))
+                    continue
+
+                scan_data = nmap_entry.get("data", {}).get("scan_data", {}) if isinstance(nmap_entry.get("data"), dict) else {}
+                queries: List[str] = []
+                for host in (scan_data or {}).get("hosts", []) or []:
+                    for p in host.get("ports", []) or []:
+                        try:
+                            if str(p.get("state", "")).lower() != "open":
+                                continue
+                            svc = str(p.get("service") or "").strip()
+                            prod = str(p.get("product") or "").strip()
+                            ver = str(p.get("version") or "").strip()
+                            if not (svc or prod):
+                                continue
+                            q = " ".join(x for x in (prod, ver, svc) if x).strip()
+                            if q and q not in queries:
+                                queries.append(q)
+                        except Exception:
+                            continue
+
+                if not queries:
+                    agg["results"].append(self._skip_tool("searchsploit", "No version/service fingerprints available"))
+                    continue
+
+                # Run a few bounded lookups (one result entry per query).
+                for q in queries[:3]:
+                    agg["results"].append(
+                        run_or_skip(
+                            "searchsploit",
+                            lambda q=q: self.scanners["searchsploit"].search(
+                                q,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("searchsploit"),
+                            ),
+                        )
+                    )
                 continue
 
             if base == "nikto":

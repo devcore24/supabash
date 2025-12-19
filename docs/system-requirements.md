@@ -10,13 +10,13 @@ sudo apt-get update -y
 sudo apt-get install -y \\
   python3 python3-pip python3-venv \\
   git curl wget jq unzip \\
-  nmap masscan nikto sqlmap hydra gobuster whatweb \\
+  nmap masscan nikto sqlmap hydra gobuster ffuf whatweb \\
   sslscan dnsenum
 ```
 
 Notes:
 - On Ubuntu, you may need to enable `universe` for some packages: `sudo add-apt-repository universe && sudo apt-get update -y`.
-- `rustscan`, `httpx`, `nuclei`, `trivy`, and `enum4linux` are not consistently available as APT packages across distros/versions; `install.sh` includes a working automated path for these.
+- `rustscan`, `httpx`, `nuclei`, `trivy`, `enum4linux`, `ffuf`, and `searchsploit` are not consistently available as APT packages across distros/versions; `install.sh` includes automated install paths for several of these, and will skip (with warnings) anything it can’t find.
 - Ubuntu 24.04 does not ship `enum4linux` as an APT package in many setups; prefer `enum4linux-ng` (installed by `install.sh`).
 - Some tools are listed in README as a planned toolset but not all wrappers are implemented yet.
 
@@ -33,11 +33,39 @@ sudo install -m 0755 /tmp/httpx/httpx /usr/local/bin/httpx
 rm -rf /tmp/httpx /tmp/httpx.zip
 ```
 
+#### subfinder (subdomain discovery)
+Install from GitHub release (Linux example):
+```bash
+tag="$(curl -fsSL https://api.github.com/repos/projectdiscovery/subfinder/releases/latest | jq -r .tag_name)"
+ver="${tag#v}"
+curl -fsSL -o /tmp/subfinder.zip "https://github.com/projectdiscovery/subfinder/releases/download/${tag}/subfinder_${ver}_linux_amd64.zip"
+unzip -q /tmp/subfinder.zip -d /tmp/subfinder
+sudo install -m 0755 /tmp/subfinder/subfinder /usr/local/bin/subfinder
+rm -rf /tmp/subfinder /tmp/subfinder.zip
+```
+
+#### katana (crawler/spider)
+Install from GitHub release (Linux example):
+```bash
+tag="$(curl -fsSL https://api.github.com/repos/projectdiscovery/katana/releases/latest | jq -r .tag_name)"
+ver="${tag#v}"
+curl -fsSL -o /tmp/katana.zip "https://github.com/projectdiscovery/katana/releases/download/${tag}/katana_${ver}_linux_amd64.zip"
+unzip -q /tmp/katana.zip -d /tmp/katana
+sudo install -m 0755 /tmp/katana/katana /usr/local/bin/katana
+rm -rf /tmp/katana /tmp/katana.zip
+```
+
 #### enum4linux-ng (SMB enumeration)
 ```bash
 sudo apt-get install -y smbclient samba-common-bin python3-impacket python3-ldap3 python3-yaml
 sudo curl -fsSL https://raw.githubusercontent.com/cddmp/enum4linux-ng/v1.3.7/enum4linux-ng.py -o /usr/local/bin/enum4linux-ng
 sudo chmod +x /usr/local/bin/enum4linux-ng
+```
+
+#### searchsploit (Exploit-DB offline reference search)
+On Kali Linux, `searchsploit` is commonly available via:
+```bash
+sudo apt-get install -y exploitdb
 ```
 
 ## Python dependencies

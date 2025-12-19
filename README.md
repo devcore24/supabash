@@ -13,15 +13,14 @@
 ```
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![License](https://img.shields.io/badge/License-MIT-green)
-![Status](https://img.shields.io/badge/Status-WIP-orange)
+![License](https://img.shields.io/badge/License-AGPLv3-blue)
+![Status](https://img.shields.io/badge/Status-Beta-orange)
 
 > **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.  
 > Progress: `[███████████████████▉]` **99%**
 
 **Supabash** is an autonomous AI Security Agent designed for developers, pentesters, DevOps engineers, Red and Blue Teams who want to **automate security audits** without sacrificing depth or understanding. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
-**Don't just find the vulnerability. Bash it, understand it, and fix it.**
 
 ---
 
@@ -43,6 +42,7 @@ Supabash aims to orchestrate the following tools over time (not all wrappers are
 *   **Nmap** (Network mapping & service detection)
 *   **Masscan** (High-speed port scanning)
 *   **Rustscan** (Modern, fast port scanner)
+*   **subfinder** (Subdomain discovery)
 *   **httpx** (HTTP probing / alive endpoints)
 *   **Netdiscover** (ARP reconnaissance)
 *   **Dnsenum** (DNS enumeration)
@@ -53,6 +53,8 @@ Supabash aims to orchestrate the following tools over time (not all wrappers are
 *   **Metasploit Framework** (Exploitation & validation)
 *   **Sqlmap** (Automated SQL injection)
 *   **Gobuster** (Directory & file brute-forcing)
+*   **ffuf** (Fast content discovery / fuzzing)
+*   **katana** (Crawling / spidering)
 *   **Nikto** (Web server scanning)
 *   **WPScan** (WordPress security scanner)
 *   **Nuclei** (Template-based vulnerability scanning)
@@ -435,6 +437,11 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - LLM context/cost controls: set `llm.max_input_chars` to cap tool output sent to the LLM; LLM token usage + estimated USD cost are recorded in audit reports.
 - Chat memory controls: `chat.llm_history_turns`, `chat.summary_every_turns`, `chat.history_max_messages`. For local models, set `llm.max_input_tokens` if you want accurate context % reporting.
 - LLM caching (optional): enable with `llm.cache_enabled=true` (and optionally set `llm.cache_ttl_seconds`, `llm.cache_max_entries`, `llm.cache_dir`) to reuse identical LLM responses and reduce cost.
+- LLM payload + caching knobs (advanced):
+  - `llm.max_input_chars` — hard cap (characters) on what gets sent to the LLM per request (higher = more context/cost).
+  - `llm.max_input_tokens` — fallback token window size used only for showing chat “context %” when the model limit can’t be detected (common for local servers); `0` disables the fallback.
+  - `llm.cache_enabled` — enable/disable caching of identical LLM calls.
+  - `llm.cache_ttl_seconds` / `llm.cache_max_entries` — cache retention controls (time-to-live and max number of entries).
 - Tune web tooling: `supabash audit ... --nuclei-rate 10 --gobuster-threads 20` (and optionally `--gobuster-wordlist /path/to/list`).
 - Parallelize web tools: `supabash audit ... --parallel-web --max-workers 3` (URL targets can overlap recon with web tooling).
 - Safety caps (aggressive mode): Supabash enforces global caps (rate limits / concurrency) in `--mode aggressive`; configure via `core.aggressive_caps` in `config.yaml`.
@@ -446,6 +453,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.
 - **Recon engines (scan mode):** Nmap, Masscan, Rustscan
 - **Wrappers implemented:** Nikto (opt-in via `--nikto`), Hydra (opt-in via `--hydra` + explicit wordlists)
+- **Optional additions (opt-in):** `ffuf` fallback for content discovery when Gobuster fails (`tools.ffuf.enabled=true`); `katana` crawl/spider for endpoint expansion (`tools.katana.enabled=true`); `subfinder` subdomain discovery (`tools.subfinder.enabled=true`); `searchsploit` offline exploit references derived from service fingerprints (`tools.searchsploit.enabled=true`)
 - **LLM integration:** litellm-based client with config-driven provider/model selection
 - **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
 - **Reporting:** timestamped JSON + Markdown reports under `reports/` (includes exact commands executed for auditability)
@@ -477,6 +485,12 @@ When Supabash detects an issue, it provides context and solutions:
 **Supabash is for educational purposes and authorized security auditing only.**
 
 Usage of Supabash for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state, and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program.
+
+---
+
+## 📄 License
+
+Supabash is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See `LICENSE`.
 
 ---
 

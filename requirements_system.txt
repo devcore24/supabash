@@ -2,16 +2,22 @@
 nmap
 masscan
 rustscan
+subfinder
+katana
 httpx
 nikto
 sqlmap
 hydra
 gobuster
+ffuf
 whatweb
 sslscan
 dnsenum
 # SMB enumeration (optional)
 enum4linux-ng
+
+# Exploit reference lookup (optional; provides `searchsploit`)
+exploitdb
 
 # Wireless (Optional)
 aircrack-ng

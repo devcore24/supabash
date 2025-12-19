@@ -1690,12 +1690,16 @@ def doctor(
         ("sqlmap", False),
         ("masscan", False),
         ("rustscan", False),
+        ("subfinder", False),
         ("httpx", False),
         ("nikto", False),
         ("hydra", False),
         ("trivy", False),
         ("sslscan", False),
         ("dnsenum", False),
+        ("ffuf", False),
+        ("katana", False),
+        ("searchsploit", False),
     ]
 
     for bin_name, req in required_bins + optional_bins:

@@ -60,10 +60,16 @@ DEFAULT_CONFIG = {
         "nmap": {"enabled": True, "timeout_seconds": 600},
         "masscan": {"enabled": True, "timeout_seconds": 600},
         "rustscan": {"enabled": True, "timeout_seconds": 600},
+        # Subdomain discovery (domain targets only; many sources require API keys)
+        "subfinder": {"enabled": False, "timeout_seconds": 600},
         "httpx": {"enabled": True, "timeout_seconds": 300},
         "whatweb": {"enabled": True, "timeout_seconds": 300},
         "nuclei": {"enabled": True, "timeout_seconds": 1800},
         "gobuster": {"enabled": True, "timeout_seconds": 1800},
+        # Content discovery (alternative/fallback to gobuster; keep opt-in by default to reduce noise)
+        "ffuf": {"enabled": False, "timeout_seconds": 1800},
+        # Crawling/spidering (attack-surface expansion; opt-in for noise control)
+        "katana": {"enabled": False, "timeout_seconds": 1800, "depth": 3, "concurrency": 10},
         "sqlmap": {"enabled": True, "timeout_seconds": 1800},
         # Slow/noisy: keep opt-in by default
         "nikto": {"enabled": False, "timeout_seconds": 1200},
@@ -71,6 +77,8 @@ DEFAULT_CONFIG = {
         "dnsenum": {"enabled": True, "timeout_seconds": 900},
         # Prefer underscore in config keys for readability; both forms are accepted by the runtime.
         "enum4linux_ng": {"enabled": True, "timeout_seconds": 1200},
+        # Informational only: offline exploit reference lookups based on service fingerprints (opt-in)
+        "searchsploit": {"enabled": False, "timeout_seconds": 120},
         "trivy": {"enabled": True, "timeout_seconds": 1800},
         "supabase_rls": {"enabled": True, "timeout_seconds": 10},
         # Credentials brute forcing should remain opt-in/manual for safety.

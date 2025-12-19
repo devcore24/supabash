@@ -46,6 +46,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
         - [x] Masscan wrapper with list-output parser.
         - [x] Rustscan wrapper with greppable parser.
     - [x] **CLI Integration:** Allow selecting Nmap/Masscan/Rustscan via `--scanner`.
+    - [x] **Subfinder:** Subdomain discovery (opt-in; best results with provider API keys).
     - [x] **HTTP Probing:** Add `httpx` wrapper to validate live web URLs before web tools run.
     - [x] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
     - [x] **TLS Checks:** Add `sslscan` wrapper (runs when 443/8443 detected).
@@ -55,6 +56,9 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] **Nikto:** Wrapper for server config scanning.
     - [x] **Nuclei:** Wrapper for template-based scanning (Crucial for modern CVEs).
     - [x] **Gobuster:** Wrapper for directory brute-forcing.
+    - [x] **ffuf:** Wrapper for content discovery (opt-in; can be used as a fallback when Gobuster fails).
+    - [x] **Katana:** Wrapper for crawling/spidering (opt-in; expands attack surface beyond brute-force).
+    - [x] **Searchsploit:** Wrapper for offline exploit reference lookup (opt-in; informational only, no exploitation).
 - [x] **SQL & Auth Wrappers**
     - [x] **Sqlmap:** Wrapper for automated SQL injection detection.
     - [x] **Hydra:** Wrapper for service authentication brute-forcing.
@@ -207,3 +211,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] **enum4linux-ng:** SMB enumeration helper (run only when 445/139 are open).
 - [x] Wire **Nikto** into the audit flow (opt-in via `--nikto`, runs on discovered web targets).
 - [x] Wire **Hydra** into the workflow (opt-in; requires explicit user-provided credential lists).
+- [x] Add **ffuf** (opt-in content discovery; fallback when Gobuster refuses wildcard/soft-404 targets).
+- [x] Add **subfinder** (opt-in subdomain discovery; feeds additional web targets into probing).
+- [x] Add **katana** (opt-in crawl/spider to expand discovered endpoints).
+- [x] Add **Searchsploit** (opt-in offline exploit reference lookup derived from service fingerprints).

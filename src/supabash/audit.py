@@ -14,14 +14,18 @@ from supabash.tools import (
     HttpxScanner,
     NucleiScanner,
     GobusterScanner,
+    FfufScanner,
+    KatanaScanner,
     SqlmapScanner,
     HydraRunner,
     NiktoScanner,
     SslscanScanner,
     DnsenumScanner,
     Enum4linuxNgScanner,
+    SubfinderScanner,
     TrivyScanner,
     SupabaseRLSChecker,
+    SearchsploitScanner,
 )
 from supabash.llm import LLMClient
 from supabash import prompts
@@ -50,14 +54,18 @@ class AuditOrchestrator:
             "httpx": HttpxScanner(),
             "nuclei": NucleiScanner(),
             "gobuster": GobusterScanner(),
+            "ffuf": FfufScanner(),
+            "katana": KatanaScanner(),
             "sqlmap": SqlmapScanner(),
             "hydra": HydraRunner(),
             "nikto": NiktoScanner(),
             "sslscan": SslscanScanner(),
             "dnsenum": DnsenumScanner(),
             "enum4linux-ng": Enum4linuxNgScanner(),
+            "subfinder": SubfinderScanner(),
             "trivy": TrivyScanner(),
             "supabase_rls": SupabaseRLSChecker(),
+            "searchsploit": SearchsploitScanner(),
         }
         self.llm = llm_client or LLMClient()
 
@@ -562,6 +570,28 @@ class AuditOrchestrator:
                         "evidence": path,
                         "tool": "gobuster",
                     })
+            # ffuf paths (content discovery)
+            if tool == "ffuf":
+                for path in data.get("findings", []):
+                    findings.append(
+                        {
+                            "severity": "INFO",
+                            "title": "Discovered path",
+                            "evidence": str(path),
+                            "tool": "ffuf",
+                        }
+                    )
+            # katana endpoints (crawl)
+            if tool == "katana":
+                for url in (data.get("urls") or data.get("findings") or [])[:200]:
+                    findings.append(
+                        {
+                            "severity": "INFO",
+                            "title": "Discovered endpoint",
+                            "evidence": str(url),
+                            "tool": "katana",
+                        }
+                    )
             # WhatWeb tech stack
             if tool == "whatweb":
                 for entry in data.get("scan_data", []):
@@ -573,6 +603,39 @@ class AuditOrchestrator:
                         "evidence": tech,
                         "tool": "whatweb",
                     })
+            # Searchsploit (offline exploit references)
+            if tool == "searchsploit":
+                for f in data.get("findings", []) or []:
+                    if not isinstance(f, dict):
+                        continue
+                    title = str(f.get("title") or "").strip()
+                    path = str(f.get("path") or "").strip()
+                    kind = str(f.get("kind") or "").strip()
+                    if not title and not path:
+                        continue
+                    evidence = title
+                    if path:
+                        evidence = f"{evidence} ({path})" if evidence else path
+                    findings.append(
+                        {
+                            "severity": "INFO",
+                            "title": "Potential exploit reference",
+                            "evidence": evidence,
+                            "tool": "searchsploit",
+                            "type": kind or None,
+                        }
+                    )
+            # subfinder subdomains
+            if tool == "subfinder":
+                for host in (data.get("hosts") or data.get("findings") or [])[:200]:
+                    findings.append(
+                        {
+                            "severity": "INFO",
+                            "title": "Discovered subdomain",
+                            "evidence": str(host),
+                            "tool": "subfinder",
+                        }
+                    )
             # Supabase RLS check
             if tool == "supabase_rls":
                 if data.get("risk"):
@@ -785,6 +848,78 @@ class AuditOrchestrator:
                         return results
             return results
 
+        def run_searchsploit_from_nmap(nmap_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+            """
+            Best-effort offline exploit reference lookup for detected services.
+            Kept INFO-only and bounded to avoid noisy/slow behavior.
+            """
+            if not self._has_scanner("searchsploit"):
+                return [self._skip_tool("searchsploit", "Scanner not available")]
+            if not self._tool_enabled("searchsploit", default=False):
+                return [self._skip_disabled("searchsploit")]
+            if not nmap_entry or not nmap_entry.get("success"):
+                return [self._skip_tool("searchsploit", "No nmap results to derive service fingerprints")]
+
+            data = nmap_entry.get("data") if isinstance(nmap_entry.get("data"), dict) else {}
+            scan_data = data.get("scan_data", {}) if isinstance(data, dict) else {}
+
+            queries: List[str] = []
+            for host in (scan_data or {}).get("hosts", []) or []:
+                for p in host.get("ports", []) or []:
+                    try:
+                        if str(p.get("state", "")).lower() != "open":
+                            continue
+                        svc = str(p.get("service") or "").strip()
+                        prod = str(p.get("product") or "").strip()
+                        ver = str(p.get("version") or "").strip()
+                        if not (svc or prod):
+                            continue
+                        q = " ".join(x for x in (prod, ver, svc) if x).strip()
+                        if q and q not in queries:
+                            queries.append(q)
+                    except Exception:
+                        continue
+
+            if not queries:
+                return [self._skip_tool("searchsploit", "No version/service fingerprints available")]
+
+            results: List[Dict[str, Any]] = []
+            for q in queries[:5]:
+                note("tool_start", "searchsploit", f"Running searchsploit for: {q}")
+                results.append(
+                    self._run_tool(
+                        "searchsploit",
+                        lambda q=q: self.scanners["searchsploit"].search(
+                            q,
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("searchsploit"),
+                        ),
+                    )
+                )
+                note("tool_end", "searchsploit", f"Finished searchsploit for: {q}")
+                if canceled():
+                    break
+            return results
+
+        def run_subfinder(domain_target: str) -> Dict[str, Any]:
+            if not self._has_scanner("subfinder"):
+                return self._skip_tool("subfinder", "Scanner not available")
+            if not self._tool_enabled("subfinder", default=False):
+                return self._skip_disabled("subfinder")
+            if not self._should_run_dnsenum(domain_target):
+                return self._skip_tool("subfinder", "Not a domain target")
+            note("tool_start", "subfinder", "Running subfinder")
+            entry = self._run_tool(
+                "subfinder",
+                lambda: self.scanners["subfinder"].scan(
+                    domain_target,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("subfinder"),
+                ),
+            )
+            note("tool_end", "subfinder", "Finished subfinder")
+            return entry
+
         def run_web_tools(web_target: str) -> List[Dict[str, Any]]:
             if not parallel_web:
                 # Sequential (default)
@@ -842,6 +977,43 @@ class AuditOrchestrator:
                     )
                 note("tool_end", "gobuster", "Finished gobuster")
                 results.append(gobuster_entry)
+
+                # Optional fallback: ffuf (-ac) can handle wildcard/soft-404 responses
+                # where gobuster refuses to continue.
+                if (
+                    not gobuster_entry.get("success")
+                    and self._has_scanner("ffuf")
+                    and self._tool_enabled("ffuf", default=False)
+                ):
+                    note("tool_start", "ffuf", "Running ffuf (fallback for content discovery)")
+                    ffuf_entry = self._run_tool(
+                        "ffuf",
+                        lambda: self.scanners["ffuf"].scan(
+                            web_target,
+                            wordlist=gobuster_wordlist,
+                            threads=max(10, int(gobuster_threads)),
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("ffuf"),
+                        ),
+                    )
+                    note("tool_end", "ffuf", "Finished ffuf")
+                    results.append(ffuf_entry)
+
+                if self._has_scanner("katana"):
+                    note("tool_start", "katana", "Running katana (crawl)")
+                    results.append(
+                        self._run_tool_if_enabled(
+                            "katana",
+                            lambda: self.scanners["katana"].crawl(
+                                web_target,
+                                depth=int(self._tool_config("katana").get("depth", 3) or 3),
+                                concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("katana"),
+                            ),
+                        )
+                    )
+                    note("tool_end", "katana", "Finished katana")
                 return results
 
             # Parallel web tooling
@@ -962,6 +1134,12 @@ class AuditOrchestrator:
                 agg["open_ports"] = open_ports
                 for entry in run_hydra_from_nmap(nmap_entry):
                     agg["results"].append(entry)
+                for entry in run_searchsploit_from_nmap(nmap_entry):
+                    agg["results"].append(entry)
+
+                # Optional domain expansion (does not block web tooling already started)
+                if self._tool_enabled("subfinder", default=False) and self._has_scanner("subfinder") and self._should_run_dnsenum(scan_host):
+                    agg["results"].append(run_subfinder(scan_host))
 
                 if self._should_run_dnsenum(scan_host):
                     if self._has_scanner("dnsenum"):
@@ -1061,7 +1239,26 @@ class AuditOrchestrator:
                 return agg
 
             if not web_targets and nmap_entry.get("success"):
-                web_targets = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
+                web_targets = []
+
+            if nmap_entry.get("success"):
+                # Domain enumeration (opt-in): expand candidates beyond nmap-derived ports.
+                if self._tool_enabled("subfinder", default=False) and self._has_scanner("subfinder") and self._should_run_dnsenum(scan_host):
+                    subfinder_entry = run_subfinder(scan_host)
+                    agg["results"].append(subfinder_entry)
+                    if subfinder_entry.get("success"):
+                        hosts = subfinder_entry.get("data", {}).get("hosts", [])
+                        if isinstance(hosts, list) and hosts:
+                            # Bound the candidate explosion to keep httpx reasonable.
+                            for h in [str(x).strip() for x in hosts[:50] if str(x).strip()]:
+                                web_targets.append(f"http://{h}")
+                                web_targets.append(f"https://{h}")
+
+                # Always include nmap-derived web targets too.
+                derived = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
+                for u in derived:
+                    if u not in web_targets:
+                        web_targets.append(u)
                 agg["web_targets"] = web_targets
 
             # Probe derived web targets (best-effort) to avoid false-positives from service detection.
@@ -1088,6 +1285,8 @@ class AuditOrchestrator:
                 open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {}))
                 agg["open_ports"] = open_ports
                 for entry in run_hydra_from_nmap(nmap_entry):
+                    agg["results"].append(entry)
+                for entry in run_searchsploit_from_nmap(nmap_entry):
                     agg["results"].append(entry)
 
                 # DNS enumeration (domain targets)
