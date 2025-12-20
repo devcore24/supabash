@@ -112,7 +112,11 @@ class TestAuditParallelWeb(unittest.TestCase):
             max_workers=3,
         )
 
-        tools = [r.get("tool") for r in report.get("results", []) if isinstance(r, dict)]
+        tools = [
+            r.get("tool")
+            for r in report.get("results", [])
+            if isinstance(r, dict) and not r.get("skipped")
+        ]
         self.assertGreaterEqual(len(tools), 4)
         self.assertEqual(tools[0], "nmap")
         self.assertEqual(tools[1], "whatweb")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Constants
 APP_NAME = "supabash"
-LOG_DIR = Path.home() / f".{APP_NAME}" / "logs"
+LOG_DIR = Path(os.getenv("SUPABASH_LOG_DIR", Path.cwd()))
 LOG_FILE = LOG_DIR / "debug.log"
 # Shared rotating handler to prevent duplicates across modules
 _file_handler = None
@@ -22,7 +22,7 @@ def _resolve_level(level_name: str) -> int:
 def setup_logger(name: str = APP_NAME, log_level: str = None) -> logging.Logger:
     """
     Sets up a rotating file logger for the application.
-    Logs are stored in ~/.supabash/logs/debug.log
+    Logs are stored in ./debug.log by default (override with SUPABASH_LOG_DIR).
     """
     effective_level = _resolve_level(log_level or os.getenv("SUPABASH_LOG_LEVEL", "INFO"))
 

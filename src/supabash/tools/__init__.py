@@ -22,6 +22,8 @@ from .theharvester import TheHarvesterScanner
 from .netdiscover import NetdiscoverScanner
 from .crackmapexec import CrackMapExecScanner
 from .medusa import MedusaRunner
+from .scoutsuite import ScoutSuiteScanner
+from .prowler import ProwlerScanner
 
 __all__ = [
     "NmapScanner",
@@ -48,4 +50,6 @@ __all__ = [
     "NetdiscoverScanner",
     "CrackMapExecScanner",
     "MedusaRunner",
+    "ScoutSuiteScanner",
+    "ProwlerScanner",
 ]

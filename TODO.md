@@ -204,6 +204,9 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Improve Markdown report styling (anchors, tables, collapsible sections).
 - [x] Add explicit offline/no-LLM mode (graceful degradation).
 - [x] Add more opt-in integration targets beyond Juice Shop.
+- [x] Add OSINT/LAN CLI flags for theHarvester + netdiscover.
+- [x] Add opt-in CLI flags for Medusa + CrackMapExec with report findings.
+- [x] Add cloud posture tooling (ScoutSuite + Prowler) with opt-in flags and report findings.
 
 ### Next Tool Additions (Planned)
 - [x] **sslscan:** TLS configuration checks (run only when HTTPS ports are open).
@@ -220,6 +223,8 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add **Netdiscover** (ARP reconnaissance for local network host discovery).
 - [x] Add **CrackMapExec/NetExec** (AD/Windows post-exploitation; SMB enumeration, pass-the-hash).
 - [x] Add **Medusa** (parallel network login brute-forcer; alternative to Hydra).
+- [x] Add **ScoutSuite** (multi-cloud posture assessment; AWS/Azure/GCP).
+- [x] Add **Prowler** (AWS security best-practice checks).
 
 ### Future Tool Additions (Backlog)
 - [ ] **Recon-ng:** Web reconnaissance framework with modular OSINT capabilities.

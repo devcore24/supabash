@@ -111,6 +111,15 @@ tools:
   trivy:
     enabled: true
     timeout_seconds: 1800
+  scoutsuite:
+    enabled: false
+    timeout_seconds: 3600
+    provider: aws
+    # arguments: "--regions us-east-1"
+  prowler:
+    enabled: false
+    timeout_seconds: 3600
+    # arguments: "--severity high"
   supabase_rls:
     enabled: true
     timeout_seconds: 10

@@ -732,6 +732,44 @@ HARVESTER_EOF
         info "CrackMapExec/NetExec is already installed."
     fi
 
+    # Install ScoutSuite (multi-cloud audit)
+    if ! command -v scout &> /dev/null && ! command -v ScoutSuite &> /dev/null; then
+        info "Installing ScoutSuite..."
+        $SUDO apt-get install -y python3-pip python3-venv python3-dev || true
+        if command -v pipx &> /dev/null; then
+            pipx install scoutsuite || pipx install ScoutSuite || true
+        else
+            $SUDO pip3 install scoutsuite --break-system-packages 2>/dev/null || \
+            $SUDO pip3 install scoutsuite || true
+        fi
+        if command -v scout &> /dev/null || command -v ScoutSuite &> /dev/null; then
+            success "ScoutSuite installed."
+        else
+            warn "ScoutSuite install attempted, but 'scout' is not on PATH. Try: pipx install scoutsuite"
+        fi
+    else
+        info "ScoutSuite is already installed."
+    fi
+
+    # Install Prowler (AWS audits)
+    if ! command -v prowler &> /dev/null; then
+        info "Installing Prowler..."
+        $SUDO apt-get install -y python3-pip python3-venv python3-dev || true
+        if command -v pipx &> /dev/null; then
+            pipx install prowler || true
+        else
+            $SUDO pip3 install prowler --break-system-packages 2>/dev/null || \
+            $SUDO pip3 install prowler || true
+        fi
+        if command -v prowler &> /dev/null; then
+            success "Prowler installed."
+        else
+            warn "Prowler install attempted, but 'prowler' is not on PATH. Try: pipx install prowler"
+        fi
+    else
+        info "Prowler is already installed."
+    fi
+
     # Install enum4linux-ng (optional SMB enumeration helper)
     if ! command -v enum4linux-ng &> /dev/null && ! command -v enum4linux &> /dev/null; then
         info "Installing enum4linux-ng from GitHub..."

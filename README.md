@@ -94,6 +94,8 @@ Supabash orchestrates the following security tools. **26 wrappers are currently 
 *   🔜 **Loot Manager** (Automated evidence collection)
 
 ### 📦 Container & Cloud
+*   ✅ **ScoutSuite** (Multi-cloud posture assessment)
+*   ✅ **Prowler** (AWS security best-practice checks)
 *   ✅ **Trivy** (Container image CVE scanning)
 *   ✅ **Supabase RLS** (Row-Level Security checker)
 
@@ -137,6 +139,7 @@ Enable exports:
 ```bash
 supabash doctor
 supabash doctor --json
+supabash doctor --verbose
 ```
 
 ### Manual Installation
@@ -196,6 +199,17 @@ supabash audit 192.168.1.10 --yes --remediate --max-remediations 5 --min-remedia
 supabash audit "http://192.168.1.10" --yes --nikto
 # opt-in: credential bruteforce (high impact/noisy; requires explicit authorization + wordlists)
 supabash audit 192.168.1.10 --yes --hydra --hydra-services ssh --hydra-usernames users.txt --hydra-passwords passwords.txt
+# opt-in: medusa bruteforce (defaults module/port from nmap)
+supabash audit 192.168.1.10 --yes --medusa --medusa-usernames users.txt --medusa-passwords passwords.txt
+# opt-in: CrackMapExec/NetExec (with creds or explicit args)
+supabash audit 192.168.1.10 --yes --crackmapexec --cme-username admin --cme-password secret --cme-protocol smb --cme-enum shares,users
+# opt-in: OSINT (domain targets only)
+supabash audit example.com --yes --theharvester --theharvester-sources crtsh,otx
+# opt-in: LAN discovery (private CIDR; requires sudo)
+sudo supabash audit 192.168.1.10 --yes --netdiscover --netdiscover-range 192.168.1.0/24
+# opt-in: cloud posture checks (requires cloud credentials)
+supabash audit 192.168.1.10 --yes --scoutsuite --scoutsuite-provider aws
+supabash audit 192.168.1.10 --yes --prowler
 ```
 Note: by default Supabash writes `reports/report-YYYYmmdd-HHMMSS.json` and `reports/report-YYYYmmdd-HHMMSS.md`. Avoid running `supabash audit` with `sudo` unless you need root-only scan modes; otherwise your report files may be owned by root.
 If web tools show `Executable not found`, install system requirements via `install.sh` or `docs/system-requirements.md`.
@@ -219,6 +233,15 @@ supabash react localhost --yes --status-file reports/react_status.json
 supabash react localhost --yes --llm-plan   # LLM-driven planning (requires configured provider/key)
 # opt-in: allow planned hydra steps to execute (requires explicit authorization + wordlists)
 supabash react 192.168.1.10 --yes --hydra --hydra-usernames users.txt --hydra-passwords passwords.txt
+# opt-in: medusa + crackmapexec
+supabash react 192.168.1.10 --yes --medusa --medusa-usernames users.txt --medusa-passwords passwords.txt
+supabash react 192.168.1.10 --yes --crackmapexec --cme-username admin --cme-password secret --cme-protocol smb
+# opt-in: OSINT + LAN discovery
+supabash react example.com --yes --theharvester
+sudo supabash react 192.168.1.10 --yes --netdiscover --netdiscover-range 192.168.1.0/24
+# opt-in: cloud posture checks (requires cloud credentials)
+supabash react 192.168.1.10 --yes --scoutsuite --scoutsuite-provider aws
+supabash react 192.168.1.10 --yes --prowler
 ```
 Note: ReAct writes `reports/react-YYYYmmdd-HHMMSS.json` and `reports/react-YYYYmmdd-HHMMSS.md` by default.
 
@@ -317,6 +340,40 @@ supabash audit [OPTIONS] TARGET
   - `--hydra-services` (default: `ssh,ftp`) — comma-separated services
   - `--hydra-threads` (default: `4`) — hydra `-t` parallel tasks
   - `--hydra-options` — extra hydra CLI options (advanced)
+  - `--medusa` — opt-in Medusa bruteforce (defaults module/port from nmap)
+  - `--medusa-usernames` — usernames file or single username
+  - `--medusa-passwords` — passwords file or single password
+  - `--medusa-module` — explicit module/service (optional)
+  - `--medusa-port` — explicit port (optional)
+  - `--medusa-threads` (default: `4`) — medusa `-t` threads
+  - `--medusa-timeout` (default: `10`) — timeout per connection (seconds)
+  - `--medusa-options` — extra medusa CLI options
+  - `--crackmapexec`, `--cme` — opt-in CrackMapExec/NetExec
+  - `--cme-protocol` (default: `smb`) — protocol (`smb|ssh|ldap|winrm|mssql|rdp`)
+  - `--cme-username` — username
+  - `--cme-password` — password
+  - `--cme-domain` — domain
+  - `--cme-hashes` — NTLM hashes (LM:NT or NT)
+  - `--cme-module` — module to run
+  - `--cme-module-options` — module options
+  - `--cme-enum` — enumeration flags (comma-separated)
+  - `--cme-args` — extra CME args (allows anonymous runs)
+  - `--theharvester` — opt-in OSINT (domain targets only)
+  - `--theharvester-sources` — comma-separated data sources
+  - `--theharvester-limit` — results per source (default: 500)
+  - `--theharvester-start` — start index (default: 0)
+  - `--theharvester-args` — extra theHarvester CLI args
+  - `--netdiscover` — opt-in LAN discovery (private CIDR only; requires sudo)
+  - `--netdiscover-range` — CIDR range (e.g. `192.168.1.0/24`)
+  - `--netdiscover-interface` — network interface (e.g. `eth0`)
+  - `--netdiscover-passive` — passive sniffing mode
+  - `--netdiscover-fast/--netdiscover-no-fast` — fast mode toggle
+  - `--netdiscover-args` — extra netdiscover CLI args
+  - `--scoutsuite` — opt-in ScoutSuite (multi-cloud)
+  - `--scoutsuite-provider` (default: `aws`) — `aws|azure|gcp`
+  - `--scoutsuite-args` — extra ScoutSuite CLI arguments
+  - `--prowler` — opt-in Prowler (AWS)
+  - `--prowler-args` — extra Prowler CLI arguments
   - `--remediate` — LLM remediation (steps + code snippets)
   - `--no-llm` — disable LLM for this run
   - `--agentic`, `--react` — agentic audit mode (baseline + bounded expansion)
@@ -368,6 +425,40 @@ supabash react [OPTIONS] TARGET
   - `--hydra-services` (default: `ssh,ftp`) — comma-separated services
   - `--hydra-threads` (default: `4`) — hydra `-t` parallel tasks
   - `--hydra-options` — extra hydra CLI options (advanced)
+  - `--medusa` — opt-in Medusa bruteforce (defaults module/port from nmap)
+  - `--medusa-usernames` — usernames file or single username
+  - `--medusa-passwords` — passwords file or single password
+  - `--medusa-module` — explicit module/service (optional)
+  - `--medusa-port` — explicit port (optional)
+  - `--medusa-threads` (default: `4`) — medusa `-t` threads
+  - `--medusa-timeout` (default: `10`) — timeout per connection (seconds)
+  - `--medusa-options` — extra medusa CLI options
+  - `--crackmapexec`, `--cme` — opt-in CrackMapExec/NetExec
+  - `--cme-protocol` (default: `smb`) — protocol (`smb|ssh|ldap|winrm|mssql|rdp`)
+  - `--cme-username` — username
+  - `--cme-password` — password
+  - `--cme-domain` — domain
+  - `--cme-hashes` — NTLM hashes (LM:NT or NT)
+  - `--cme-module` — module to run
+  - `--cme-module-options` — module options
+  - `--cme-enum` — enumeration flags (comma-separated)
+  - `--cme-args` — extra CME args (allows anonymous runs)
+  - `--theharvester` — opt-in OSINT (domain targets only)
+  - `--theharvester-sources` — comma-separated data sources
+  - `--theharvester-limit` — results per source (default: 500)
+  - `--theharvester-start` — start index (default: 0)
+  - `--theharvester-args` — extra theHarvester CLI args
+  - `--netdiscover` — opt-in LAN discovery (private CIDR only; requires sudo)
+  - `--netdiscover-range` — CIDR range (e.g. `192.168.1.0/24`)
+  - `--netdiscover-interface` — network interface (e.g. `eth0`)
+  - `--netdiscover-passive` — passive sniffing mode
+  - `--netdiscover-fast/--netdiscover-no-fast` — fast mode toggle
+  - `--netdiscover-args` — extra netdiscover CLI args
+  - `--scoutsuite` — opt-in ScoutSuite (multi-cloud)
+  - `--scoutsuite-provider` (default: `aws`) — `aws|azure|gcp`
+  - `--scoutsuite-args` — extra ScoutSuite CLI arguments
+  - `--prowler` — opt-in Prowler (AWS)
+  - `--prowler-args` — extra Prowler CLI arguments
   - `--remediate` — LLM remediation (steps + code snippets)
   - `--max-remediations` (default: `5`) — cost control
   - `--min-remediation-severity` (default: `MEDIUM`) — `CRITICAL|HIGH|MEDIUM|LOW|INFO`
@@ -426,7 +517,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 ## ⚙️ Configuration
 
 - Default config lives in the project root as `config.yaml` (falls back to `~/.supabash/config.yaml`).
-- Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `~/.supabash/logs/debug.log`.
+- Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `./debug.log` by default (override with `SUPABASH_LOG_DIR`).
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`/`react`.
@@ -468,7 +559,7 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 | **Dnsenum** | DNS enumeration | Auto (domain targets) |
 | **Sslscan** | SSL/TLS analysis | Auto (443/8443 ports) |
 | **Enum4linux-ng** | SMB/Samba enumeration | Auto (139/445 ports) |
-| **Netdiscover** | ARP network discovery | Manual invocation |
+| **Netdiscover** | ARP network discovery | `--netdiscover` (private LAN) |
 
 ### Web & Vulnerability (9 tools)
 | Tool | Purpose | Trigger |
@@ -487,13 +578,15 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 | Tool | Purpose | Trigger |
 |------|---------|---------|
 | **Hydra** | Login brute-forcing | `--hydra` + wordlists |
-| **Medusa** | Parallel login brute-forcing | Manual invocation |
-| **CrackMapExec/NetExec** | AD/Windows post-exploitation | Manual invocation |
-| **TheHarvester** | OSINT (emails, subdomains) | Manual invocation |
+| **Medusa** | Parallel login brute-forcing | `--medusa` |
+| **CrackMapExec/NetExec** | AD/Windows post-exploitation | `--crackmapexec` |
+| **TheHarvester** | OSINT (emails, subdomains) | `--theharvester` (domain targets) |
 
-### Container & Cloud (2 tools)
+### Container & Cloud (4 tools)
 | Tool | Purpose | Trigger |
 |------|---------|---------|
+| **ScoutSuite** | Multi-cloud posture assessment | `--scoutsuite` |
+| **Prowler** | AWS security best-practice checks | `--prowler` |
 | **Trivy** | Container image CVE scanning | `--container-image` |
 | **Supabase RLS** | Row-Level Security checker | Auto (Supabase URLs) |
 

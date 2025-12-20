@@ -26,6 +26,13 @@ from supabash.tools import (
     TrivyScanner,
     SupabaseRLSChecker,
     SearchsploitScanner,
+    WPScanScanner,
+    TheHarvesterScanner,
+    NetdiscoverScanner,
+    CrackMapExecScanner,
+    MedusaRunner,
+    ScoutSuiteScanner,
+    ProwlerScanner,
 )
 from supabash.llm import LLMClient
 from supabash import prompts
@@ -66,6 +73,13 @@ class AuditOrchestrator:
             "trivy": TrivyScanner(),
             "supabase_rls": SupabaseRLSChecker(),
             "searchsploit": SearchsploitScanner(),
+            "wpscan": WPScanScanner(),
+            "theharvester": TheHarvesterScanner(),
+            "netdiscover": NetdiscoverScanner(),
+            "crackmapexec": CrackMapExecScanner(),
+            "medusa": MedusaRunner(),
+            "scoutsuite": ScoutSuiteScanner(),
+            "prowler": ProwlerScanner(),
         }
         self.llm = llm_client or LLMClient()
 
@@ -149,6 +163,102 @@ class AuditOrchestrator:
         if enabled is None:
             return bool(default)
         return bool(enabled)
+
+    def _whatweb_detects_wordpress(self, whatweb_entry: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(whatweb_entry, dict):
+            return False
+        data = whatweb_entry.get("data", {})
+        if not isinstance(data, dict):
+            return False
+        scan_data = data.get("scan_data", [])
+        if not isinstance(scan_data, list):
+            return False
+        for item in scan_data:
+            if not isinstance(item, dict):
+                continue
+            plugins = item.get("plugins", {})
+            if isinstance(plugins, dict):
+                for key in plugins.keys():
+                    if "wordpress" in str(key).lower():
+                        return True
+            banner = item.get("banner")
+            if isinstance(banner, str) and "wordpress" in banner.lower():
+                return True
+        return False
+
+    def _wpscan_args(self) -> Dict[str, Optional[str]]:
+        cfg = self._tool_config("wpscan")
+        if not isinstance(cfg, dict):
+            cfg = {}
+        api_token = cfg.get("api_token")
+        if isinstance(api_token, str):
+            api_token = api_token.strip() or None
+        else:
+            api_token = None
+        enumerate_opt = cfg.get("enumerate") or cfg.get("enumeration")
+        if isinstance(enumerate_opt, str):
+            enumerate_opt = enumerate_opt.strip() or None
+        else:
+            enumerate_opt = None
+        arguments = cfg.get("arguments")
+        if isinstance(arguments, str):
+            arguments = arguments.strip() or None
+        else:
+            arguments = None
+        return {"api_token": api_token, "enumerate": enumerate_opt, "arguments": arguments}
+
+    def _theharvester_args(self) -> Dict[str, Any]:
+        cfg = self._tool_config("theharvester")
+        if not isinstance(cfg, dict):
+            cfg = {}
+        sources = cfg.get("sources")
+        if isinstance(sources, str):
+            sources = sources.strip() or None
+        else:
+            sources = None
+        limit = cfg.get("limit")
+        try:
+            limit = int(limit)
+        except Exception:
+            limit = None
+        start = cfg.get("start")
+        try:
+            start = int(start)
+        except Exception:
+            start = None
+        arguments = cfg.get("arguments")
+        if isinstance(arguments, str):
+            arguments = arguments.strip() or None
+        else:
+            arguments = None
+        return {"sources": sources, "limit": limit, "start": start, "arguments": arguments}
+
+    def _scoutsuite_args(self) -> Dict[str, Optional[str]]:
+        cfg = self._tool_config("scoutsuite")
+        if not isinstance(cfg, dict):
+            cfg = {}
+        provider = cfg.get("provider")
+        if isinstance(provider, str):
+            provider = provider.strip() or None
+        else:
+            provider = None
+        arguments = cfg.get("arguments")
+        if isinstance(arguments, str):
+            arguments = arguments.strip() or None
+        else:
+            arguments = None
+        return {"provider": provider, "arguments": arguments}
+
+    def _prowler_args(self) -> Dict[str, Optional[str]]:
+        cfg = self._tool_config("prowler")
+        if not isinstance(cfg, dict):
+            cfg = {}
+        arguments = cfg.get("arguments")
+        if isinstance(arguments, str):
+            arguments = arguments.strip() or None
+        else:
+            arguments = None
+        return {"arguments": arguments}
 
     def _skip_disabled(self, tool: str) -> Dict[str, Any]:
         return self._skip_tool(tool, "Disabled by config (tools.<name>.enabled=false)")
@@ -540,6 +650,22 @@ class AuditOrchestrator:
                         "evidence": f"{where} login={login} password={password}".strip(),
                         "tool": "hydra",
                     })
+            # Medusa valid credentials (high risk)
+            if tool == "medusa":
+                for c in data.get("found_credentials", []) or []:
+                    if not isinstance(c, dict):
+                        continue
+                    svc = (c.get("module") or data.get("module") or "").strip().lower() or "service"
+                    host = (c.get("host") or data.get("target") or "").strip() or "host"
+                    login = (c.get("login") or "").strip()
+                    password = redact_secret(c.get("password"))
+                    where = f"{svc}://{host}"
+                    findings.append({
+                        "severity": "HIGH",
+                        "title": "Valid credentials discovered (bruteforce)",
+                        "evidence": f"{where} login={login} password={password}".strip(),
+                        "tool": "medusa",
+                    })
             # Trivy container CVEs
             if tool == "trivy":
                 for f in data.get("findings", []):
@@ -603,6 +729,68 @@ class AuditOrchestrator:
                         "evidence": tech,
                         "tool": "whatweb",
                     })
+            # WPScan findings (WordPress-specific)
+            if tool == "wpscan":
+                scan_data = data.get("scan_data", {})
+                if isinstance(scan_data, dict):
+                    for vuln in scan_data.get("vulnerabilities", []) or []:
+                        if not isinstance(vuln, dict):
+                            continue
+                        title = str(vuln.get("title") or "WordPress vulnerability").strip()
+                        component = str(vuln.get("component") or "").strip()
+                        fixed_in = str(vuln.get("fixed_in") or "").strip()
+                        details = []
+                        if component:
+                            details.append(f"component={component}")
+                        if fixed_in:
+                            details.append(f"fixed_in={fixed_in}")
+                        evidence = title
+                        if details:
+                            evidence = f"{title} ({', '.join(details)})"
+                        findings.append({
+                            "severity": "MEDIUM",
+                            "title": title,
+                            "evidence": evidence,
+                            "tool": "wpscan",
+                            "type": vuln.get("type"),
+                        })
+                    for item in scan_data.get("interesting_findings", []) or []:
+                        if isinstance(item, dict):
+                            text = item.get("to_s") or item.get("type") or item.get("url")
+                            if not isinstance(text, str) or not text.strip():
+                                text = str(item)
+                        else:
+                            text = str(item)
+                        text = text.strip()
+                        if not text:
+                            continue
+                        findings.append({
+                            "severity": "INFO",
+                            "title": "WordPress interesting finding",
+                            "evidence": text,
+                            "tool": "wpscan",
+                        })
+                    for user in scan_data.get("users", []) or []:
+                        if not isinstance(user, dict):
+                            continue
+                        username = str(user.get("username") or "").strip()
+                        if not username:
+                            continue
+                        details = []
+                        if user.get("id") is not None:
+                            details.append(f"id={user.get('id')}")
+                        slug = str(user.get("slug") or "").strip()
+                        if slug:
+                            details.append(f"slug={slug}")
+                        evidence = f"username={username}"
+                        if details:
+                            evidence = f"{evidence} ({', '.join(details)})"
+                        findings.append({
+                            "severity": "INFO",
+                            "title": "WordPress user enumerated",
+                            "evidence": evidence,
+                            "tool": "wpscan",
+                        })
             # Searchsploit (offline exploit references)
             if tool == "searchsploit":
                 for f in data.get("findings", []) or []:
@@ -625,6 +813,99 @@ class AuditOrchestrator:
                             "type": kind or None,
                         }
                     )
+            # CrackMapExec/NetExec findings
+            if tool == "crackmapexec":
+                scan_data = data.get("scan_data", {})
+                if isinstance(scan_data, dict):
+                    for cred in (scan_data.get("credentials") or [])[:50]:
+                        if not isinstance(cred, dict):
+                            continue
+                        host = cred.get("host") or cred.get("ip") or ""
+                        login = cred.get("username") or cred.get("user") or ""
+                        password = redact_secret(cred.get("password"))
+                        domain = cred.get("domain") or ""
+                        evidence_parts = []
+                        if host:
+                            evidence_parts.append(f"host={host}")
+                        if domain:
+                            evidence_parts.append(f"domain={domain}")
+                        if login:
+                            evidence_parts.append(f"login={login}")
+                        evidence_parts.append(f"password={password}")
+                        findings.append({
+                            "severity": "HIGH",
+                            "title": "Valid credentials discovered (CME/NetExec)",
+                            "evidence": ", ".join(evidence_parts).strip(),
+                            "tool": "crackmapexec",
+                        })
+                    for finding in (scan_data.get("findings") or [])[:50]:
+                        if not isinstance(finding, dict):
+                            continue
+                        msg = str(finding.get("message") or "").strip()
+                        if not msg:
+                            msg = str(finding)
+                        findings.append({
+                            "severity": "HIGH",
+                            "title": "Privilege escalation indicator",
+                            "evidence": msg,
+                            "tool": "crackmapexec",
+                        })
+                    for share in (scan_data.get("shares") or [])[:50]:
+                        if not isinstance(share, dict):
+                            continue
+                        name = str(share.get("name") or "").strip()
+                        perms = str(share.get("permissions") or "").strip()
+                        host = str(share.get("host") or "").strip()
+                        remark = str(share.get("remark") or "").strip()
+                        parts = []
+                        if name:
+                            parts.append(f"share={name}")
+                        if perms:
+                            parts.append(f"perms={perms}")
+                        if host:
+                            parts.append(f"host={host}")
+                        if remark:
+                            parts.append(f"remark={remark}")
+                        findings.append({
+                            "severity": "INFO",
+                            "title": "SMB share discovered",
+                            "evidence": ", ".join(parts).strip(),
+                            "tool": "crackmapexec",
+                        })
+            # ScoutSuite findings (multi-cloud)
+            if tool == "scoutsuite":
+                scan_data = data.get("scan_data", {})
+                for item in (scan_data.get("findings") or [])[:200]:
+                    if not isinstance(item, dict):
+                        continue
+                    severity = str(item.get("severity") or "INFO").upper()
+                    title = str(item.get("title") or "ScoutSuite finding")
+                    evidence = str(item.get("evidence") or "")
+                    findings.append(
+                        {
+                            "severity": severity,
+                            "title": title,
+                            "evidence": evidence,
+                            "tool": "scoutsuite",
+                        }
+                    )
+            # Prowler findings (AWS)
+            if tool == "prowler":
+                scan_data = data.get("scan_data", {})
+                for item in (scan_data.get("findings") or [])[:500]:
+                    if not isinstance(item, dict):
+                        continue
+                    severity = str(item.get("severity") or "MEDIUM").upper()
+                    title = str(item.get("title") or "Prowler finding")
+                    evidence = str(item.get("evidence") or "")
+                    findings.append(
+                        {
+                            "severity": severity,
+                            "title": title,
+                            "evidence": evidence,
+                            "tool": "prowler",
+                        }
+                    )
             # subfinder subdomains
             if tool == "subfinder":
                 for host in (data.get("hosts") or data.get("findings") or [])[:200]:
@@ -636,6 +917,81 @@ class AuditOrchestrator:
                             "tool": "subfinder",
                         }
                     )
+            # theHarvester OSINT results
+            if tool == "theharvester":
+                scan_data = data.get("scan_data", {})
+                if isinstance(scan_data, dict):
+                    for email in (scan_data.get("emails") or [])[:50]:
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "OSINT email discovered",
+                                "evidence": str(email),
+                                "tool": "theharvester",
+                            }
+                        )
+                    for host in (scan_data.get("hosts") or [])[:50]:
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "OSINT host discovered",
+                                "evidence": str(host),
+                                "tool": "theharvester",
+                            }
+                        )
+                    for ip in (scan_data.get("ips") or [])[:50]:
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "OSINT IP discovered",
+                                "evidence": str(ip),
+                                "tool": "theharvester",
+                            }
+                        )
+                    for url in (scan_data.get("interesting_urls") or [])[:50]:
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "OSINT URL discovered",
+                                "evidence": str(url),
+                                "tool": "theharvester",
+                            }
+                        )
+                    for asn in (scan_data.get("asns") or [])[:50]:
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "OSINT ASN discovered",
+                                "evidence": str(asn),
+                                "tool": "theharvester",
+                            }
+                        )
+            # netdiscover LAN hosts
+            if tool == "netdiscover":
+                scan_data = data.get("scan_data", {})
+                if isinstance(scan_data, dict):
+                    for host in (scan_data.get("hosts") or [])[:50]:
+                        if not isinstance(host, dict):
+                            continue
+                        ip_addr = str(host.get("ip") or "").strip()
+                        mac = str(host.get("mac") or "").strip()
+                        vendor = str(host.get("vendor") or "").strip()
+                        evidence_parts = []
+                        if ip_addr:
+                            evidence_parts.append(f"ip={ip_addr}")
+                        if mac:
+                            evidence_parts.append(f"mac={mac}")
+                        if vendor:
+                            evidence_parts.append(f"vendor={vendor}")
+                        evidence = ", ".join(evidence_parts) if evidence_parts else str(host)
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "Discovered LAN host",
+                                "evidence": evidence,
+                                "tool": "netdiscover",
+                            }
+                        )
             # Supabase RLS check
             if tool == "supabase_rls":
                 if data.get("risk"):
@@ -720,6 +1076,40 @@ class AuditOrchestrator:
         hydra_services: Optional[str] = None,
         hydra_threads: int = 4,
         hydra_options: Optional[str] = None,
+        run_theharvester: bool = False,
+        theharvester_sources: Optional[str] = None,
+        theharvester_limit: Optional[int] = None,
+        theharvester_start: Optional[int] = None,
+        theharvester_args: Optional[str] = None,
+        run_netdiscover: bool = False,
+        netdiscover_range: Optional[str] = None,
+        netdiscover_interface: Optional[str] = None,
+        netdiscover_passive: bool = False,
+        netdiscover_fast: bool = True,
+        netdiscover_args: Optional[str] = None,
+        run_medusa: bool = False,
+        medusa_usernames: Optional[str] = None,
+        medusa_passwords: Optional[str] = None,
+        medusa_module: Optional[str] = None,
+        medusa_port: Optional[int] = None,
+        medusa_threads: int = 4,
+        medusa_timeout: int = 10,
+        medusa_options: Optional[str] = None,
+        run_crackmapexec: bool = False,
+        cme_protocol: str = "smb",
+        cme_username: Optional[str] = None,
+        cme_password: Optional[str] = None,
+        cme_domain: Optional[str] = None,
+        cme_hashes: Optional[str] = None,
+        cme_module: Optional[str] = None,
+        cme_module_options: Optional[str] = None,
+        cme_enum: Optional[str] = None,
+        cme_args: Optional[str] = None,
+        run_scoutsuite: bool = False,
+        scoutsuite_provider: str = "aws",
+        scoutsuite_args: Optional[str] = None,
+        run_prowler: bool = False,
+        prowler_args: Optional[str] = None,
         remediate: bool = False,
         max_remediations: int = 5,
         min_remediation_severity: str = "MEDIUM",
@@ -763,11 +1153,35 @@ class AuditOrchestrator:
                 "hydra_enabled": bool(run_hydra),
                 "hydra_services": hydra_services,
                 "hydra_threads": int(hydra_threads),
+                "theharvester_enabled": bool(run_theharvester),
+                "theharvester_sources": theharvester_sources,
+                "theharvester_limit": theharvester_limit,
+                "theharvester_start": theharvester_start,
+                "netdiscover_enabled": bool(run_netdiscover),
+                "netdiscover_range": netdiscover_range,
+                "netdiscover_interface": netdiscover_interface,
+                "netdiscover_passive": bool(netdiscover_passive),
+                "netdiscover_fast": bool(netdiscover_fast),
+                "medusa_enabled": bool(run_medusa),
+                "medusa_module": medusa_module,
+                "medusa_port": medusa_port,
+                "medusa_threads": int(medusa_threads),
+                "crackmapexec_enabled": bool(run_crackmapexec),
+                "cme_protocol": cme_protocol,
+                "cme_module": cme_module,
+                "scoutsuite_enabled": bool(run_scoutsuite),
+                "scoutsuite_provider": scoutsuite_provider,
+                "prowler_enabled": bool(run_prowler),
             },
             "safety": {"aggressive_caps": caps_meta},
         }
         if container_image:
             agg["container_image"] = container_image
+        report_root = Path(output).parent if output is not None else Path("reports")
+        try:
+            report_root.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
 
         def canceled() -> bool:
             return bool(cancel_event and cancel_event.is_set())
@@ -920,6 +1334,306 @@ class AuditOrchestrator:
             note("tool_end", "subfinder", "Finished subfinder")
             return entry
 
+        theharvester_cfg = self._theharvester_args()
+
+        def resolve_theharvester_settings() -> Dict[str, Any]:
+            sources = theharvester_sources if theharvester_sources is not None else theharvester_cfg.get("sources")
+            if isinstance(sources, str):
+                sources = sources.strip() or None
+            else:
+                sources = None
+
+            limit = theharvester_limit if theharvester_limit is not None else theharvester_cfg.get("limit")
+            try:
+                limit = int(limit)
+            except Exception:
+                limit = 500
+            if limit <= 0:
+                limit = 500
+
+            start = theharvester_start if theharvester_start is not None else theharvester_cfg.get("start")
+            try:
+                start = int(start)
+            except Exception:
+                start = 0
+            if start < 0:
+                start = 0
+
+            arguments = theharvester_args if theharvester_args is not None else theharvester_cfg.get("arguments")
+            if isinstance(arguments, str):
+                arguments = arguments.strip() or None
+            else:
+                arguments = None
+
+            return {"sources": sources, "limit": limit, "start": start, "arguments": arguments}
+
+        def run_theharvester_if_requested(domain_target: str) -> Optional[Dict[str, Any]]:
+            if not run_theharvester:
+                return None
+            if not self._has_scanner("theharvester"):
+                return self._skip_tool("theharvester", "Scanner not available")
+            if not self._should_run_dnsenum(domain_target):
+                return self._skip_tool("theharvester", "Not a domain target")
+
+            settings = resolve_theharvester_settings()
+            note("tool_start", "theharvester", "Running theHarvester (OSINT)")
+            entry = self._run_tool_if_enabled(
+                "theharvester",
+                lambda: self.scanners["theharvester"].scan(
+                    domain_target,
+                    sources=settings["sources"],
+                    limit=settings["limit"],
+                    start=settings["start"],
+                    arguments=settings["arguments"],
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("theharvester"),
+                ),
+            )
+            note("tool_end", "theharvester", "Finished theHarvester")
+            return entry
+
+        def run_netdiscover_if_requested() -> Optional[Dict[str, Any]]:
+            if not run_netdiscover:
+                return None
+            if not self._has_scanner("netdiscover"):
+                return self._skip_tool("netdiscover", "Scanner not available")
+            if not netdiscover_range and not netdiscover_passive:
+                return self._skip_tool("netdiscover", "Provide --netdiscover-range or --netdiscover-passive")
+            if netdiscover_range:
+                try:
+                    net = ipaddress.ip_network(str(netdiscover_range), strict=False)
+                    if not net.is_private:
+                        return self._skip_tool("netdiscover", "Netdiscover supports private LAN ranges only")
+                except Exception:
+                    return self._skip_tool("netdiscover", "Invalid --netdiscover-range CIDR")
+
+            note("tool_start", "netdiscover", "Running netdiscover (LAN discovery)")
+            entry = self._run_tool_if_enabled(
+                "netdiscover",
+                lambda: self.scanners["netdiscover"].scan(
+                    interface=netdiscover_interface,
+                    range=netdiscover_range,
+                    passive=bool(netdiscover_passive),
+                    fast_mode=bool(netdiscover_fast),
+                    arguments=netdiscover_args,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("netdiscover"),
+                ),
+            )
+            note("tool_end", "netdiscover", "Finished netdiscover")
+            return entry
+
+        def run_medusa_from_nmap(nmap_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+            if not run_medusa:
+                return []
+            if not medusa_usernames or not medusa_passwords:
+                return [self._skip_tool("medusa", "Missing --medusa-usernames/--medusa-passwords")]
+            if not self._has_scanner("medusa"):
+                return [self._skip_tool("medusa", "Scanner not available")]
+            if not nmap_entry or not nmap_entry.get("success"):
+                return [self._skip_tool("medusa", "No nmap results to derive services/ports")]
+
+            scan_data = nmap_entry.get("data", {}).get("scan_data", {})
+            ports: List[Dict[str, Any]] = []
+            for host in (scan_data or {}).get("hosts", []) or []:
+                for p in host.get("ports", []) or []:
+                    try:
+                        if str(p.get("state", "")).lower() != "open":
+                            continue
+                        ports.append(p)
+                    except Exception:
+                        continue
+
+            service_map = {
+                "ssh": "ssh",
+                "ftp": "ftp",
+                "telnet": "telnet",
+                "smtp": "smtp",
+                "pop3": "pop3",
+                "imap": "imap",
+                "imaps": "imap",
+                "mysql": "mysql",
+                "postgres": "postgres",
+                "postgresql": "postgres",
+                "mssql": "mssql",
+                "ms-sql-s": "mssql",
+                "rdp": "rdp",
+                "ms-wbt-server": "rdp",
+                "microsoft-ds": "smbnt",
+                "netbios-ssn": "smbnt",
+                "smb": "smbnt",
+            }
+            port_map = {
+                22: "ssh",
+                21: "ftp",
+                23: "telnet",
+                25: "smtp",
+                110: "pop3",
+                143: "imap",
+                139: "smbnt",
+                445: "smbnt",
+                3389: "rdp",
+                3306: "mysql",
+                5432: "postgres",
+                1433: "mssql",
+            }
+
+            module_ports: Dict[str, List[int]] = {}
+            for p in ports:
+                try:
+                    port = int(p.get("port"))
+                except Exception:
+                    continue
+                svc = str(p.get("service") or "").lower()
+                module = service_map.get(svc) or port_map.get(port)
+                if not module:
+                    continue
+                module_ports.setdefault(module, []).append(port)
+
+            results: List[Dict[str, Any]] = []
+            module_override = (medusa_module or "").strip().lower()
+            if module_override:
+                ports_for_module = []
+                if medusa_port:
+                    ports_for_module = [int(medusa_port)]
+                else:
+                    ports_for_module = sorted(set(module_ports.get(module_override, [])))
+                if not ports_for_module:
+                    return [self._skip_tool("medusa", f"No {module_override} service detected by nmap")]
+                module_ports = {module_override: ports_for_module}
+            elif not module_ports:
+                return [self._skip_tool("medusa", "No supported services detected by nmap")]
+
+            for module, ports_list in module_ports.items():
+                for port in sorted(set(ports_list))[:2]:
+                    note("tool_start", "medusa", f"Running medusa ({module}) on port {port}")
+                    results.append(
+                        self._run_tool(
+                            "medusa",
+                            lambda module=module, port=port: self.scanners["medusa"].run(
+                                scan_host,
+                                module,
+                                medusa_usernames,
+                                medusa_passwords,
+                                port=port,
+                                threads=int(medusa_threads),
+                                timeout_per_connection=int(medusa_timeout),
+                                options=medusa_options,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("medusa"),
+                            ),
+                        )
+                    )
+                    note("tool_end", "medusa", f"Finished medusa ({module}) on port {port}")
+                    if canceled():
+                        return results
+            return results
+
+        def run_crackmapexec_from_nmap(nmap_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+            if not run_crackmapexec:
+                return []
+            if not self._has_scanner("crackmapexec"):
+                return [self._skip_tool("crackmapexec", "Scanner not available")]
+            if not nmap_entry or not nmap_entry.get("success"):
+                return [self._skip_tool("crackmapexec", "No nmap results to validate services")]
+
+            if not (cme_username or cme_password or cme_hashes or cme_args):
+                return [self._skip_tool("crackmapexec", "Provide creds/hashes or --cme-args for anonymous runs")]
+
+            protocol = str(cme_protocol or "smb").strip().lower()
+            open_ports = self._open_ports_from_nmap(nmap_entry.get("data", {}).get("scan_data", {}))
+            if protocol == "smb" and not any(p in (139, 445) for p in open_ports):
+                return [self._skip_tool("crackmapexec", "No SMB ports detected (139/445)")]
+            if protocol == "rdp" and 3389 not in open_ports:
+                return [self._skip_tool("crackmapexec", "No RDP port detected (3389)")]
+            if protocol == "ssh" and 22 not in open_ports:
+                return [self._skip_tool("crackmapexec", "No SSH port detected (22)")]
+            if protocol == "ldap" and not any(p in (389, 636) for p in open_ports):
+                return [self._skip_tool("crackmapexec", "No LDAP ports detected (389/636)")]
+            if protocol == "winrm" and not any(p in (5985, 5986) for p in open_ports):
+                return [self._skip_tool("crackmapexec", "No WinRM ports detected (5985/5986)")]
+            if protocol == "mssql" and 1433 not in open_ports:
+                return [self._skip_tool("crackmapexec", "No MSSQL port detected (1433)")]
+
+            enum_opts: List[str] = []
+            if isinstance(cme_enum, str):
+                for token in cme_enum.replace(";", ",").split(","):
+                    t = token.strip()
+                    if not t:
+                        continue
+                    enum_opts.append(t if t.startswith("-") else f"--{t}")
+
+            note("tool_start", "crackmapexec", f"Running crackmapexec ({protocol})")
+            entry = self._run_tool(
+                "crackmapexec",
+                lambda: self.scanners["crackmapexec"].scan(
+                    scan_host,
+                    protocol=protocol,
+                    username=cme_username,
+                    password=cme_password,
+                    domain=cme_domain,
+                    hashes=cme_hashes,
+                    module=cme_module,
+                    module_options=cme_module_options,
+                    enumerate_options=enum_opts or None,
+                    arguments=cme_args,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("crackmapexec"),
+                ),
+            )
+            note("tool_end", "crackmapexec", "Finished crackmapexec")
+            return [entry]
+
+        scoutsuite_cfg = self._scoutsuite_args()
+        prowler_cfg = self._prowler_args()
+
+        def run_scoutsuite_if_requested() -> Optional[Dict[str, Any]]:
+            if not run_scoutsuite:
+                return None
+            if not self._has_scanner("scoutsuite"):
+                return self._skip_tool("scoutsuite", "Scanner not available")
+            provider = scoutsuite_provider or scoutsuite_cfg.get("provider") or "aws"
+            provider = str(provider).strip().lower()
+            if provider not in ("aws", "azure", "gcp"):
+                return self._skip_tool("scoutsuite", f"Unsupported provider: {provider}")
+            args = scoutsuite_args if scoutsuite_args is not None else scoutsuite_cfg.get("arguments")
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            report_dir = report_root / f"scoutsuite-{ts}"
+            note("tool_start", "scoutsuite", f"Running ScoutSuite ({provider})")
+            entry = self._run_tool(
+                "scoutsuite",
+                lambda: self.scanners["scoutsuite"].scan(
+                    provider=provider,
+                    report_dir=str(report_dir),
+                    arguments=args,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("scoutsuite"),
+                ),
+            )
+            note("tool_end", "scoutsuite", "Finished ScoutSuite")
+            return entry
+
+        def run_prowler_if_requested() -> Optional[Dict[str, Any]]:
+            if not run_prowler:
+                return None
+            if not self._has_scanner("prowler"):
+                return self._skip_tool("prowler", "Scanner not available")
+            args = prowler_args if prowler_args is not None else prowler_cfg.get("arguments")
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            output_dir = report_root / f"prowler-{ts}"
+            note("tool_start", "prowler", "Running Prowler (AWS)")
+            entry = self._run_tool(
+                "prowler",
+                lambda: self.scanners["prowler"].scan(
+                    output_dir=str(output_dir),
+                    arguments=args,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("prowler"),
+                ),
+            )
+            note("tool_end", "prowler", "Finished Prowler")
+            return entry
+
         def run_web_tools(web_target: str) -> List[Dict[str, Any]]:
             if not parallel_web:
                 # Sequential (default)
@@ -936,6 +1650,30 @@ class AuditOrchestrator:
                 note("tool_end", "whatweb", "Finished whatweb")
                 results.append(whatweb_entry)
                 if canceled() or (isinstance(whatweb_entry.get("data"), dict) and whatweb_entry["data"].get("canceled")):
+                    return results
+
+                if self._has_scanner("wpscan"):
+                    if self._whatweb_detects_wordpress(whatweb_entry):
+                        wpscan_args = self._wpscan_args()
+                        note("tool_start", "wpscan", "Running wpscan (WordPress detected)")
+                        wpscan_entry = self._run_tool_if_enabled(
+                            "wpscan",
+                            lambda: self.scanners["wpscan"].scan(
+                                web_target,
+                                api_token=wpscan_args.get("api_token"),
+                                enumerate=wpscan_args.get("enumerate"),
+                                arguments=wpscan_args.get("arguments"),
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("wpscan"),
+                            ),
+                        )
+                        note("tool_end", "wpscan", "Finished wpscan")
+                    else:
+                        wpscan_entry = self._skip_tool("wpscan", "WordPress not detected by whatweb")
+                else:
+                    wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
+                results.append(wpscan_entry)
+                if canceled() or (isinstance(wpscan_entry.get("data"), dict) and wpscan_entry["data"].get("canceled")):
                     return results
 
                 note("tool_start", "nuclei", "Running nuclei")
@@ -1095,6 +1833,32 @@ class AuditOrchestrator:
                         entry = {"tool": tool, "success": False, "error": str(e)}
                     results.append(entry)
                     note("tool_end", tool, f"Finished {tool}")
+            whatweb_entry = None
+            for entry in results:
+                if isinstance(entry, dict) and entry.get("tool") == "whatweb":
+                    whatweb_entry = entry
+                    break
+            if self._has_scanner("wpscan"):
+                if self._whatweb_detects_wordpress(whatweb_entry):
+                    wpscan_args = self._wpscan_args()
+                    note("tool_start", "wpscan", "Running wpscan (WordPress detected)")
+                    wpscan_entry = self._run_tool_if_enabled(
+                        "wpscan",
+                        lambda: self.scanners["wpscan"].scan(
+                            web_target,
+                            api_token=wpscan_args.get("api_token"),
+                            enumerate=wpscan_args.get("enumerate"),
+                            arguments=wpscan_args.get("arguments"),
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("wpscan"),
+                        ),
+                    )
+                    note("tool_end", "wpscan", "Finished wpscan")
+                else:
+                    wpscan_entry = self._skip_tool("wpscan", "WordPress not detected by whatweb")
+            else:
+                wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
+            results.append(wpscan_entry)
             return results
 
         # Recon & web scans (optional parallel overlap)
@@ -1136,6 +1900,10 @@ class AuditOrchestrator:
                     agg["results"].append(entry)
                 for entry in run_searchsploit_from_nmap(nmap_entry):
                     agg["results"].append(entry)
+                for entry in run_medusa_from_nmap(nmap_entry):
+                    agg["results"].append(entry)
+                for entry in run_crackmapexec_from_nmap(nmap_entry):
+                    agg["results"].append(entry)
 
                 # Optional domain expansion (does not block web tooling already started)
                 if self._tool_enabled("subfinder", default=False) and self._has_scanner("subfinder") and self._should_run_dnsenum(scan_host):
@@ -1159,6 +1927,38 @@ class AuditOrchestrator:
                         agg["results"].append(self._skip_tool("dnsenum", "Scanner not available"))
                 else:
                     agg["results"].append(self._skip_tool("dnsenum", "Not a domain target"))
+
+                harvester_entry = run_theharvester_if_requested(scan_host)
+                if harvester_entry is not None:
+                    agg["results"].append(harvester_entry)
+                    if canceled() or (isinstance(harvester_entry.get("data"), dict) and harvester_entry["data"].get("canceled")):
+                        agg["canceled"] = True
+                        agg["finished_at"] = time.time()
+                        return agg
+
+                netdiscover_entry = run_netdiscover_if_requested()
+                if netdiscover_entry is not None:
+                    agg["results"].append(netdiscover_entry)
+                    if canceled() or (isinstance(netdiscover_entry.get("data"), dict) and netdiscover_entry["data"].get("canceled")):
+                        agg["canceled"] = True
+                        agg["finished_at"] = time.time()
+                        return agg
+
+                scoutsuite_entry = run_scoutsuite_if_requested()
+                if scoutsuite_entry is not None:
+                    agg["results"].append(scoutsuite_entry)
+                    if canceled() or (isinstance(scoutsuite_entry.get("data"), dict) and scoutsuite_entry["data"].get("canceled")):
+                        agg["canceled"] = True
+                        agg["finished_at"] = time.time()
+                        return agg
+
+                prowler_entry = run_prowler_if_requested()
+                if prowler_entry is not None:
+                    agg["results"].append(prowler_entry)
+                    if canceled() or (isinstance(prowler_entry.get("data"), dict) and prowler_entry["data"].get("canceled")):
+                        agg["canceled"] = True
+                        agg["finished_at"] = time.time()
+                        return agg
 
                 tls_ports = [p for p in open_ports if p in (443, 8443)]
                 if tls_ports:
@@ -1288,6 +2088,10 @@ class AuditOrchestrator:
                     agg["results"].append(entry)
                 for entry in run_searchsploit_from_nmap(nmap_entry):
                     agg["results"].append(entry)
+                for entry in run_medusa_from_nmap(nmap_entry):
+                    agg["results"].append(entry)
+                for entry in run_crackmapexec_from_nmap(nmap_entry):
+                    agg["results"].append(entry)
 
                 # DNS enumeration (domain targets)
                 if self._should_run_dnsenum(scan_host):
@@ -1352,6 +2156,38 @@ class AuditOrchestrator:
                 else:
                     agg["results"].append(self._skip_tool("enum4linux-ng", "No SMB ports detected (139/445)"))
 
+            harvester_entry = run_theharvester_if_requested(scan_host)
+            if harvester_entry is not None:
+                agg["results"].append(harvester_entry)
+                if canceled() or (isinstance(harvester_entry.get("data"), dict) and harvester_entry["data"].get("canceled")):
+                    agg["canceled"] = True
+                    agg["finished_at"] = time.time()
+                    return agg
+
+            netdiscover_entry = run_netdiscover_if_requested()
+            if netdiscover_entry is not None:
+                agg["results"].append(netdiscover_entry)
+                if canceled() or (isinstance(netdiscover_entry.get("data"), dict) and netdiscover_entry["data"].get("canceled")):
+                    agg["canceled"] = True
+                    agg["finished_at"] = time.time()
+                    return agg
+
+            scoutsuite_entry = run_scoutsuite_if_requested()
+            if scoutsuite_entry is not None:
+                agg["results"].append(scoutsuite_entry)
+                if canceled() or (isinstance(scoutsuite_entry.get("data"), dict) and scoutsuite_entry["data"].get("canceled")):
+                    agg["canceled"] = True
+                    agg["finished_at"] = time.time()
+                    return agg
+
+            prowler_entry = run_prowler_if_requested()
+            if prowler_entry is not None:
+                agg["results"].append(prowler_entry)
+                if canceled() or (isinstance(prowler_entry.get("data"), dict) and prowler_entry["data"].get("canceled")):
+                    agg["canceled"] = True
+                    agg["finished_at"] = time.time()
+                    return agg
+
             if web_targets:
                 for entry in run_web_tools(web_targets[0]):
                     agg["results"].append(entry)
@@ -1384,6 +2220,7 @@ class AuditOrchestrator:
                 agg["results"].append(self._skip_tool("nuclei", "No web ports detected (80/443/8080/8443)"))
                 agg["results"].append(self._skip_tool("gobuster", "No web ports detected (80/443/8080/8443)"))
                 agg["results"].append(self._skip_tool("nikto", "No web ports detected (80/443/8080/8443)"))
+                agg["results"].append(self._skip_tool("wpscan", "No web ports detected (80/443/8080/8443)"))
 
         if normalized["sqlmap_url"]:
             if canceled():

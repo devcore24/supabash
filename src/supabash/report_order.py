@@ -8,10 +8,13 @@ DEFAULT_TOOL_ORDER: Tuple[str, ...] = (
     "nmap",
     "masscan",
     "rustscan",
+    "netdiscover",
     "subfinder",
+    "theharvester",
     # Web tooling
     "httpx",
     "whatweb",
+    "wpscan",
     "nuclei",
     "gobuster",
     "ffuf",
@@ -24,9 +27,13 @@ DEFAULT_TOOL_ORDER: Tuple[str, ...] = (
     # Optional / special
     "sqlmap",
     "hydra",
+    "medusa",
+    "crackmapexec",
     "searchsploit",
     "supabase_rls",
     "trivy",
+    "scoutsuite",
+    "prowler",
 )
 
 
