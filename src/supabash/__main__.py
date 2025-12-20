@@ -1694,18 +1694,22 @@ def doctor(
         ("httpx", False),
         ("nikto", False),
         ("hydra", False),
+        ("medusa", False),
         ("trivy", False),
         ("sslscan", False),
         ("dnsenum", False),
         ("ffuf", False),
         ("katana", False),
         ("searchsploit", False),
+        ("wpscan", False),
+        ("netdiscover", False),
     ]
 
     for bin_name, req in required_bins + optional_bins:
         path = shutil.which(bin_name)
         add_check(f"bin:{bin_name}", bool(path), path or "missing", required=req, details={"which": path})
 
+    # enum4linux / enum4linux-ng (either works)
     enum_legacy = shutil.which("enum4linux")
     enum_ng = shutil.which("enum4linux-ng")
     add_check(
@@ -1714,6 +1718,26 @@ def doctor(
         enum_legacy or enum_ng or "missing",
         required=False,
         details={"enum4linux": enum_legacy, "enum4linux-ng": enum_ng},
+    )
+
+    # theHarvester (case-sensitive, check both variants)
+    theharvester_path = shutil.which("theHarvester") or shutil.which("theharvester")
+    add_check(
+        "bin:theHarvester",
+        bool(theharvester_path),
+        theharvester_path or "missing",
+        required=False,
+        details={"which": theharvester_path},
+    )
+
+    # CrackMapExec / NetExec (multiple possible binary names)
+    cme_path = shutil.which("netexec") or shutil.which("nxc") or shutil.which("crackmapexec") or shutil.which("cme")
+    add_check(
+        "bin:crackmapexec",
+        bool(cme_path),
+        cme_path or "missing",
+        required=False,
+        details={"which": cme_path},
     )
 
     required_failed = [c for c in checks if c["required"] and not c["ok"]]
