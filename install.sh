@@ -31,6 +31,67 @@ SUPABASH_UPDATE_NUCLEI_TEMPLATES="${SUPABASH_UPDATE_NUCLEI_TEMPLATES:-1}"
 # Optional: install PDF/HTML report export dependencies (WeasyPrint)
 SUPABASH_PDF_EXPORT="${SUPABASH_PDF_EXPORT:-0}"
 
+# Optional manual installers (fallbacks for GitHub asset detection)
+install_via_go() {
+    local name="$1"
+    local module="$2"
+    local version="$3"
+
+    if command -v "$name" >/dev/null 2>&1; then
+        return 0
+    fi
+    if ! command -v go >/dev/null 2>&1; then
+        warn "Go toolchain not found; cannot install ${name} via go install."
+        return 1
+    fi
+
+    local mod_ref="$module@${version:-latest}"
+    info "Installing ${name} via go install (${mod_ref})..."
+
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    local gobin
+    gobin="${tmpdir}/bin"
+    mkdir -p "$gobin"
+
+    if ! GO111MODULE=on GOBIN="$gobin" go install -v "$mod_ref" >/tmp/${name}-go-install.log 2>&1; then
+        warn "go install failed for ${name}. See /tmp/${name}-go-install.log"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    if [ ! -x "${gobin}/${name}" ]; then
+        warn "go install finished but ${name} binary not found at ${gobin}/${name}."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    $SUDO install -m 0755 "${gobin}/${name}" "/usr/local/bin/${name}"
+    rm -rf "$tmpdir"
+    if command -v "$name" >/dev/null 2>&1; then
+        success "${name} installed via go install."
+        return 0
+    fi
+    warn "${name} installed via go install, but not found on PATH."
+    return 1
+}
+
+migrate_trivy_keyring() {
+    local list_file="/etc/apt/sources.list.d/trivy.list"
+    local new_key="/etc/apt/keyrings/trivy.gpg"
+    if [ -f "$list_file" ] && grep -q "trusted.gpg" "$list_file"; then
+        info "Migrating Trivy apt key to ${new_key} (to silence legacy keyring warning)..."
+        $SUDO mkdir -p /etc/apt/keyrings
+        if $SUDO gpg --no-default-keyring --keyring /etc/apt/trusted.gpg --export aquasecurity | $SUDO tee "$new_key" >/dev/null; then
+            $SUDO chmod a+r "$new_key"
+            $SUDO sed -i "s|/etc/apt/trusted.gpg|${new_key}|g" "$list_file"
+            success "Trivy key migrated to ${new_key}."
+        else
+            warn "Could not export Trivy key from trusted.gpg; leaving existing configuration."
+        fi
+    fi
+}
+
 info() {
     echo -e "${BLUE}[INFO]${RESET} $1"
 }
@@ -71,6 +132,49 @@ enable_ubuntu_universe() {
         info "Ensuring Ubuntu 'universe' repository is enabled..."
         $SUDO add-apt-repository -y universe >/dev/null 2>&1 || true
         $SUDO apt-get update -y
+    fi
+}
+
+install_exploitdb() {
+    # Prefer distro package if available
+    if command -v searchsploit >/dev/null 2>&1; then
+        info "exploitdb/searchsploit already installed."
+        return 0
+    fi
+
+    if apt_pkg_available "exploitdb"; then
+        info "Installing exploitdb via APT..."
+        $SUDO apt-get install -y exploitdb || warn "Failed to install exploitdb from APT."
+        if command -v searchsploit >/dev/null 2>&1; then
+            success "exploitdb installed via APT."
+            return 0
+        fi
+    fi
+
+    # Fallback: git clone
+    info "Falling back to git install of exploitdb (searchsploit)..."
+    local target_dir="/opt/exploitdb"
+    local bin_path="/usr/local/bin/searchsploit"
+    if [ ! -d "$target_dir" ]; then
+        $SUDO git clone https://gitlab.com/exploit-database/exploitdb.git "$target_dir" || {
+            warn "Git clone of exploitdb failed; please install manually."
+            return 1
+        }
+    else
+        info "Updating existing exploitdb clone..."
+        (cd "$target_dir" && $SUDO git pull --ff-only) || warn "Failed to update exploitdb; continuing with existing copy."
+    fi
+
+    $SUDO ln -sf "$target_dir/searchsploit" "$bin_path"
+    if command -v searchsploit >/dev/null 2>&1; then
+        success "searchsploit installed at ${bin_path}."
+    else
+        warn "searchsploit symlink created but not detected on PATH; check ${bin_path}."
+    fi
+
+    # Optional extra packages
+    if apt_pkg_available "exploitdb-bin-sploits"; then
+        $SUDO apt-get install -y exploitdb-bin-sploits exploitdb-papers || true
     fi
 }
 
@@ -202,12 +306,16 @@ install_apt_deps() {
         nikto
         sqlmap
         hydra
+        medusa
         gobuster
         ffuf
         whatweb
         sslscan
         dnsenum
-        exploitdb
+        netdiscover
+        theharvester
+        wpscan
+        exploitdb # may be unavailable on some distros; handled below
         # Add other standard tools here
     )
 
@@ -231,6 +339,8 @@ install_apt_deps() {
 
 # 3. External Tools (Nuclei, Trivy)
 install_external_tools() {
+    install_exploitdb
+
     # Install Nuclei (ProjectDiscovery)
     if ! command -v nuclei &> /dev/null; then
         info "Installing Nuclei..."
@@ -319,10 +429,16 @@ install_external_tools() {
     fi
 
     # Install subfinder (ProjectDiscovery subdomain discovery)
-    install_github_zip_binary "subfinder" "$SUBFINDER_REPO" "$SUBFINDER_VERSION" '^subfinder_.*_linux_amd64\\.zip$' '^subfinder_.*_linux_arm64\\.zip$' || true
+    if ! install_github_zip_binary "subfinder" "$SUBFINDER_REPO" "$SUBFINDER_VERSION" '^subfinder_.*_linux_amd64\\.zip$' '^subfinder_.*_linux_arm64\\.zip$'; then
+        warn "Falling back to go install for subfinder (if Go is available)."
+        install_via_go "subfinder" "github.com/projectdiscovery/subfinder/v2/cmd/subfinder" "$SUBFINDER_VERSION" || true
+    fi
 
     # Install katana (ProjectDiscovery crawler)
-    install_github_zip_binary "katana" "$KATANA_REPO" "$KATANA_VERSION" '^katana_.*_linux_amd64\\.zip$' '^katana_.*_linux_arm64\\.zip$' || true
+    if ! install_github_zip_binary "katana" "$KATANA_REPO" "$KATANA_VERSION" '^katana_.*_linux_amd64\\.zip$' '^katana_.*_linux_arm64\\.zip$'; then
+        warn "Falling back to go install for katana (if Go is available)."
+        install_via_go "katana" "github.com/projectdiscovery/katana/cmd/katana" "$KATANA_VERSION" || true
+    fi
 
     # Install Trivy (Container Scanner)
     if ! command -v trivy &> /dev/null; then
@@ -342,6 +458,8 @@ install_external_tools() {
     else
         info "Trivy is already installed."
     fi
+
+    migrate_trivy_keyring
 
     # Install RustScan (optional fast port scanner)
     if ! command -v rustscan &> /dev/null; then
@@ -466,6 +584,68 @@ install_external_tools() {
         fi
     else
         info "RustScan is already installed."
+    fi
+
+    # Install WPScan (WordPress scanner) - fallback to gem if not in APT
+    if ! command -v wpscan &> /dev/null; then
+        if apt_pkg_available "wpscan"; then
+            info "WPScan will be installed via APT (handled in install_apt_deps)."
+        else
+            info "Installing WPScan via Ruby gem (fallback)..."
+            if ! command -v gem &> /dev/null; then
+                info "Installing Ruby for WPScan..."
+                $SUDO apt-get install -y ruby ruby-dev build-essential libcurl4-openssl-dev libxml2 libxml2-dev libxslt1-dev zlib1g-dev || true
+            fi
+            if command -v gem &> /dev/null; then
+                $SUDO gem install wpscan --no-document || warn "Failed to install WPScan via gem. Install manually: gem install wpscan"
+                if command -v wpscan &> /dev/null; then
+                    success "WPScan installed via gem."
+                fi
+            else
+                warn "Ruby gem not available; cannot install WPScan. Install manually."
+            fi
+        fi
+    else
+        info "WPScan is already installed."
+    fi
+
+    # Install theHarvester (OSINT tool) - fallback to pip if not in APT
+    if ! command -v theHarvester &> /dev/null && ! command -v theharvester &> /dev/null; then
+        if apt_pkg_available "theharvester"; then
+            info "theHarvester will be installed via APT (handled in install_apt_deps)."
+        else
+            info "Installing theHarvester via pip (fallback)..."
+            if command -v pipx &> /dev/null; then
+                pipx install theHarvester || warn "Failed to install theHarvester via pipx."
+            else
+                pip3 install theHarvester || warn "Failed to install theHarvester via pip."
+            fi
+            if command -v theHarvester &> /dev/null || command -v theharvester &> /dev/null; then
+                success "theHarvester installed."
+            fi
+        fi
+    else
+        info "theHarvester is already installed."
+    fi
+
+    # Install CrackMapExec/NetExec (AD/Windows post-exploitation)
+    if ! command -v crackmapexec &> /dev/null && ! command -v netexec &> /dev/null && ! command -v cme &> /dev/null && ! command -v nxc &> /dev/null; then
+        info "Installing CrackMapExec/NetExec..."
+        # NetExec is the newer fork of CrackMapExec
+        if command -v pipx &> /dev/null; then
+            pipx install netexec 2>/dev/null || pipx install crackmapexec 2>/dev/null || warn "Failed to install NetExec/CrackMapExec via pipx."
+        else
+            pip3 install netexec 2>/dev/null || pip3 install crackmapexec 2>/dev/null || warn "Failed to install NetExec/CrackMapExec via pip."
+        fi
+        if command -v netexec &> /dev/null || command -v nxc &> /dev/null; then
+            success "NetExec installed."
+        elif command -v crackmapexec &> /dev/null || command -v cme &> /dev/null; then
+            success "CrackMapExec installed."
+        else
+            warn "CrackMapExec/NetExec install attempted but not found on PATH. Install manually: pipx install netexec"
+        fi
+    else
+        info "CrackMapExec/NetExec is already installed."
     fi
 
     # Install enum4linux-ng (optional SMB enumeration helper)

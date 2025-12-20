@@ -215,3 +215,16 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add **subfinder** (opt-in subdomain discovery; feeds additional web targets into probing).
 - [x] Add **katana** (opt-in crawl/spider to expand discovered endpoints).
 - [x] Add **Searchsploit** (opt-in offline exploit reference lookup derived from service fingerprints).
+- [x] Add **WPScan** (WordPress security scanner; runs when WordPress is detected via WhatWeb).
+- [x] Add **theHarvester** (OSINT reconnaissance; harvests emails, subdomains, hosts from public sources).
+- [x] Add **Netdiscover** (ARP reconnaissance for local network host discovery).
+- [x] Add **CrackMapExec/NetExec** (AD/Windows post-exploitation; SMB enumeration, pass-the-hash).
+- [x] Add **Medusa** (parallel network login brute-forcer; alternative to Hydra).
+
+### Future Tool Additions (Backlog)
+- [ ] **Recon-ng:** Web reconnaissance framework with modular OSINT capabilities.
+- [ ] **Shodan CLI:** Query Shodan for exposed services (requires API key).
+- [ ] **Impacket Tools:** Network protocol manipulation for Windows/AD environments.
+- [ ] **John the Ripper:** Offline password cracking for captured hashes.
+- [ ] **Hashcat:** GPU-accelerated password recovery.
+- [ ] **Aircrack-ng:** WiFi security auditing (requires hardware; experimental).

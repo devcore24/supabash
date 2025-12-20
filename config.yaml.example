@@ -117,3 +117,20 @@ tools:
   hydra:
     enabled: false
     timeout_seconds: 3600
+  medusa:
+    enabled: false
+    timeout_seconds: 3600
+  wpscan:
+    enabled: true
+    timeout_seconds: 1200
+    # Optional: WPScan API token for vulnerability data
+    # api_token: YOUR_WPSCAN_API_TOKEN
+  theharvester:
+    enabled: true
+    timeout_seconds: 900
+  netdiscover:
+    enabled: true
+    timeout_seconds: 300
+  crackmapexec:
+    enabled: true
+    timeout_seconds: 600

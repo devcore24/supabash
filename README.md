@@ -16,8 +16,8 @@
 ![License](https://img.shields.io/badge/License-AGPLv3-blue)
 ![Status](https://img.shields.io/badge/Status-Beta-orange)
 
-> **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.  
-> Progress: `[███████████████████▉]` **99%**
+> **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, 26 tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.
+> Progress: `[████████████████████]` **100%** (Core complete)
 
 **Supabash** is an autonomous AI Security Agent designed for developers, pentesters, DevOps engineers, Red and Blue Teams who want to **automate security audits** without sacrificing depth or understanding. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
 
@@ -34,64 +34,68 @@
 
 ---
 
-## 🛠️ The Arsenal (Planned Toolset)
+## 🛠️ The Arsenal (Toolset)
 
-Supabash aims to orchestrate the following tools over time (not all wrappers are implemented yet). For what currently works today, see **Implemented Wrappers (Beta)** below.
+Supabash orchestrates the following security tools. **26 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
 
 ### 🔍 Recon & Discovery
-*   **Nmap** (Network mapping & service detection)
-*   **Masscan** (High-speed port scanning)
-*   **Rustscan** (Modern, fast port scanner)
-*   **subfinder** (Subdomain discovery)
-*   **httpx** (HTTP probing / alive endpoints)
-*   **Netdiscover** (ARP reconnaissance)
-*   **Dnsenum** (DNS enumeration)
-*   **Sslscan** (SSL/TLS analysis)
-*   **Enum4linux-ng** (SMB/Samba enumeration)
+*   ✅ **Nmap** (Network mapping & service detection)
+*   ✅ **Masscan** (High-speed port scanning)
+*   ✅ **Rustscan** (Modern, fast port scanner)
+*   ✅ **subfinder** (Subdomain discovery)
+*   ✅ **httpx** (HTTP probing / alive endpoints)
+*   ✅ **Netdiscover** (ARP reconnaissance)
+*   ✅ **Dnsenum** (DNS enumeration)
+*   ✅ **Sslscan** (SSL/TLS analysis)
+*   ✅ **Enum4linux-ng** (SMB/Samba enumeration)
 
 ### 🌐 Web & Exploit
-*   **Metasploit Framework** (Exploitation & validation)
-*   **Sqlmap** (Automated SQL injection)
-*   **Gobuster** (Directory & file brute-forcing)
-*   **ffuf** (Fast content discovery / fuzzing)
-*   **katana** (Crawling / spidering)
-*   **Nikto** (Web server scanning)
-*   **WPScan** (WordPress security scanner)
-*   **Nuclei** (Template-based vulnerability scanning)
-*   **Searchsploit** (Offline exploit database)
+*   🔜 **Metasploit Framework** (Exploitation & validation)
+*   ✅ **Sqlmap** (Automated SQL injection)
+*   ✅ **Gobuster** (Directory & file brute-forcing)
+*   ✅ **ffuf** (Fast content discovery / fuzzing)
+*   ✅ **katana** (Crawling / spidering)
+*   ✅ **Nikto** (Web server scanning)
+*   ✅ **WPScan** (WordPress security scanner)
+*   ✅ **Nuclei** (Template-based vulnerability scanning)
+*   ✅ **Searchsploit** (Offline exploit database)
 
 ### 🔐 Credentials & Access
-*   **Hashcat** (Advanced password recovery)
-*   **John the Ripper** (Password cracker)
-*   **Hydra** (Online login brute-forcer)
-*   **Medusa** (Parallel network login brute-forcer)
-*   **CrackMapExec** (Post-exploitation for AD)
-*   **Impacket Suite** (Network protocols & packet manipulation)
+*   🔜 **Hashcat** (Advanced password recovery)
+*   🔜 **John the Ripper** (Password cracker)
+*   ✅ **Hydra** (Online login brute-forcer)
+*   ✅ **Medusa** (Parallel network login brute-forcer)
+*   ✅ **CrackMapExec/NetExec** (Post-exploitation for AD)
+*   🔜 **Impacket Suite** (Network protocols & packet manipulation)
 
 ### 📡 Wireless
-*   **Aircrack-ng Suite** (WiFi security auditing)
-*   **Reaver** (WPS attack tool)
-*   **Bettercap** (MITM & network utility)
-*   **Wifite** (Automated wireless auditor)
-*   **Hostapd** (Rogue AP creation)
+*   🔜 **Aircrack-ng Suite** (WiFi security auditing)
+*   🔜 **Reaver** (WPS attack tool)
+*   🔜 **Bettercap** (MITM & network utility)
+*   🔜 **Wifite** (Automated wireless auditor)
+*   🔜 **Hostapd** (Rogue AP creation)
 
 ### 🕵️ Intel & OSINT
-*   **TheHarvester** (E-mail, subdomain & name harvesting)
-*   **Recon-ng** (Web reconnaissance framework)
-*   **Shodan CLI** (IoT search engine)
-*   **Tcpdump** (Packet analyzer)
-*   **Wireshark** (Network protocol analyzer)
+*   ✅ **TheHarvester** (E-mail, subdomain & name harvesting)
+*   🔜 **Recon-ng** (Web reconnaissance framework)
+*   🔜 **Shodan CLI** (IoT search engine)
+*   🔜 **Tcpdump** (Packet analyzer)
+*   🔜 **Wireshark** (Network protocol analyzer)
 
 ### 📉 Stress & Performance
-*   **Hping3** (Packet generator/analyzer)
-*   **Iperf3** (Network bandwidth measurement)
-*   **ApacheBench (ab)** (HTTP server benchmarking)
-*   **Tc/Netem** (Network emulation)
+*   🔜 **Hping3** (Packet generator/analyzer)
+*   🔜 **Iperf3** (Network bandwidth measurement)
+*   🔜 **ApacheBench (ab)** (HTTP server benchmarking)
+*   🔜 **Tc/Netem** (Network emulation)
 
 ### 🔧 Utilities & Post-Exploitation
-*   **SSH / Socat / Netcat** (Connectivity & redirection)
-*   **Mimikatz** (Windows credential extraction helpers)
-*   **Loot Manager** (Automated evidence collection)
+*   🔜 **SSH / Socat / Netcat** (Connectivity & redirection)
+*   🔜 **Mimikatz** (Windows credential extraction helpers)
+*   🔜 **Loot Manager** (Automated evidence collection)
+
+### 📦 Container & Cloud
+*   ✅ **Trivy** (Container image CVE scanning)
+*   ✅ **Supabase RLS** (Row-Level Security checker)
 
 ---
 
@@ -448,17 +452,61 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 
 ---
 
-## ✅ Implemented Wrappers (Beta)
-- **Audit pipeline (runs by default):** Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase RLS/Trivy)
+## ✅ Implemented Wrappers (26 Tools)
+
+### Core Audit Pipeline (runs by default)
+Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase RLS/Trivy/WPScan)
+
+### Recon & Discovery (9 tools)
+| Tool | Purpose | Trigger |
+|------|---------|---------|
+| **Nmap** | Port scanning & service detection | Default recon |
+| **Masscan** | High-speed port scanning | `--scanner masscan` |
+| **Rustscan** | Fast port scanner | `--scanner rustscan` |
+| **httpx** | HTTP probing / alive endpoints | Auto (web ports) |
+| **subfinder** | Subdomain discovery | `tools.subfinder.enabled=true` |
+| **Dnsenum** | DNS enumeration | Auto (domain targets) |
+| **Sslscan** | SSL/TLS analysis | Auto (443/8443 ports) |
+| **Enum4linux-ng** | SMB/Samba enumeration | Auto (139/445 ports) |
+| **Netdiscover** | ARP network discovery | Manual invocation |
+
+### Web & Vulnerability (9 tools)
+| Tool | Purpose | Trigger |
+|------|---------|---------|
+| **WhatWeb** | Technology detection | Auto (web ports) |
+| **Nuclei** | Template-based vuln scanning | Default pipeline |
+| **Gobuster** | Directory brute-forcing | Default pipeline |
+| **ffuf** | Content discovery (fallback) | `tools.ffuf.enabled=true` |
+| **Nikto** | Web server scanning | `--nikto` flag |
+| **Sqlmap** | SQL injection detection | Auto (parameterized URLs) |
+| **katana** | Web crawling/spidering | `tools.katana.enabled=true` |
+| **Searchsploit** | Offline exploit references | `tools.searchsploit.enabled=true` |
+| **WPScan** | WordPress security scanner | Auto (WordPress detected) |
+
+### Credentials & Post-Exploitation (4 tools)
+| Tool | Purpose | Trigger |
+|------|---------|---------|
+| **Hydra** | Login brute-forcing | `--hydra` + wordlists |
+| **Medusa** | Parallel login brute-forcing | Manual invocation |
+| **CrackMapExec/NetExec** | AD/Windows post-exploitation | Manual invocation |
+| **TheHarvester** | OSINT (emails, subdomains) | Manual invocation |
+
+### Container & Cloud (2 tools)
+| Tool | Purpose | Trigger |
+|------|---------|---------|
+| **Trivy** | Container image CVE scanning | `--container-image` |
+| **Supabase RLS** | Row-Level Security checker | Auto (Supabase URLs) |
+
+### AI & Orchestration
 - **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.
-- **Recon engines (scan mode):** Nmap, Masscan, Rustscan
-- **Wrappers implemented:** Nikto (opt-in via `--nikto`), Hydra (opt-in via `--hydra` + explicit wordlists)
-- **Optional additions (opt-in):** `ffuf` fallback for content discovery when Gobuster fails (`tools.ffuf.enabled=true`); `katana` crawl/spider for endpoint expansion (`tools.katana.enabled=true`); `subfinder` subdomain discovery (`tools.subfinder.enabled=true`); `searchsploit` offline exploit references derived from service fingerprints (`tools.searchsploit.enabled=true`)
-- **LLM integration:** litellm-based client with config-driven provider/model selection
+- **LLM integration:** litellm-based client with config-driven provider/model selection (OpenAI, Anthropic, Gemini, Mistral, Ollama, LM Studio)
 - **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
-- **Reporting:** timestamped JSON + Markdown reports under `reports/` (includes exact commands executed for auditability)
-- **Report schema:** JSON reports include `schema_version` + `schema_validation` for sanity checks and forward compatibility
-- **Markdown reports:** include TOC + summary tables for readability
+
+### Reporting
+- **Formats:** Timestamped JSON + Markdown reports under `reports/` (includes exact commands executed for auditability)
+- **Schema:** JSON reports include `schema_version` + `schema_validation` for sanity checks and forward compatibility
+- **Styling:** Markdown reports include TOC + summary tables for readability
+- **Export:** Optional HTML/PDF export via WeasyPrint
 
 ---
 

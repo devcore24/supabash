@@ -17,6 +17,11 @@ from .ffuf import FfufScanner
 from .katana import KatanaScanner
 from .searchsploit import SearchsploitScanner
 from .subfinder import SubfinderScanner
+from .wpscan import WPScanScanner
+from .theharvester import TheHarvesterScanner
+from .netdiscover import NetdiscoverScanner
+from .crackmapexec import CrackMapExecScanner
+from .medusa import MedusaRunner
 
 __all__ = [
     "NmapScanner",
@@ -38,4 +43,9 @@ __all__ = [
     "KatanaScanner",
     "SearchsploitScanner",
     "SubfinderScanner",
+    "WPScanScanner",
+    "TheHarvesterScanner",
+    "NetdiscoverScanner",
+    "CrackMapExecScanner",
+    "MedusaRunner",
 ]
