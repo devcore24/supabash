@@ -592,14 +592,16 @@ install_external_tools() {
             info "WPScan will be installed via APT (handled in install_apt_deps)."
         else
             info "Installing WPScan via Ruby gem (fallback)..."
-            if ! command -v gem &> /dev/null; then
-                info "Installing Ruby for WPScan..."
-                $SUDO apt-get install -y ruby ruby-dev build-essential libcurl4-openssl-dev libxml2 libxml2-dev libxslt1-dev zlib1g-dev || true
-            fi
+            # Install Ruby development packages required for native extensions
+            info "Installing Ruby and build dependencies for WPScan..."
+            $SUDO apt-get install -y ruby ruby-dev build-essential libcurl4-openssl-dev libxml2 libxml2-dev libxslt1-dev zlib1g-dev libyajl-dev || true
+
             if command -v gem &> /dev/null; then
-                $SUDO gem install wpscan --no-document || warn "Failed to install WPScan via gem. Install manually: gem install wpscan"
+                $SUDO gem install wpscan --no-document || warn "Failed to install WPScan via gem. Install manually: sudo gem install wpscan"
                 if command -v wpscan &> /dev/null; then
                     success "WPScan installed via gem."
+                else
+                    warn "WPScan gem installed but not found on PATH. Try: sudo gem install wpscan"
                 fi
             else
                 warn "Ruby gem not available; cannot install WPScan. Install manually."
@@ -609,19 +611,48 @@ install_external_tools() {
         info "WPScan is already installed."
     fi
 
-    # Install theHarvester (OSINT tool) - fallback to pip if not in APT
+    # Install theHarvester (OSINT tool) - install from GitHub (PyPI package is outdated placeholder)
     if ! command -v theHarvester &> /dev/null && ! command -v theharvester &> /dev/null; then
         if apt_pkg_available "theharvester"; then
             info "theHarvester will be installed via APT (handled in install_apt_deps)."
         else
-            info "Installing theHarvester via pip (fallback)..."
-            if command -v pipx &> /dev/null; then
-                pipx install theHarvester || warn "Failed to install theHarvester via pipx."
+            info "Installing theHarvester from GitHub..."
+            local theharvester_dir="/opt/theHarvester"
+
+            # Install Python dependencies for theHarvester
+            $SUDO apt-get install -y python3-pip python3-venv python3-dev || true
+
+            if [ -d "$theharvester_dir" ]; then
+                info "Updating existing theHarvester installation..."
+                (cd "$theharvester_dir" && $SUDO git pull --ff-only) || warn "Failed to update theHarvester."
             else
-                pip3 install theHarvester || warn "Failed to install theHarvester via pip."
+                $SUDO git clone https://github.com/laramies/theHarvester.git "$theharvester_dir" || {
+                    warn "Failed to clone theHarvester. Install manually: https://github.com/laramies/theHarvester"
+                }
             fi
-            if command -v theHarvester &> /dev/null || command -v theharvester &> /dev/null; then
-                success "theHarvester installed."
+
+            if [ -d "$theharvester_dir" ]; then
+                # Install dependencies in the system or create a wrapper
+                if [ -f "$theharvester_dir/requirements.txt" ]; then
+                    info "Installing theHarvester Python dependencies..."
+                    $SUDO pip3 install -r "$theharvester_dir/requirements.txt" --break-system-packages 2>/dev/null || \
+                    $SUDO pip3 install -r "$theharvester_dir/requirements.txt" || true
+                fi
+
+                # Create wrapper script
+                $SUDO tee /usr/local/bin/theHarvester > /dev/null << 'HARVESTER_EOF'
+#!/bin/bash
+cd /opt/theHarvester
+python3 theHarvester.py "$@"
+HARVESTER_EOF
+                $SUDO chmod +x /usr/local/bin/theHarvester
+                $SUDO ln -sf /usr/local/bin/theHarvester /usr/local/bin/theharvester 2>/dev/null || true
+
+                if command -v theHarvester &> /dev/null; then
+                    success "theHarvester installed."
+                else
+                    warn "theHarvester installed to /opt but wrapper not working. Run manually: cd /opt/theHarvester && python3 theHarvester.py"
+                fi
             fi
         fi
     else
@@ -631,18 +662,71 @@ install_external_tools() {
     # Install CrackMapExec/NetExec (AD/Windows post-exploitation)
     if ! command -v crackmapexec &> /dev/null && ! command -v netexec &> /dev/null && ! command -v cme &> /dev/null && ! command -v nxc &> /dev/null; then
         info "Installing CrackMapExec/NetExec..."
-        # NetExec is the newer fork of CrackMapExec
-        if command -v pipx &> /dev/null; then
-            pipx install netexec 2>/dev/null || pipx install crackmapexec 2>/dev/null || warn "Failed to install NetExec/CrackMapExec via pipx."
-        else
-            pip3 install netexec 2>/dev/null || pip3 install crackmapexec 2>/dev/null || warn "Failed to install NetExec/CrackMapExec via pip."
+
+        # Install system dependencies required by NetExec/CME
+        info "Installing system dependencies for NetExec..."
+        $SUDO apt-get install -y python3-dev libffi-dev libssl-dev libxml2-dev libxslt1-dev \
+            libkrb5-dev krb5-user libpq-dev build-essential pipx || true
+
+        # Ensure pipx is available and configured
+        if ! command -v pipx &> /dev/null; then
+            info "Installing pipx..."
+            $SUDO apt-get install -y pipx || pip3 install --user pipx --break-system-packages 2>/dev/null || pip3 install --user pipx || true
         fi
-        if command -v netexec &> /dev/null || command -v nxc &> /dev/null; then
-            success "NetExec installed."
-        elif command -v crackmapexec &> /dev/null || command -v cme &> /dev/null; then
-            success "CrackMapExec installed."
+
+        # Ensure pipx path is set
+        if command -v pipx &> /dev/null; then
+            pipx ensurepath 2>/dev/null || true
+            export PATH="$PATH:$HOME/.local/bin:/root/.local/bin"
+
+            info "Installing NetExec via pipx (this may take a while)..."
+            # NetExec is the actively maintained fork of CrackMapExec
+            # Try with verbose output to see errors
+            if pipx install netexec; then
+                success "NetExec installed via pipx."
+            else
+                info "NetExec install failed, trying git-based install..."
+                # Try installing from git directly
+                if pipx install git+https://github.com/Pennyw0rth/NetExec.git; then
+                    success "NetExec installed via pipx from GitHub."
+                elif pipx install crackmapexec; then
+                    success "CrackMapExec installed via pipx."
+                else
+                    warn "pipx install failed. Trying pip3 with --break-system-packages..."
+                    # Final fallback: pip3 to system
+                    if pip3 install netexec --break-system-packages; then
+                        success "NetExec installed via pip3."
+                    elif pip3 install git+https://github.com/Pennyw0rth/NetExec.git --break-system-packages; then
+                        success "NetExec installed via pip3 from GitHub."
+                    else
+                        warn "All NetExec installation methods failed."
+                        warn "Install manually: pipx install git+https://github.com/Pennyw0rth/NetExec.git"
+                    fi
+                fi
+            fi
         else
-            warn "CrackMapExec/NetExec install attempted but not found on PATH. Install manually: pipx install netexec"
+            # Fallback to pip with --break-system-packages for Ubuntu 24.04+
+            info "pipx not available, trying pip3..."
+            if pip3 install netexec --break-system-packages; then
+                success "NetExec installed via pip3."
+            elif pip3 install git+https://github.com/Pennyw0rth/NetExec.git --break-system-packages; then
+                success "NetExec installed via pip3 from GitHub."
+            else
+                warn "Failed to install NetExec/CrackMapExec via pip."
+                warn "Install manually: pip3 install git+https://github.com/Pennyw0rth/NetExec.git --break-system-packages"
+            fi
+        fi
+
+        # Check if installation succeeded
+        if command -v netexec &> /dev/null || command -v nxc &> /dev/null; then
+            success "NetExec installed and available."
+        elif command -v crackmapexec &> /dev/null || command -v cme &> /dev/null; then
+            success "CrackMapExec installed and available."
+        elif [ -f "$HOME/.local/bin/netexec" ] || [ -f "$HOME/.local/bin/nxc" ]; then
+            success "NetExec installed to ~/.local/bin (add to PATH: export PATH=\$PATH:\$HOME/.local/bin)"
+        else
+            warn "CrackMapExec/NetExec not found on PATH after install."
+            warn "Try: pipx install netexec && pipx ensurepath"
         fi
     else
         info "CrackMapExec/NetExec is already installed."
