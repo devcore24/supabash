@@ -9,9 +9,15 @@ core:
   - 127.0.0.1
   - 10.0.0.0/24
   consent_accepted: true
-  allow_public_ips: false
+  allow_public_ips: false  
 llm:
   enabled: true
+  max_input_chars: 12000
+  # Optional fallback for chat context % (useful for local models).
+  max_input_tokens: 0
+  cache_enabled: false
+  cache_ttl_seconds: 3600
+  cache_max_entries: 500
   # When true, only local providers are allowed (ollama/lmstudio).
   local_only: false
   provider: openai
@@ -29,12 +35,6 @@ llm:
     api_key: YOUR_MISTRAL_KEY
     model: mistral-large-2512
     api_base: https://api.mistral.ai/v1
-  max_input_chars: 12000
-  # Optional fallback for chat context % (useful for local models).
-  max_input_tokens: 0
-  cache_enabled: false
-  cache_ttl_seconds: 3600
-  cache_max_entries: 500
   ollama:
     api_key: null
     model: ollama/llama3.1
@@ -43,7 +43,6 @@ llm:
     api_key: null
     model: local-model
     api_base: http://localhost:1234/v1
-
 chat:
   history_max_messages: 80
   max_message_chars: 4000
@@ -52,7 +51,6 @@ chat:
   summary_keep_last_messages: 24
   max_summary_chars: 1200
   redact_secrets: true
-
 # Tool registry (enable/disable tools globally)
 # Notes:
 # - Some tools are conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL, nikto is slow/noisy).
