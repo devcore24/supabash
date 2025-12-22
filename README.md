@@ -16,7 +16,7 @@
 ![License](https://img.shields.io/badge/License-AGPLv3-blue)
 ![Status](https://img.shields.io/badge/Status-Beta-orange)
 
-> **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, 26 tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.
+> **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, 27 tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.
 > Progress: `[████████████████████]` **100%** (Core complete)
 
 **Supabash** is an autonomous AI Security Agent designed for developers, pentesters, DevOps engineers, Red and Blue Teams who want to **automate security audits** without sacrificing depth or understanding. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
@@ -36,7 +36,7 @@
 
 ## 🛠️ The Arsenal (Toolset)
 
-Supabash orchestrates the following security tools. **26 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
+Supabash orchestrates the following security tools. **27 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
 
 ### 🔍 Recon & Discovery
 *   ✅ **Nmap** (Network mapping & service detection)
@@ -69,7 +69,7 @@ Supabash orchestrates the following security tools. **26 wrappers are currently 
 *   🔜 **Impacket Suite** (Network protocols & packet manipulation)
 
 ### 📡 Wireless
-*   🔜 **Aircrack-ng Suite** (WiFi security auditing)
+*   ✅ **Aircrack-ng Suite** (WiFi security auditing)
 *   🔜 **Reaver** (WPS attack tool)
 *   🔜 **Bettercap** (MITM & network utility)
 *   🔜 **Wifite** (Automated wireless auditor)
@@ -207,6 +207,8 @@ supabash audit 192.168.1.10 --yes --crackmapexec --cme-username admin --cme-pass
 supabash audit example.com --yes --theharvester --theharvester-sources crtsh,otx
 # opt-in: LAN discovery (private CIDR; requires sudo)
 sudo supabash audit 192.168.1.10 --yes --netdiscover --netdiscover-range 192.168.1.0/24
+# opt-in: WiFi capture (requires monitor mode; use --aircrack-airmon to auto toggle)
+sudo supabash audit 192.168.1.10 --yes --aircrack --aircrack-interface wlan0mon
 # opt-in: cloud posture checks (requires cloud credentials)
 supabash audit 192.168.1.10 --yes --scoutsuite --scoutsuite-provider aws
 supabash audit 192.168.1.10 --yes --prowler
@@ -239,6 +241,8 @@ supabash react 192.168.1.10 --yes --crackmapexec --cme-username admin --cme-pass
 # opt-in: OSINT + LAN discovery
 supabash react example.com --yes --theharvester
 sudo supabash react 192.168.1.10 --yes --netdiscover --netdiscover-range 192.168.1.0/24
+# opt-in: WiFi capture (requires monitor mode; use --aircrack-airmon to auto toggle)
+sudo supabash react 192.168.1.10 --yes --aircrack --aircrack-interface wlan0mon
 # opt-in: cloud posture checks (requires cloud credentials)
 supabash react 192.168.1.10 --yes --scoutsuite --scoutsuite-provider aws
 supabash react 192.168.1.10 --yes --prowler
@@ -369,6 +373,11 @@ supabash audit [OPTIONS] TARGET
   - `--netdiscover-passive` — passive sniffing mode
   - `--netdiscover-fast/--netdiscover-no-fast` — fast mode toggle
   - `--netdiscover-args` — extra netdiscover CLI args
+  - `--aircrack`, `--aircrack-ng` — opt-in Aircrack-ng suite (WiFi)
+  - `--aircrack-interface` — wireless interface for airodump-ng (e.g. `wlan0mon`)
+  - `--aircrack-channel` — WiFi channel to lock during capture
+  - `--aircrack-args` — extra airodump-ng CLI args
+  - `--aircrack-airmon` — auto start/stop monitor mode with airmon-ng
   - `--scoutsuite` — opt-in ScoutSuite (multi-cloud)
   - `--scoutsuite-provider` (default: `aws`) — `aws|azure|gcp`
   - `--scoutsuite-args` — extra ScoutSuite CLI arguments
@@ -454,6 +463,11 @@ supabash react [OPTIONS] TARGET
   - `--netdiscover-passive` — passive sniffing mode
   - `--netdiscover-fast/--netdiscover-no-fast` — fast mode toggle
   - `--netdiscover-args` — extra netdiscover CLI args
+  - `--aircrack`, `--aircrack-ng` — opt-in Aircrack-ng suite (WiFi)
+  - `--aircrack-interface` — wireless interface for airodump-ng (e.g. `wlan0mon`)
+  - `--aircrack-channel` — WiFi channel to lock during capture
+  - `--aircrack-args` — extra airodump-ng CLI args
+  - `--aircrack-airmon` — auto start/stop monitor mode with airmon-ng
   - `--scoutsuite` — opt-in ScoutSuite (multi-cloud)
   - `--scoutsuite-provider` (default: `aws`) — `aws|azure|gcp`
   - `--scoutsuite-args` — extra ScoutSuite CLI arguments
@@ -543,7 +557,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 
 ---
 
-## ✅ Implemented Wrappers (26 Tools)
+## ✅ Implemented Wrappers (27 Tools)
 
 ### Core Audit Pipeline (runs by default)
 Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase RLS/Trivy/WPScan)
@@ -581,6 +595,11 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 | **Medusa** | Parallel login brute-forcing | `--medusa` |
 | **CrackMapExec/NetExec** | AD/Windows post-exploitation | `--crackmapexec` |
 | **TheHarvester** | OSINT (emails, subdomains) | `--theharvester` (domain targets) |
+
+### Wireless (1 tool)
+| Tool | Purpose | Trigger |
+|------|---------|---------|
+| **Aircrack-ng** | WiFi discovery (airodump-ng capture) | `--aircrack` |
 
 ### Container & Cloud (4 tools)
 | Tool | Purpose | Trigger |

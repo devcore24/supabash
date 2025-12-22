@@ -20,6 +20,7 @@ from .subfinder import SubfinderScanner
 from .wpscan import WPScanScanner
 from .theharvester import TheHarvesterScanner
 from .netdiscover import NetdiscoverScanner
+from .aircrack_ng import AircrackNgScanner
 from .crackmapexec import CrackMapExecScanner
 from .medusa import MedusaRunner
 from .scoutsuite import ScoutSuiteScanner
@@ -48,6 +49,7 @@ __all__ = [
     "WPScanScanner",
     "TheHarvesterScanner",
     "NetdiscoverScanner",
+    "AircrackNgScanner",
     "CrackMapExecScanner",
     "MedusaRunner",
     "ScoutSuiteScanner",

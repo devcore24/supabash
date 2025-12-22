@@ -313,6 +313,7 @@ install_apt_deps() {
         sslscan
         dnsenum
         netdiscover
+        aircrack-ng
         theharvester
         wpscan
         exploitdb # may be unavailable on some distros; handled below

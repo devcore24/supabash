@@ -140,6 +140,12 @@ tools:
   netdiscover:
     enabled: true
     timeout_seconds: 300
+  aircrack_ng:
+    enabled: false
+    timeout_seconds: 120
+    airmon: false
+    # channel: "6"
+    # arguments: "--band abg"
   crackmapexec:
     enabled: true
     timeout_seconds: 600

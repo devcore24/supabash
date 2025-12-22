@@ -413,6 +413,11 @@ def audit(
     netdiscover_passive: bool = typer.Option(False, "--netdiscover-passive", help="Netdiscover passive mode (sniff only)"),
     netdiscover_fast: bool = typer.Option(True, "--netdiscover-fast/--netdiscover-no-fast", help="Netdiscover fast mode"),
     netdiscover_args: Optional[str] = typer.Option(None, "--netdiscover-args", help="Extra netdiscover CLI args"),
+    aircrack: bool = typer.Option(False, "--aircrack", "--aircrack-ng", help="Run Aircrack-ng suite (WiFi; opt-in)"),
+    aircrack_interface: Optional[str] = typer.Option(None, "--aircrack-interface", help="Wireless interface for airodump-ng (e.g. wlan0mon)"),
+    aircrack_channel: Optional[str] = typer.Option(None, "--aircrack-channel", help="WiFi channel to lock during capture"),
+    aircrack_args: Optional[str] = typer.Option(None, "--aircrack-args", help="Extra airodump-ng CLI args"),
+    aircrack_airmon: bool = typer.Option(False, "--aircrack-airmon", help="Auto start/stop monitor mode with airmon-ng"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
     agentic: bool = typer.Option(False, "--agentic", "--react", help="Run an agentic audit (baseline + ReAct-style expansion)"),
@@ -456,6 +461,9 @@ def audit(
         raise typer.Exit(code=1)
     if medusa and (not medusa_usernames or not medusa_passwords):
         console.print("[red]--medusa requires --medusa-usernames and --medusa-passwords[/red]")
+        raise typer.Exit(code=1)
+    if aircrack and not aircrack_interface:
+        console.print("[red]--aircrack requires --aircrack-interface[/red]")
         raise typer.Exit(code=1)
     if crackmapexec and not (cme_username or cme_password or cme_hashes or cme_args):
         console.print("[red]--crackmapexec requires creds/hashes or --cme-args for anonymous runs[/red]")
@@ -538,6 +546,11 @@ def audit(
         netdiscover_passive=netdiscover_passive,
         netdiscover_fast=netdiscover_fast,
         netdiscover_args=netdiscover_args,
+        run_aircrack=aircrack,
+        aircrack_interface=aircrack_interface,
+        aircrack_channel=aircrack_channel,
+        aircrack_args=aircrack_args,
+        aircrack_airmon=aircrack_airmon,
         remediate=remediate,
         use_llm=not no_llm,
         max_remediations=max_remediations,
@@ -654,6 +667,11 @@ def ai_audit(
     netdiscover_passive: bool = typer.Option(False, "--netdiscover-passive", help="Netdiscover passive mode (sniff only)"),
     netdiscover_fast: bool = typer.Option(True, "--netdiscover-fast/--netdiscover-no-fast", help="Netdiscover fast mode"),
     netdiscover_args: Optional[str] = typer.Option(None, "--netdiscover-args", help="Extra netdiscover CLI args"),
+    aircrack: bool = typer.Option(False, "--aircrack", "--aircrack-ng", help="Run Aircrack-ng suite (WiFi; opt-in)"),
+    aircrack_interface: Optional[str] = typer.Option(None, "--aircrack-interface", help="Wireless interface for airodump-ng (e.g. wlan0mon)"),
+    aircrack_channel: Optional[str] = typer.Option(None, "--aircrack-channel", help="WiFi channel to lock during capture"),
+    aircrack_args: Optional[str] = typer.Option(None, "--aircrack-args", help="Extra airodump-ng CLI args"),
+    aircrack_airmon: bool = typer.Option(False, "--aircrack-airmon", help="Auto start/stop monitor mode with airmon-ng"),
     llm_plan: bool = typer.Option(False, "--llm-plan", help="Use the LLM to plan agentic expansion steps (requires LLM enabled)"),
     max_actions: int = typer.Option(10, "--max-actions", help="Maximum agentic expansion actions"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
@@ -721,6 +739,11 @@ def ai_audit(
         netdiscover_passive=netdiscover_passive,
         netdiscover_fast=netdiscover_fast,
         netdiscover_args=netdiscover_args,
+        aircrack=aircrack,
+        aircrack_interface=aircrack_interface,
+        aircrack_channel=aircrack_channel,
+        aircrack_args=aircrack_args,
+        aircrack_airmon=aircrack_airmon,
         agentic=True,
         llm_plan=llm_plan,
         max_actions=max_actions,
@@ -786,6 +809,11 @@ def react(
     netdiscover_passive: bool = typer.Option(False, "--netdiscover-passive", help="Netdiscover passive mode (sniff only)"),
     netdiscover_fast: bool = typer.Option(True, "--netdiscover-fast/--netdiscover-no-fast", help="Netdiscover fast mode"),
     netdiscover_args: Optional[str] = typer.Option(None, "--netdiscover-args", help="Extra netdiscover CLI args"),
+    aircrack: bool = typer.Option(False, "--aircrack", "--aircrack-ng", help="Run Aircrack-ng suite (WiFi; opt-in)"),
+    aircrack_interface: Optional[str] = typer.Option(None, "--aircrack-interface", help="Wireless interface for airodump-ng (e.g. wlan0mon)"),
+    aircrack_channel: Optional[str] = typer.Option(None, "--aircrack-channel", help="WiFi channel to lock during capture"),
+    aircrack_args: Optional[str] = typer.Option(None, "--aircrack-args", help="Extra airodump-ng CLI args"),
+    aircrack_airmon: bool = typer.Option(False, "--aircrack-airmon", help="Auto start/stop monitor mode with airmon-ng"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate remediation steps + code snippets"),
     max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
     min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
@@ -951,6 +979,11 @@ def react(
             netdiscover_passive=netdiscover_passive,
             netdiscover_fast=netdiscover_fast,
             netdiscover_args=netdiscover_args,
+            run_aircrack=aircrack,
+            aircrack_interface=aircrack_interface,
+            aircrack_channel=aircrack_channel,
+            aircrack_args=aircrack_args,
+            aircrack_airmon=aircrack_airmon,
             run_scoutsuite=scoutsuite,
             scoutsuite_provider=scoutsuite_provider,
             scoutsuite_args=scoutsuite_args,
@@ -1937,6 +1970,8 @@ def doctor(
         ("searchsploit", False),
         ("wpscan", False),
         ("netdiscover", False),
+        ("airodump-ng", False),
+        ("airmon-ng", False),
     ]
 
     for bin_name, req in required_bins + optional_bins:

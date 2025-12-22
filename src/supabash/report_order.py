@@ -9,6 +9,7 @@ DEFAULT_TOOL_ORDER: Tuple[str, ...] = (
     "masscan",
     "rustscan",
     "netdiscover",
+    "aircrack-ng",
     "subfinder",
     "theharvester",
     # Web tooling

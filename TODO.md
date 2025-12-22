@@ -67,8 +67,8 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] **Supabase Specific Module**
     - [x] Implement the RLS (Row Level Security) checker for Supabase URLs.
     - [x] Wire into audit aggregation (report.json output).
-- [ ] **Wireless Module (Experimental)**
-    - [ ] **Aircrack-ng:** Basic wrapper for monitoring and capturing (requires hardware access).
+- [x] **Wireless Module (Experimental)**
+    - [x] **Aircrack-ng:** Basic wrapper for monitoring and capturing (requires hardware access).
 
 ---
 

@@ -60,6 +60,11 @@ class ReActOrchestrator(AuditOrchestrator):
         netdiscover_passive: bool = False,
         netdiscover_fast: bool = True,
         netdiscover_args: Optional[str] = None,
+        run_aircrack: bool = False,
+        aircrack_interface: Optional[str] = None,
+        aircrack_channel: Optional[str] = None,
+        aircrack_args: Optional[str] = None,
+        aircrack_airmon: bool = False,
         run_medusa: bool = False,
         medusa_usernames: Optional[str] = None,
         medusa_passwords: Optional[str] = None,
@@ -144,6 +149,11 @@ class ReActOrchestrator(AuditOrchestrator):
                 "netdiscover_interface": netdiscover_interface,
                 "netdiscover_passive": bool(netdiscover_passive),
                 "netdiscover_fast": bool(netdiscover_fast),
+                "aircrack_enabled": bool(run_aircrack),
+                "aircrack_interface": aircrack_interface,
+                "aircrack_channel": aircrack_channel,
+                "aircrack_args": aircrack_args,
+                "aircrack_airmon": bool(aircrack_airmon),
                 "medusa_enabled": bool(run_medusa),
                 "medusa_module": medusa_module,
                 "medusa_port": medusa_port,
@@ -267,6 +277,40 @@ class ReActOrchestrator(AuditOrchestrator):
                 ),
             )
             note("tool_end", "netdiscover", "Finished netdiscover")
+            return entry
+
+        aircrack_cfg = self._aircrack_args()
+
+        def run_aircrack_if_requested() -> Optional[Dict[str, Any]]:
+            if not run_aircrack:
+                return None
+            if not aircrack_interface:
+                return self._skip_tool("aircrack-ng", "Provide --aircrack-interface")
+            if not self._has_scanner("aircrack-ng"):
+                return self._skip_tool("aircrack-ng", "Scanner not available")
+
+            channel = aircrack_channel if aircrack_channel is not None else aircrack_cfg.get("channel")
+            if channel is not None:
+                channel = str(channel).strip() or None
+            args = aircrack_args if aircrack_args is not None else aircrack_cfg.get("arguments")
+            airmon = bool(aircrack_airmon) or bool(aircrack_cfg.get("airmon"))
+
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            output_dir = report_root / f"aircrack-{ts}"
+            note("tool_start", "aircrack-ng", "Running airodump-ng (WiFi capture)")
+            entry = self._run_tool(
+                "aircrack-ng",
+                lambda: self.scanners["aircrack-ng"].scan(
+                    interface=aircrack_interface,
+                    channel=channel,
+                    output_dir=str(output_dir),
+                    arguments=args,
+                    airmon=airmon,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("aircrack-ng"),
+                ),
+            )
+            note("tool_end", "aircrack-ng", "Finished airodump-ng")
             return entry
 
         def run_medusa_from_nmap(nmap_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -528,6 +572,18 @@ class ReActOrchestrator(AuditOrchestrator):
         if netdiscover_entry is not None:
             agg["results"].append(netdiscover_entry)
             if canceled() or (isinstance(netdiscover_entry.get("data"), dict) and netdiscover_entry["data"].get("canceled")):
+                agg["canceled"] = True
+                agg["finished_at"] = time.time()
+                try:
+                    annotate_schema_validation(agg, kind="react")
+                except Exception:
+                    pass
+                return agg
+
+        aircrack_entry = run_aircrack_if_requested()
+        if aircrack_entry is not None:
+            agg["results"].append(aircrack_entry)
+            if canceled() or (isinstance(aircrack_entry.get("data"), dict) and aircrack_entry["data"].get("canceled")):
                 agg["canceled"] = True
                 agg["finished_at"] = time.time()
                 try:

@@ -29,6 +29,7 @@ from supabash.tools import (
     WPScanScanner,
     TheHarvesterScanner,
     NetdiscoverScanner,
+    AircrackNgScanner,
     CrackMapExecScanner,
     MedusaRunner,
     ScoutSuiteScanner,
@@ -76,6 +77,7 @@ class AuditOrchestrator:
             "wpscan": WPScanScanner(),
             "theharvester": TheHarvesterScanner(),
             "netdiscover": NetdiscoverScanner(),
+            "aircrack-ng": AircrackNgScanner(),
             "crackmapexec": CrackMapExecScanner(),
             "medusa": MedusaRunner(),
             "scoutsuite": ScoutSuiteScanner(),
@@ -259,6 +261,21 @@ class AuditOrchestrator:
         else:
             arguments = None
         return {"arguments": arguments}
+
+    def _aircrack_args(self) -> Dict[str, Optional[str]]:
+        cfg = self._tool_config("aircrack-ng")
+        if not isinstance(cfg, dict):
+            cfg = {}
+        channel = cfg.get("channel")
+        if channel is not None:
+            channel = str(channel).strip() or None
+        arguments = cfg.get("arguments")
+        if isinstance(arguments, str):
+            arguments = arguments.strip() or None
+        else:
+            arguments = None
+        airmon = cfg.get("airmon")
+        return {"channel": channel, "arguments": arguments, "airmon": airmon}
 
     def _skip_disabled(self, tool: str) -> Dict[str, Any]:
         return self._skip_tool(tool, "Disabled by config (tools.<name>.enabled=false)")
@@ -992,6 +1009,41 @@ class AuditOrchestrator:
                                 "tool": "netdiscover",
                             }
                         )
+            # Aircrack-ng WiFi findings (open/WEP networks)
+            if tool == "aircrack-ng":
+                scan_data = data.get("scan_data", {})
+                if isinstance(scan_data, dict):
+                    for ap in (scan_data.get("access_points") or [])[:100]:
+                        if not isinstance(ap, dict):
+                            continue
+                        security = str(ap.get("security") or "").upper()
+                        privacy = str(ap.get("privacy") or "").upper()
+                        is_open = security == "OPEN" or ("WPA" not in privacy and "WEP" not in privacy)
+                        is_wep = security == "WEP" or "WEP" in privacy
+                        if not (is_open or is_wep):
+                            continue
+                        bssid = str(ap.get("bssid") or "").strip()
+                        essid = str(ap.get("essid") or "").strip()
+                        channel = ap.get("channel")
+                        evidence_parts = []
+                        if essid:
+                            evidence_parts.append(f"essid={essid}")
+                        if bssid:
+                            evidence_parts.append(f"bssid={bssid}")
+                        if channel is not None:
+                            evidence_parts.append(f"channel={channel}")
+                        if privacy:
+                            evidence_parts.append(f"privacy={privacy}")
+                        severity = "HIGH" if is_wep else "MEDIUM"
+                        title = "WEP network detected" if is_wep else "Open WiFi network detected"
+                        findings.append(
+                            {
+                                "severity": severity,
+                                "title": title,
+                                "evidence": ", ".join(evidence_parts).strip(),
+                                "tool": "aircrack-ng",
+                            }
+                        )
             # Supabase RLS check
             if tool == "supabase_rls":
                 if data.get("risk"):
@@ -1087,6 +1139,11 @@ class AuditOrchestrator:
         netdiscover_passive: bool = False,
         netdiscover_fast: bool = True,
         netdiscover_args: Optional[str] = None,
+        run_aircrack: bool = False,
+        aircrack_interface: Optional[str] = None,
+        aircrack_channel: Optional[str] = None,
+        aircrack_args: Optional[str] = None,
+        aircrack_airmon: bool = False,
         run_medusa: bool = False,
         medusa_usernames: Optional[str] = None,
         medusa_passwords: Optional[str] = None,
@@ -1162,6 +1219,11 @@ class AuditOrchestrator:
                 "netdiscover_interface": netdiscover_interface,
                 "netdiscover_passive": bool(netdiscover_passive),
                 "netdiscover_fast": bool(netdiscover_fast),
+                "aircrack_enabled": bool(run_aircrack),
+                "aircrack_interface": aircrack_interface,
+                "aircrack_channel": aircrack_channel,
+                "aircrack_args": aircrack_args,
+                "aircrack_airmon": bool(aircrack_airmon),
                 "medusa_enabled": bool(run_medusa),
                 "medusa_module": medusa_module,
                 "medusa_port": medusa_port,
@@ -1421,6 +1483,40 @@ class AuditOrchestrator:
                 ),
             )
             note("tool_end", "netdiscover", "Finished netdiscover")
+            return entry
+
+        aircrack_cfg = self._aircrack_args()
+
+        def run_aircrack_if_requested() -> Optional[Dict[str, Any]]:
+            if not run_aircrack:
+                return None
+            if not aircrack_interface:
+                return self._skip_tool("aircrack-ng", "Provide --aircrack-interface")
+            if not self._has_scanner("aircrack-ng"):
+                return self._skip_tool("aircrack-ng", "Scanner not available")
+
+            channel = aircrack_channel if aircrack_channel is not None else aircrack_cfg.get("channel")
+            if channel is not None:
+                channel = str(channel).strip() or None
+            args = aircrack_args if aircrack_args is not None else aircrack_cfg.get("arguments")
+            airmon = bool(aircrack_airmon) or bool(aircrack_cfg.get("airmon"))
+
+            ts = time.strftime("%Y%m%d-%H%M%S")
+            output_dir = report_root / f"aircrack-{ts}"
+            note("tool_start", "aircrack-ng", "Running airodump-ng (WiFi capture)")
+            entry = self._run_tool(
+                "aircrack-ng",
+                lambda: self.scanners["aircrack-ng"].scan(
+                    interface=aircrack_interface,
+                    channel=channel,
+                    output_dir=str(output_dir),
+                    arguments=args,
+                    airmon=airmon,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("aircrack-ng"),
+                ),
+            )
+            note("tool_end", "aircrack-ng", "Finished airodump-ng")
             return entry
 
         def run_medusa_from_nmap(nmap_entry: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1944,6 +2040,14 @@ class AuditOrchestrator:
                         agg["finished_at"] = time.time()
                         return agg
 
+                aircrack_entry = run_aircrack_if_requested()
+                if aircrack_entry is not None:
+                    agg["results"].append(aircrack_entry)
+                    if canceled() or (isinstance(aircrack_entry.get("data"), dict) and aircrack_entry["data"].get("canceled")):
+                        agg["canceled"] = True
+                        agg["finished_at"] = time.time()
+                        return agg
+
                 scoutsuite_entry = run_scoutsuite_if_requested()
                 if scoutsuite_entry is not None:
                     agg["results"].append(scoutsuite_entry)
@@ -2168,6 +2272,14 @@ class AuditOrchestrator:
             if netdiscover_entry is not None:
                 agg["results"].append(netdiscover_entry)
                 if canceled() or (isinstance(netdiscover_entry.get("data"), dict) and netdiscover_entry["data"].get("canceled")):
+                    agg["canceled"] = True
+                    agg["finished_at"] = time.time()
+                    return agg
+
+            aircrack_entry = run_aircrack_if_requested()
+            if aircrack_entry is not None:
+                agg["results"].append(aircrack_entry)
+                if canceled() or (isinstance(aircrack_entry.get("data"), dict) and aircrack_entry["data"].get("canceled")):
                     agg["canceled"] = True
                     agg["finished_at"] = time.time()
                     return agg
