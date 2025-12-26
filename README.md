@@ -30,7 +30,7 @@
 *   **🛡️ Auditing:** Scans infrastructure, web applications, and Docker container images (wireless is planned).
 *   **📝 Smart Reporting:** Generates human-readable audits containing detection details, severity levels, and **code-level fix suggestions**.
 *   **⚡ High-Performance:** Orchestrates fast scanners (Rust/Go) alongside deep-dive frameworks (Python/Ruby).
-*   **🔌 Extensible Design:** Modular wrappers today; plugin registry planned.
+*   **🔌 Extensible Design:** Modular wrappers; plugin registry planned.
 
 ---
 

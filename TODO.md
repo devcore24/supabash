@@ -225,6 +225,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add **Medusa** (parallel network login brute-forcer; alternative to Hydra).
 - [x] Add **ScoutSuite** (multi-cloud posture assessment; AWS/Azure/GCP).
 - [x] Add **Prowler** (AWS security best-practice checks).
+- [x] Add **Aircrack-ng:** WiFi security auditing (requires hardware; experimental).
 
 ### Future Tool Additions (Backlog)
 - [ ] **Recon-ng:** Web reconnaissance framework with modular OSINT capabilities.
@@ -232,4 +233,4 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [ ] **Impacket Tools:** Network protocol manipulation for Windows/AD environments.
 - [ ] **John the Ripper:** Offline password cracking for captured hashes.
 - [ ] **Hashcat:** GPU-accelerated password recovery.
-- [ ] **Aircrack-ng:** WiFi security auditing (requires hardware; experimental).
+
