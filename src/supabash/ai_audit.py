@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 from pathlib import Path
 from threading import Event
@@ -11,6 +10,7 @@ from urllib.parse import urlparse
 from supabash.audit import AuditOrchestrator
 from supabash.agent import MethodologyPlanner
 from supabash import prompts
+from supabash.llm import ToolCallingNotSupported, ToolCallingError
 from supabash.llm_context import prepare_json_payload
 from supabash.report_order import stable_sort_results
 from supabash.report_schema import annotate_schema_validation
@@ -20,7 +20,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
     """
     Combined "agentic audit":
       1) Run the deterministic baseline audit pipeline (no LLM)
-      2) Optionally run an agentic expansion phase (heuristic or LLM-planned)
+      2) Optionally run a bounded, tool-calling agentic expansion phase
       3) Summarize + remediate on the combined results and write one report
     """
 
@@ -91,7 +91,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
         scoutsuite_args: Optional[str] = None,
         run_prowler: bool = False,
         prowler_args: Optional[str] = None,
-        llm_plan: bool = False,
+        llm_plan: bool = True,
         max_actions: int = 10,
         remediate: bool = False,
         max_remediations: int = 5,
@@ -101,6 +101,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
         use_llm: bool = True,
     ) -> Dict[str, Any]:
         run_error: Optional[str] = None
+        normalized = self._normalize_target(target)
 
         def canceled() -> bool:
             return bool(cancel_event and cancel_event.is_set())
@@ -210,7 +211,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
             {
                 "phase": "baseline+agentic",
                 "baseline_finished_at": baseline_finished_at,
-                "planner": {"type": "llm" if llm_plan else "heuristic", "plans": [], "error": None, "warning": None},
+                "planner": {
+                    "type": "tool_calling" if llm_plan else "disabled",
+                    "plans": [],
+                    "error": None,
+                    "warning": None,
+                },
                 "max_actions": int(max_actions),
                 "actions": [],
                 "notes": "",
@@ -226,7 +232,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
         llm_enabled = bool(use_llm) and self._llm_enabled(default=True)
         if llm_plan and not llm_enabled:
             llm_plan = False
-            ai_obj["planner"]["warning"] = "LLM disabled; falling back to heuristic planning"
+            ai_obj["planner"]["warning"] = "LLM disabled; skipping agentic phase"
 
         # Reflect actual LLM usage in the combined report (baseline intentionally runs with use_llm=False).
         if llm_enabled:
@@ -287,58 +293,19 @@ class AIAuditOrchestrator(AuditOrchestrator):
         if extra_web_targets:
             ai_obj["notes"] = f"Additional web targets detected: {', '.join(extra_web_targets[:6])}"
 
-        # Candidate actions (bounded by max_actions)
-        candidates: List[str] = []
-        for url in extra_web_targets:
-            candidates.extend(
-                [
-                    f"whatweb:{url}",
-                    f"nuclei:{url}",
-                    f"gobuster:{url}",
-                ]
-            )
-            if run_nikto:
-                candidates.append(f"nikto:{url}")
+        # Agentic tool-calling phase (bounded).
+        agentic_enabled = bool(llm_plan)
+        ai_obj["planner"]["type"] = "tool_calling" if agentic_enabled else "disabled"
 
-        # Heuristic plan: take candidates in order.
-        if not llm_plan and candidates:
-            ai_obj["planner"]["plans"].append(
-                {"next_steps": candidates[: max(1, int(max_actions))], "notes": ai_obj.get("notes", "")}
-            )
-
-        def parse_llm_plan(text: str) -> Dict[str, Any]:
-            raw = (text or "").strip()
-            if not raw:
-                raise ValueError("empty LLM response")
-            obj = None
-            try:
-                obj = json.loads(raw)
-            except Exception:
-                m = re.search(r"\{.*\}", raw, flags=re.S)
-                if m:
-                    obj = json.loads(m.group(0))
-            if not isinstance(obj, dict):
-                raise ValueError("LLM planner output is not a JSON object")
-            steps = obj.get("next_steps", [])
-            if steps is None:
-                steps = []
-            if not isinstance(steps, list):
-                raise ValueError("LLM planner output next_steps is not a list")
-            cleaned = []
-            for s in steps:
-                if s is None:
-                    continue
-                st = str(s).strip()
-                if st:
-                    cleaned.append(st)
-            notes = obj.get("notes", "")
-            if notes is None:
-                notes = ""
-            return {"next_steps": cleaned, "notes": str(notes)}
-
-        def llm_plan_next_steps(available_actions: List[str], remaining: int) -> Dict[str, Any]:
-            # Build minimal context for the planner (kept intentionally small).
-            open_ports = []
+        if not agentic_enabled:
+            ai_obj["planner"]["warning"] = "Agentic phase disabled (--no-llm-plan)."
+            ai_obj["agentic_skipped"] = True
+        elif not llm_enabled:
+            ai_obj["planner"]["warning"] = "LLM disabled; skipping agentic phase."
+            ai_obj["agentic_skipped"] = True
+        else:
+            profile_values = ("fast", "standard", "aggressive")
+            open_ports: List[int] = []
             try:
                 for entry in agg.get("results", []) or []:
                     if isinstance(entry, dict) and entry.get("tool") == "nmap" and entry.get("success"):
@@ -348,269 +315,524 @@ class AIAuditOrchestrator(AuditOrchestrator):
             except Exception:
                 open_ports = []
 
-            context_obj = {
-                "target": target,
-                "mode": mode,
-                "remaining_actions": int(remaining),
-                "available_actions": available_actions,
-                "observations": {
-                    "open_ports": open_ports,
-                    "web_targets": web_targets,
-                    "baseline_web_target": baseline_web,
-                },
-                "constraints": {
-                    "max_actions": int(max_actions),
-                    "nikto_opt_in": bool(run_nikto),
-                    "hydra_opt_in": bool(run_hydra),
-                    "sqlmap_requires_parameterized_url": True,
-                },
+            tls_ports = [p for p in open_ports if p in (443, 8443)]
+            smb_ports = [p for p in open_ports if p in (139, 445)]
+
+            allowed_web_targets = [u for u in web_targets if isinstance(u, str) and u.strip()]
+            sqlmap_targets = [u for u in allowed_web_targets if "?" in u]
+            if normalized.get("sqlmap_url") and normalized["sqlmap_url"] not in sqlmap_targets:
+                sqlmap_targets.insert(0, normalized["sqlmap_url"])
+
+            tool_specs = {
+                "httpx": {"target_kind": "web", "enabled_default": True},
+                "whatweb": {"target_kind": "web", "enabled_default": True},
+                "nuclei": {"target_kind": "web", "enabled_default": True},
+                "gobuster": {"target_kind": "web", "enabled_default": True},
+                "ffuf": {"target_kind": "web", "enabled_default": False},
+                "katana": {"target_kind": "web", "enabled_default": False},
+                "nikto": {"target_kind": "web", "enabled_default": False, "opt_in": bool(run_nikto)},
+                "sqlmap": {"target_kind": "web", "enabled_default": True, "requires_param": True},
+                "dnsenum": {"target_kind": "domain", "enabled_default": True},
+                "subfinder": {"target_kind": "domain", "enabled_default": False},
+                "sslscan": {"target_kind": "host_port", "enabled_default": True},
+                "enum4linux-ng": {"target_kind": "host", "enabled_default": True, "requires_smb": True},
+                "trivy": {"target_kind": "container", "enabled_default": True},
             }
 
-            max_chars = self._llm_max_chars(default=8000)
-            payload, truncated = prepare_json_payload(context_obj, max_chars=max_chars)
-            messages = [
-                {"role": "system", "content": prompts.REACT_LLM_PLANNER_PROMPT},
-                {
-                    "role": "system",
-                    "content": "Action format note: choose actions exactly from `available_actions` (often like `tool:https://host:port`).",
-                },
-                {"role": "user", "content": payload},
-            ]
-            if truncated:
-                messages.insert(2, {"role": "system", "content": "Note: Input was truncated to fit context limits."})
-
-            note("llm_start", "planner", "Planning next steps with LLM", agg=agg)
-            chat_with_meta = getattr(self.llm, "chat_with_meta", None)
-            if callable(chat_with_meta):
-                content, meta = chat_with_meta(messages)
-            else:
-                content = self.llm.chat(messages)
-                meta = None
-
-            if isinstance(meta, dict):
-                meta = dict(meta)
-                meta.update(
-                    {
-                        "call_type": "plan",
-                        "stage": "ai_audit",
-                        "input_truncated": bool(truncated),
-                        "input_chars": len(payload),
-                        "max_input_chars": int(max_chars),
-                    }
-                )
-                self._append_llm_call(agg, meta)
-
-            plan_obj = parse_llm_plan(content)
-            return plan_obj
-
-        def run_web_action(tool: str, url: str) -> Dict[str, Any]:
-            if canceled():
-                return {"tool": tool, "success": False, "skipped": True, "reason": "Canceled", "phase": "agentic", "target": url}
-            if not self._tool_enabled(tool, default=True):
-                entry = self._skip_disabled(tool)
-                entry["phase"] = "agentic"
-                entry["target"] = url
-                return entry
-            if tool not in self.scanners:
-                entry = self._skip_tool(tool, "Scanner not available")
-                entry["phase"] = "agentic"
-                entry["target"] = url
-                return entry
-
-            if tool == "whatweb":
-                entry = self._run_tool(
-                    tool,
-                    lambda: self.scanners["whatweb"].scan(
-                        url,
-                        cancel_event=cancel_event,
-                        timeout_seconds=self._tool_timeout_seconds("whatweb"),
-                    ),
-                )
-            elif tool == "nuclei":
-                entry = self._run_tool(
-                    tool,
-                    lambda: self.scanners["nuclei"].scan(
-                        url,
-                        rate_limit=nuclei_rate_limit or None,
-                        cancel_event=cancel_event,
-                        timeout_seconds=self._tool_timeout_seconds("nuclei"),
-                    ),
-                )
-            elif tool == "gobuster":
-                if gobuster_wordlist:
-                    entry = self._run_tool(
-                        tool,
-                        lambda: self.scanners["gobuster"].scan(
-                            url,
-                            wordlist=gobuster_wordlist,
-                            threads=gobuster_threads,
-                            cancel_event=cancel_event,
-                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
-                        ),
-                    )
-                else:
-                    entry = self._run_tool(
-                        tool,
-                        lambda: self.scanners["gobuster"].scan(
-                            url,
-                            threads=gobuster_threads,
-                            cancel_event=cancel_event,
-                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
-                        ),
-                    )
-            elif tool == "nikto":
-                try:
-                    u = urlparse(url)
-                    host = u.hostname or url
-                    port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
-                except Exception:
-                    host = url
-                    port = 80
-                entry = self._run_tool(
-                    tool,
-                    lambda: self.scanners["nikto"].scan(
-                        host,
-                        port=port,
-                        cancel_event=cancel_event,
-                        timeout_seconds=self._tool_timeout_seconds("nikto"),
-                    ),
-                )
-            else:
-                entry = self._skip_tool(tool, "Unsupported agentic action")
-
-            entry["phase"] = "agentic"
-            entry["target"] = url
-            return entry
-
-        # Execute actions
-        actions_executed = 0
-        available_set = set(candidates)
-
-        def _choose_action_from_step(step: str) -> Optional[str]:
-            """
-            Best-effort mapping from an LLM planner step to a concrete pending action.
-
-            Accepts:
-              - exact action strings (e.g. "nuclei:https://host:port")
-              - base tool names (e.g. "nuclei" → first matching pending action)
-              - space form (e.g. "nuclei https://host:port")
-            """
-            s = (step or "").strip()
-            if not s:
-                return None
-            if s in available_set:
-                return s
-
-            if ":" not in s and " " in s:
-                base, _, rest = s.partition(" ")
-                base = base.strip().lower()
-                rest = rest.strip()
-                if base and rest:
-                    candidate = f"{base}:{rest}"
-                    if candidate in available_set:
-                        return candidate
-
-            base = s.split(":", 1)[0].strip().lower()
-            if not base:
-                return None
-
-            prefix = f"{base}:"
-            for a in candidates:
-                if isinstance(a, str) and a in available_set and a.lower().startswith(prefix):
-                    return a
-            return None
-
-        while candidates and actions_executed < int(max_actions):
-            if canceled():
-                break
-
-            if llm_plan:
-                remaining = int(max_actions) - actions_executed
-                try:
-                    plan = llm_plan_next_steps(list(candidates), remaining=remaining)
-                except Exception as e:
-                    llm_plan_failed = f"LLM planning failed: {e}"
-                    ai_obj["planner"]["error"] = llm_plan_failed
-                    agg["error"] = llm_plan_failed
-                    agg["failed"] = True
-                    run_error = llm_plan_failed
-                    break
-
-                # Filter steps to the provided available set and handle stop.
-                steps = []
-                stop_requested = False
-                for step in plan.get("next_steps", []):
-                    base = str(step).split(":", 1)[0].strip().lower()
-                    if base in ("stop", "done", "finish"):
-                        stop_requested = True
-                        break
-                    chosen = _choose_action_from_step(str(step))
-                    if chosen and chosen not in steps:
-                        steps.append(chosen)
-
-                ai_obj["planner"]["plans"].append({"next_steps": steps, "notes": plan.get("notes", "")})
-                if stop_requested or not steps:
-                    break
-                queue = steps
-            else:
-                remaining = int(max_actions) - actions_executed
-                queue = list(candidates[:remaining])
-
-            for action in list(queue):
-                if actions_executed >= int(max_actions) or canceled():
-                    break
-                if action not in available_set:
+            allowed_tools: List[str] = []
+            for tool, spec in tool_specs.items():
+                if not self._has_scanner(tool):
                     continue
-                candidates.remove(action)
-                available_set.remove(action)
+                if not self._tool_enabled(tool, default=bool(spec.get("enabled_default", True))):
+                    continue
+                if spec.get("opt_in") is False:
+                    continue
+                if tool in ("dnsenum", "subfinder") and not self._should_run_dnsenum(scan_host):
+                    continue
+                if tool == "sqlmap" and not sqlmap_targets:
+                    continue
+                if tool == "sslscan" and not tls_ports:
+                    continue
+                if tool == "enum4linux-ng" and not smb_ports:
+                    continue
+                if tool == "trivy" and not container_image:
+                    continue
+                allowed_tools.append(tool)
 
-                tool, url = action.split(":", 1)
-                tool = tool.strip().lower()
-                url = url.strip()
-
-                note("tool_start", tool, f"Running {tool} (agentic)", agg=agg)
-                started_at = time.time()
-                entry = run_web_action(tool, url)
-                finished_at = time.time()
-                note("tool_end", tool, f"Finished {tool} (agentic)", agg=agg)
-
-                agg.setdefault("results", []).append(entry)
-                ai_obj["actions"].append(
-                    {
-                        "action": action,
-                        "tool": tool,
-                        "target": url,
-                        "phase": "agentic",
-                        "success": bool(entry.get("success")) if not entry.get("skipped") else False,
-                        "skipped": bool(entry.get("skipped")),
-                        "error": entry.get("error") or entry.get("reason"),
-                        "started_at": started_at,
-                        "finished_at": finished_at,
-                    }
-                )
-                actions_executed += 1
-
-        # If LLM planning was required and failed, stop and write a best-effort report
-        # (baseline phase + any already-run agentic actions).
-        if agg.get("failed") and run_error:
-            agg["finished_at"] = time.time()
-            agg["results"] = stable_sort_results(agg.get("results", []) or [])
-            agg["run_error"] = run_error
-            try:
-                annotate_schema_validation(agg, kind="audit")
-            except Exception:
-                pass
-            if output is not None:
-                try:
-                    output.parent.mkdir(parents=True, exist_ok=True)
-                    output.write_text(json.dumps(agg, indent=2), encoding="utf-8")
-                    agg["saved_to"] = str(output)
-                except Exception as e:
-                    agg["saved_to"] = None
-                    agg["write_error"] = str(e)
+            if not allowed_tools:
+                ai_obj["planner"]["warning"] = "No eligible tools available for agentic phase."
+                ai_obj["agentic_skipped"] = True
             else:
-                agg["saved_to"] = None
-            return agg
+                allowed_argument_keys = {"profile", "target", "port", "rate_limit", "threads", "wordlist"}
+
+                def build_tool_schema(allowed: List[str]) -> Dict[str, Any]:
+                    return {
+                        "type": "function",
+                        "function": {
+                            "name": "propose_actions",
+                            "description": "Propose next audit actions using allowed tools and targets.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "actions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "tool_name": {"type": "string", "enum": allowed},
+                                                "arguments": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "profile": {
+                                                            "type": "string",
+                                                            "enum": list(profile_values),
+                                                        },
+                                                        "target": {"type": "string"},
+                                                        "port": {"type": "integer"},
+                                                        "rate_limit": {"type": "integer"},
+                                                        "threads": {"type": "integer"},
+                                                        "wordlist": {"type": "string"},
+                                                    },
+                                                    "required": ["profile"],
+                                                    "additionalProperties": False,
+                                                },
+                                                "reasoning": {"type": "string"},
+                                            },
+                                            "required": ["tool_name", "arguments", "reasoning"],
+                                            "additionalProperties": False,
+                                        },
+                                    },
+                                    "stop": {"type": "boolean"},
+                                    "notes": {"type": "string"},
+                                },
+                                "required": ["actions"],
+                                "additionalProperties": False,
+                            },
+                        },
+                    }
+
+                def clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+                    try:
+                        v = int(value)
+                    except Exception:
+                        v = default
+                    if v < minimum:
+                        return minimum
+                    if v > maximum:
+                        return maximum
+                    return v
+
+                def apply_profile(profile: str, base_rate: int, base_threads: int) -> Tuple[int, int]:
+                    prof = (profile or "").strip().lower()
+                    if prof not in profile_values:
+                        prof = "standard"
+                    rate = base_rate
+                    threads = base_threads
+                    if prof == "fast":
+                        threads = max(5, threads // 2)
+                        if rate > 0:
+                            rate = max(1, rate // 2)
+                    elif prof == "aggressive":
+                        threads = min(max(threads, 10) * 2, 50)
+                        if rate > 0:
+                            rate = min(rate * 2, 100)
+                    return rate, threads
+
+                def normalize_action(item: Any) -> Optional[Dict[str, Any]]:
+                    if not isinstance(item, dict):
+                        return None
+                    tool = str(item.get("tool_name") or "").strip().lower()
+                    if tool not in allowed_tools:
+                        return None
+                    args = item.get("arguments")
+                    if not isinstance(args, dict):
+                        return None
+                    profile = str(args.get("profile") or "standard").strip().lower()
+                    if profile not in profile_values:
+                        profile = "standard"
+                    filtered = {k: v for k, v in args.items() if k in allowed_argument_keys}
+                    filtered["profile"] = profile
+                    reasoning = str(item.get("reasoning") or "").strip()
+                    return {
+                        "tool": tool,
+                        "arguments": filtered,
+                        "profile": profile,
+                        "reasoning": reasoning,
+                    }
+
+                def parse_tool_calls(tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
+                    actions: List[Dict[str, Any]] = []
+                    notes = ""
+                    stop = False
+                    for call in tool_calls:
+                        if call.get("name") != "propose_actions":
+                            continue
+                        args = call.get("arguments")
+                        if not isinstance(args, dict):
+                            raise ToolCallingError("Tool call arguments missing or invalid.")
+                        stop = bool(args.get("stop")) or stop
+                        note_text = args.get("notes")
+                        if isinstance(note_text, str) and note_text.strip():
+                            notes = note_text.strip()
+                        raw_actions = args.get("actions", [])
+                        if raw_actions is None:
+                            raw_actions = []
+                        if not isinstance(raw_actions, list):
+                            raise ToolCallingError("Tool call actions must be a list.")
+                        for item in raw_actions:
+                            spec = normalize_action(item)
+                            if spec:
+                                actions.append(spec)
+                    return {"actions": actions, "notes": notes, "stop": stop}
+
+                def plan_actions(remaining: int) -> Dict[str, Any]:
+                    results_summary = []
+                    for r in agg.get("results", []) or []:
+                        if not isinstance(r, dict):
+                            continue
+                        results_summary.append(
+                            {
+                                "tool": r.get("tool"),
+                                "success": r.get("success"),
+                                "skipped": r.get("skipped"),
+                                "phase": r.get("phase"),
+                            }
+                        )
+
+                    findings_preview = []
+                    try:
+                        findings_preview = self._collect_findings(agg)[-20:]
+                    except Exception:
+                        findings_preview = []
+
+                    context_obj = {
+                        "target": target,
+                        "mode": mode,
+                        "remaining_actions": int(remaining),
+                        "allowed_tools": allowed_tools,
+                        "allowed_targets": {
+                            "web": allowed_web_targets[:12],
+                            "sqlmap": sqlmap_targets[:6],
+                            "scan_host": scan_host,
+                        },
+                        "open_ports": open_ports,
+                        "observations": {
+                            "web_targets": allowed_web_targets[:12],
+                            "results": results_summary[-12:],
+                            "findings": findings_preview,
+                        },
+                        "constraints": {
+                            "profile_enum": list(profile_values),
+                            "sqlmap_requires_parameterized_url": True,
+                            "nikto_opt_in": bool(run_nikto),
+                            "trivy_requires_container": bool(container_image),
+                            "tls_ports_detected": tls_ports,
+                            "smb_ports_detected": bool(smb_ports),
+                        },
+                    }
+
+                    max_chars = self._llm_max_chars(default=8000)
+                    payload, truncated = prepare_json_payload(context_obj, max_chars=max_chars)
+                    messages = [
+                        {"role": "system", "content": prompts.AGENTIC_TOOLCALL_PROMPT},
+                        {"role": "user", "content": payload},
+                    ]
+                    if truncated:
+                        messages.insert(1, {"role": "system", "content": "Note: Input was truncated to fit context limits."})
+
+                    note("llm_start", "planner", "Planning next steps with tool-calling", agg=agg)
+                    tool_calls, meta = self.llm.tool_call(
+                        messages,
+                        tools=[build_tool_schema(allowed_tools)],
+                        tool_choice={"type": "function", "function": {"name": "propose_actions"}},
+                    )
+                    if isinstance(meta, dict):
+                        meta = dict(meta)
+                        meta.update(
+                            {
+                                "call_type": "plan",
+                                "stage": "ai_audit_tool_call",
+                                "input_truncated": bool(truncated),
+                                "input_chars": len(payload),
+                                "max_input_chars": int(max_chars),
+                            }
+                        )
+                        self._append_llm_call(agg, meta)
+
+                    return parse_tool_calls(tool_calls)
+
+                def run_agentic_action(action: Dict[str, Any]) -> Dict[str, Any]:
+                    tool = action["tool"]
+                    args = action["arguments"]
+                    profile = action["profile"]
+                    target = args.get("target") if isinstance(args.get("target"), str) else None
+
+                    if canceled():
+                        entry = {"tool": tool, "success": False, "skipped": True, "reason": "Canceled"}
+                    elif tool_specs.get(tool, {}).get("target_kind") == "web":
+                        if not target:
+                            entry = self._skip_tool(tool, "Missing target")
+                        elif target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
+                            entry = self._skip_tool(tool, "Target not in allowed web targets")
+                        else:
+                            base_rate = int(nuclei_rate_limit or 0)
+                            base_threads = int(gobuster_threads or 10)
+                            rate_limit = args.get("rate_limit", base_rate)
+                            threads = args.get("threads", base_threads)
+                            rate_limit = clamp_int(rate_limit, base_rate, 0, 100)
+                            threads = clamp_int(threads, base_threads, 1, 50)
+                            rate_limit, threads = apply_profile(profile, rate_limit, threads)
+                            wordlist = args.get("wordlist") if isinstance(args.get("wordlist"), str) else gobuster_wordlist
+
+                            if tool == "httpx":
+                                entry = self._run_tool(
+                                    tool,
+                                    lambda: self.scanners["httpx"].scan(
+                                        [target],
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("httpx"),
+                                    ),
+                                )
+                            elif tool == "whatweb":
+                                entry = self._run_tool(
+                                    tool,
+                                    lambda: self.scanners["whatweb"].scan(
+                                        target,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("whatweb"),
+                                    ),
+                                )
+                            elif tool == "nuclei":
+                                entry = self._run_tool(
+                                    tool,
+                                    lambda: self.scanners["nuclei"].scan(
+                                        target,
+                                        rate_limit=rate_limit or None,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                                    ),
+                                )
+                            elif tool == "gobuster":
+                                if wordlist:
+                                    entry = self._run_tool(
+                                        tool,
+                                        lambda: self.scanners["gobuster"].scan(
+                                            target,
+                                            wordlist=wordlist,
+                                            threads=threads,
+                                            cancel_event=cancel_event,
+                                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                        ),
+                                    )
+                                else:
+                                    entry = self._run_tool(
+                                        tool,
+                                        lambda: self.scanners["gobuster"].scan(
+                                            target,
+                                            threads=threads,
+                                            cancel_event=cancel_event,
+                                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                        ),
+                                    )
+                            elif tool == "ffuf":
+                                entry = self._run_tool(
+                                    tool,
+                                    lambda: self.scanners["ffuf"].scan(
+                                        target,
+                                        wordlist=wordlist,
+                                        threads=threads,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("ffuf"),
+                                    ),
+                                )
+                            elif tool == "katana":
+                                entry = self._run_tool(
+                                    tool,
+                                    lambda: self.scanners["katana"].crawl(
+                                        target,
+                                        depth=int(self._tool_config("katana").get("depth", 3) or 3),
+                                        concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("katana"),
+                                    ),
+                                )
+                            elif tool == "nikto":
+                                try:
+                                    u = urlparse(target)
+                                    host = u.hostname or target
+                                    port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
+                                except Exception:
+                                    host = target
+                                    port = 80
+                                entry = self._run_tool(
+                                    tool,
+                                    lambda: self.scanners["nikto"].scan(
+                                        host,
+                                        port=port,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("nikto"),
+                                    ),
+                                )
+                            elif tool == "sqlmap":
+                                if "?" not in target:
+                                    entry = self._skip_tool(tool, "No parameterized URL provided")
+                                else:
+                                    entry = self._run_tool(
+                                        tool,
+                                        lambda: self.scanners["sqlmap"].scan(
+                                            target,
+                                            cancel_event=cancel_event,
+                                            timeout_seconds=self._tool_timeout_seconds("sqlmap"),
+                                        ),
+                                    )
+                            else:
+                                entry = self._skip_tool(tool, "Unsupported agentic action")
+                    elif tool == "dnsenum":
+                        if not self._should_run_dnsenum(scan_host):
+                            entry = self._skip_tool(tool, "Not a domain target")
+                        else:
+                            entry = self._run_tool(
+                                tool,
+                                lambda: self.scanners["dnsenum"].scan(
+                                    scan_host,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("dnsenum"),
+                                ),
+                            )
+                    elif tool == "subfinder":
+                        if not self._should_run_dnsenum(scan_host):
+                            entry = self._skip_tool(tool, "Not a domain target")
+                        else:
+                            entry = self._run_tool(
+                                tool,
+                                lambda: self.scanners["subfinder"].scan(
+                                    scan_host,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("subfinder"),
+                                ),
+                            )
+                    elif tool == "sslscan":
+                        port = args.get("port")
+                        if port is None:
+                            port = tls_ports[0] if tls_ports else None
+                        try:
+                            port = int(port) if port is not None else None
+                        except Exception:
+                            port = None
+                        if port is None:
+                            entry = self._skip_tool(tool, "No TLS ports detected (443/8443)")
+                        else:
+                            entry = self._run_tool(
+                                tool,
+                                lambda: self.scanners["sslscan"].scan(
+                                    scan_host,
+                                    port=port,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("sslscan"),
+                                ),
+                            )
+                    elif tool == "enum4linux-ng":
+                        if not smb_ports:
+                            entry = self._skip_tool(tool, "No SMB ports detected (139/445)")
+                        else:
+                            entry = self._run_tool(
+                                tool,
+                                lambda: self.scanners["enum4linux-ng"].scan(
+                                    scan_host,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("enum4linux-ng"),
+                                ),
+                            )
+                    elif tool == "trivy":
+                        if not container_image:
+                            entry = self._skip_tool(tool, "No container image provided")
+                        else:
+                            entry = self._run_tool(
+                                tool,
+                                lambda: self.scanners["trivy"].scan(
+                                    container_image,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("trivy"),
+                                ),
+                            )
+                    else:
+                        entry = self._skip_tool(tool, "Unsupported agentic action")
+
+                    entry["phase"] = "agentic"
+                    if target:
+                        entry["target"] = target
+                    entry["profile"] = profile
+                    return entry
+
+                actions_executed = 0
+                while actions_executed < int(max_actions):
+                    if canceled():
+                        break
+                    remaining = int(max_actions) - actions_executed
+                    try:
+                        plan = plan_actions(remaining)
+                    except ToolCallingNotSupported as e:
+                        msg = f"Tool calling not supported; skipping agentic phase. ({e})"
+                        ai_obj["planner"]["warning"] = msg
+                        ai_obj["agentic_skipped"] = True
+                        note("llm_error", "planner", msg, agg=agg)
+                        break
+                    except (ToolCallingError, Exception) as e:
+                        msg = f"Tool calling failed; skipping agentic phase. ({e})"
+                        ai_obj["planner"]["warning"] = msg
+                        ai_obj["agentic_skipped"] = True
+                        note("llm_error", "planner", msg, agg=agg)
+                        break
+
+                    plan_actions_list = plan.get("actions", [])
+                    ai_obj["planner"]["plans"].append(
+                        {"actions": plan_actions_list, "notes": plan.get("notes", ""), "stop": plan.get("stop", False)}
+                    )
+                    if plan.get("notes"):
+                        ai_obj["notes"] = plan.get("notes")
+                    if plan.get("stop") or not plan_actions_list:
+                        break
+
+                    for action in plan_actions_list:
+                        if actions_executed >= int(max_actions) or canceled():
+                            break
+                        note("tool_start", action["tool"], f"Running {action['tool']} (agentic)", agg=agg)
+                        started_at = time.time()
+                        entry = run_agentic_action(action)
+                        finished_at = time.time()
+                        note("tool_end", action["tool"], f"Finished {action['tool']} (agentic)", agg=agg)
+
+                        agg.setdefault("results", []).append(entry)
+                        ai_obj["actions"].append(
+                            {
+                                "tool": action["tool"],
+                                "target": entry.get("target"),
+                                "profile": action.get("profile"),
+                                "reasoning": action.get("reasoning"),
+                                "phase": "agentic",
+                                "success": bool(entry.get("success")) if not entry.get("skipped") else False,
+                                "skipped": bool(entry.get("skipped")),
+                                "error": entry.get("error") or entry.get("reason"),
+                                "started_at": started_at,
+                                "finished_at": finished_at,
+                            }
+                        )
+                        actions_executed += 1
+                        if action["tool"] == "httpx" and entry.get("success"):
+                            alive = entry.get("data", {}).get("alive")
+                            if isinstance(alive, list) and alive:
+                                allowed_web_targets = [str(x) for x in alive if str(x).strip()]
+                                web_targets = allowed_web_targets
+                                agg["web_targets"] = web_targets
+                        if action["tool"] == "subfinder" and entry.get("success"):
+                            hosts = entry.get("data", {}).get("hosts")
+                            if isinstance(hosts, list) and hosts:
+                                for h in [str(x).strip() for x in hosts[:50] if str(x).strip()]:
+                                    for u in (f"http://{h}", f"https://{h}"):
+                                        if u not in allowed_web_targets:
+                                            allowed_web_targets.append(u)
+                                            web_targets.append(u)
+                                agg["web_targets"] = web_targets
 
         # Recompute summary/findings on the combined results.
         agg["finished_at"] = time.time()
@@ -627,6 +849,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
             summary, llm_meta = self._summarize_with_llm(agg, context=ctx)
             if llm_meta:
                 self._append_llm_call(agg, llm_meta)
+                if llm_meta.get("error"):
+                    note("llm_error", "summary", f"LLM summary failed: {llm_meta['error']}", agg=agg)
             if summary:
                 agg["summary"] = summary
 

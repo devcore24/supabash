@@ -26,13 +26,5 @@ class TestReportSchema(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(any("target is required" in e for e in errors))
 
-    def test_react_kind_requires_react_block(self):
-        report = {"schema_version": SCHEMA_VERSION, "target": "t", "results": []}
-        ok, errors = validate_report(report, kind="react")
-        self.assertFalse(ok)
-        self.assertTrue(any(e == "react is required for react reports" for e in errors))
-
-
 if __name__ == "__main__":
     unittest.main()
-

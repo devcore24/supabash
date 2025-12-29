@@ -103,11 +103,7 @@ def validate_report(report: Any, *, kind: Optional[str] = None) -> Tuple[bool, L
 
     if kind:
         k = str(kind).strip().lower()
-        if k == "react":
-            react = report.get("react")
-            if react is None or not isinstance(react, dict):
-                errors.append("react is required for react reports")
-        elif k == "audit":
+        if k == "audit":
             # no extra strict requirements today
             pass
 
@@ -118,4 +114,3 @@ def annotate_schema_validation(report: Dict[str, Any], *, kind: Optional[str] = 
     ok, errs = validate_report(report, kind=kind)
     report["schema_validation"] = {"valid": bool(ok), "errors": errs[:50]}
     return report
-

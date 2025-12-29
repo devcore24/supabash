@@ -2,7 +2,6 @@ import unittest
 from pathlib import Path
 
 from supabash.audit import AuditOrchestrator
-from supabash.react import ReActOrchestrator
 from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
@@ -23,11 +22,6 @@ class FakeScanner:
     def scan(self, *args, **kwargs):
         self.calls.append((args, kwargs))
         return self.result
-
-
-class FakePlanner:
-    def suggest(self, state):
-        return {"next_steps": ["whatweb"], "notes": "web"}
 
 
 class TestNoLLMMode(unittest.TestCase):
@@ -52,21 +46,6 @@ class TestNoLLMMode(unittest.TestCase):
         self.assertNotIn("summary", report)
         self.assertEqual(report.get("llm", {}).get("enabled"), False)
         cleanup_artifact(out)
-
-    def test_react_no_llm_falls_back_from_llm_plan(self):
-        scanners = {
-            "nmap": FakeScanner("nmap", {"success": True, "scan_data": {"hosts": []}, "command": "nmap t"}),
-            "whatweb": FakeScanner("whatweb", {"success": True, "scan_data": [], "command": "whatweb t"}),
-        }
-        orch = ReActOrchestrator(scanners=scanners, llm_client=BombLLM(), planner=FakePlanner())
-        out = artifact_path("no_llm_react.json")
-        report = orch.run("t", out, llm_plan=True, use_llm=False, max_actions=2)
-        self.assertTrue(out.exists())
-        planner = report.get("react", {}).get("planner", {})
-        self.assertEqual(planner.get("type"), "heuristic")
-        self.assertEqual(report.get("llm", {}).get("enabled"), False)
-        cleanup_artifact(out)
-
 
 if __name__ == "__main__":
     unittest.main()

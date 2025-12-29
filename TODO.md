@@ -107,21 +107,8 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
         - [x] Agent loop UX: freeform chat proposes a command; runs only after explicit confirmation (`y/yes`).
         - [x] Safety/privacy: redact secrets in chat history; optional local-only LLM mode (`llm.local_only=true`).
         - [x] Show context window usage (%) for each LLM call (best-effort; set `llm.max_input_tokens` for local models).
-- [x] **The "ReAct" Loop (Reason + Act)**
-    - [x] Implement the main agent loop:
-        1.  Analyze Goal.
-        2.  Select Tool.
-        3.  Execute Tool.
-        4.  Read Output.
-        5.  Decide next step or Finish.
-    - [x] Add methodology map (recon → web/app → auth → container) and heuristic/LLM planner to pick next tools from findings.
-    - [x] Maintain agent state (targets, ports, tech stack, findings, actions run) and expose `/plan` to show next steps.
-    - [x] ReAct CLI: print live progress updates (planner + tools) and optional `--status-file`.
-    - [x] ReAct: avoid report permission errors (fallback path when output not writable).
-    - [x] ReAct: default timestamped report filenames (JSON + Markdown).
-    - [x] ReAct: `--llm-plan` (LLM suggests actions iteratively; aborts on planning failure and writes error to report).
 - [x] **AI Audit (Baseline + Agentic Expansion)**
-    - [x] Add `supabash ai-audit` command (and `audit --agentic/--react` alias).
+    - [x] Add `supabash ai-audit` command (and `audit --agentic` alias).
     - [x] Run baseline audit without LLM for determinism.
     - [x] Add bounded agentic expansion phase (covers additional discovered web targets).
     - [x] Report includes run type + agentic expansion section.
@@ -160,7 +147,6 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] **JSON Report:** For machine integration.
     - [x] **Markdown Report:** A pretty, readable audit file with sections.
     - [x] Auto-generate Markdown alongside JSON (same timestamped filename).
-    - [x] ReAct: auto-generate Markdown alongside JSON.
 - [x] **Code Fix Generator**
     - [x] Ensure the AI provides specific code snippets (e.g., "Change line 40 in Dockerfile to...").
 
@@ -207,6 +193,8 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add OSINT/LAN CLI flags for theHarvester + netdiscover.
 - [x] Add opt-in CLI flags for Medusa + CrackMapExec with report findings.
 - [x] Add cloud posture tooling (ScoutSuite + Prowler) with opt-in flags and report findings.
+- [x] Add tool-calling agentic planning for AI audit (structured schema with profile + graceful fallback).
+- [ ] Map compliance profiles (PCI, SOC2, ISO, DORA, NIS2, GDPR, BSI) to agentic tool settings.
 
 ### Next Tool Additions (Planned)
 - [x] **sslscan:** TLS configuration checks (run only when HTTPS ports are open).
@@ -233,4 +221,3 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [ ] **Impacket Tools:** Network protocol manipulation for Windows/AD environments.
 - [ ] **John the Ripper:** Offline password cracking for captured hashes.
 - [ ] **Hashcat:** GPU-accelerated password recovery.
-

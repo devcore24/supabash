@@ -5,7 +5,6 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from supabash.audit import AuditOrchestrator
-from supabash.react import ReActOrchestrator
 
 
 class DummyConfigManager:
@@ -99,31 +98,5 @@ class TestAggressiveCaps(unittest.TestCase):
         self.assertTrue(caps.get("enabled"))
         self.assertIn("applied", caps)
 
-    def test_react_aggressive_sets_default_nuclei_rate_when_zero(self):
-        cfg = DummyConfigManager({"core": {"aggressive_caps": {"default_nuclei_rate": 3, "max_nuclei_rate": 4}}, "llm": {"max_input_chars": 12000}, "tools": {}})
-        nmap = SpyScanner("nmap", result={"success": True, "scan_data": {"hosts": [{"ports": [{"port": 80, "state": "open", "protocol": "tcp", "service": "http"}]}]}})
-        nuclei = SpyScanner("nuclei", result={"success": True, "findings": []})
-        whatweb = SpyScanner("whatweb", result={"success": True, "scan_data": []})
-        gobuster = SpyScanner("gobuster", result={"success": True, "findings": []})
-
-        class Planner:
-            def suggest(self, state):
-                return {"next_steps": ["whatweb", "nuclei"], "notes": "web"}
-
-        orch = ReActOrchestrator(
-            scanners={"nmap": nmap, "whatweb": whatweb, "nuclei": nuclei, "gobuster": gobuster},
-            llm_client=FakeLLM(cfg),
-            planner=Planner(),
-        )
-
-        report = orch.run("http://localhost", output=None, mode="aggressive", nuclei_rate_limit=0, max_actions=3)
-        self.assertTrue(nuclei.calls, "nuclei was not called")
-        _, nuclei_kwargs = nuclei.calls[0]
-        self.assertEqual(nuclei_kwargs.get("rate_limit"), 3)
-        caps = report.get("safety", {}).get("aggressive_caps", {})
-        self.assertTrue(caps.get("enabled"))
-
-
 if __name__ == "__main__":
     unittest.main()
-

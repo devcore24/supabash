@@ -345,8 +345,10 @@ class AuditOrchestrator:
         *,
         context: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        payload = ""
+        truncated = False
+        max_chars = self._llm_max_chars()
         try:
-            max_chars = self._llm_max_chars()
             payload_obj = context if isinstance(context, dict) else agg
             payload, truncated = prepare_json_payload(payload_obj, max_chars=max_chars)
             messages = [
@@ -378,7 +380,15 @@ class AuditOrchestrator:
             return json.loads(content), meta
         except Exception as e:
             logger.error(f"LLM summary failed: {e}")
-            return None, None
+            meta = {
+                "call_type": "summary",
+                "error": str(e),
+            }
+            if payload:
+                meta["input_truncated"] = bool(truncated)
+                meta["input_chars"] = len(payload)
+                meta["max_input_chars"] = int(max_chars)
+            return None, meta
 
     def _build_llm_summary_context(self, agg: Dict[str, Any], findings: List[Dict[str, Any]]) -> Dict[str, Any]:
         def norm_sev(value: Any) -> str:
@@ -476,7 +486,7 @@ class AuditOrchestrator:
 
         run_type = agg.get("report_kind")
         if not isinstance(run_type, str) or not run_type.strip():
-            run_type = "react" if isinstance(agg.get("react"), dict) else "audit"
+            run_type = "audit"
 
         ctx: Dict[str, Any] = {
             "run_type": str(run_type),
@@ -500,14 +510,6 @@ class AuditOrchestrator:
                 "planner_error": planner.get("error"),
                 "actions": [a.get("action") for a in (ai.get("actions") or []) if isinstance(a, dict)][:20],
             }
-        react = agg.get("react")
-        if isinstance(react, dict):
-            ctx["react"] = {
-                "max_actions": react.get("max_actions"),
-                "actions": list(react.get("actions", []) or [])[:30],
-                "notes": react.get("notes"),
-            }
-
         return ctx
 
     def _severity_rank(self, severity: str) -> int:
@@ -2420,6 +2422,8 @@ class AuditOrchestrator:
             summary, llm_meta = self._summarize_with_llm(agg, context=ctx)
             if llm_meta:
                 self._append_llm_call(agg, llm_meta)
+                if llm_meta.get("error"):
+                    note("llm_error", "summary", f"LLM summary failed: {llm_meta['error']}")
             if summary:
                 agg["summary"] = summary
         else:

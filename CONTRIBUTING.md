@@ -35,5 +35,4 @@ PYTHONPATH=src venv/bin/python -m unittest discover -s tests
 - Tests pass locally.
 - Docs updated (if behavior or flags changed).
 - New flags include sane defaults and help text.
-- Changes do not break existing CLI commands (`scan`, `audit`, `chat`, `react`, `config`).
-
+- Changes do not break existing CLI commands (`scan`, `audit`, `chat`, `config`).

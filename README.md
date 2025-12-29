@@ -26,7 +26,7 @@
 
 ## 🚀 Key Features
 
-*   **🤖 Autonomous Reasoning (Beta):** The agent can plan next steps based on scan results (ReAct Pattern).
+*   **🤖 Autonomous Reasoning (Beta):** Tool-calling agentic planning expands audits safely and predictably.
 *   **🛡️ Auditing:** Scans infrastructure, web applications, and Docker container images (wireless is planned).
 *   **📝 Smart Reporting:** Generates human-readable audits containing detection details, severity levels, and **code-level fix suggestions**.
 *   **⚡ High-Performance:** Orchestrates fast scanners (Rust/Go) alongside deep-dive frameworks (Python/Ruby).
@@ -213,41 +213,20 @@ sudo supabash audit 192.168.1.10 --yes --aircrack --aircrack-interface wlan0mon
 supabash audit 192.168.1.10 --yes --scoutsuite --scoutsuite-provider aws
 supabash audit 192.168.1.10 --yes --prowler
 ```
-Note: by default Supabash writes `reports/report-YYYYmmdd-HHMMSS.json` and `reports/report-YYYYmmdd-HHMMSS.md`. Avoid running `supabash audit` with `sudo` unless you need root-only scan modes; otherwise your report files may be owned by root.
+Note: Supabash writes JSON + Markdown by default; HTML/PDF exports are optional via `core.report_exports`. Avoid running `supabash audit` with `sudo` unless you need root-only scan modes; otherwise your report files may be owned by root.
 If web tools show `Executable not found`, install system requirements via `install.sh` or `docs/system-requirements.md`.
 
 ### 2b. AI Audit (Baseline + Agentic Expansion)
-AI audit combines the deterministic `audit` pipeline with a bounded expansion phase (useful when Nmap finds multiple web ports). It produces one unified report.
+AI audit combines the deterministic `audit` pipeline with a bounded, tool-calling expansion phase (useful when Nmap finds multiple web ports). It produces one unified report.
 ```bash
 supabash ai-audit 192.168.1.10 --yes
 supabash audit 192.168.1.10 --agentic --yes   # alias
 supabash ai-audit "http://192.168.1.10" --yes --llm-plan --max-actions 8
 ```
-Note: AI audit writes `reports/ai-audit-YYYYmmdd-HHMMSS.json` and `reports/ai-audit-YYYYmmdd-HHMMSS.md` by default (and exits non-zero if `--llm-plan` planning fails).
-
-### 2c. ReAct Loop (Plan → Act)
-Run an iterative ReAct loop that plans next tools based on recon results.
-```bash
-supabash react 192.168.1.10 --yes --max-actions 10
-supabash react "http://192.168.1.10" --yes --remediate
-supabash react 192.168.1.10 --output reports/my-react.json --yes
-supabash react localhost --yes --status-file reports/react_status.json
-supabash react localhost --yes --llm-plan   # LLM-driven planning (requires configured provider/key)
-# opt-in: allow planned hydra steps to execute (requires explicit authorization + wordlists)
-supabash react 192.168.1.10 --yes --hydra --hydra-usernames users.txt --hydra-passwords passwords.txt
-# opt-in: medusa + crackmapexec
-supabash react 192.168.1.10 --yes --medusa --medusa-usernames users.txt --medusa-passwords passwords.txt
-supabash react 192.168.1.10 --yes --crackmapexec --cme-username admin --cme-password secret --cme-protocol smb
-# opt-in: OSINT + LAN discovery
-supabash react example.com --yes --theharvester
-sudo supabash react 192.168.1.10 --yes --netdiscover --netdiscover-range 192.168.1.0/24
-# opt-in: WiFi capture (requires monitor mode; use --aircrack-airmon to auto toggle)
-sudo supabash react 192.168.1.10 --yes --aircrack --aircrack-interface wlan0mon
-# opt-in: cloud posture checks (requires cloud credentials)
-supabash react 192.168.1.10 --yes --scoutsuite --scoutsuite-provider aws
-supabash react 192.168.1.10 --yes --prowler
-```
-Note: ReAct writes `reports/react-YYYYmmdd-HHMMSS.json` and `reports/react-YYYYmmdd-HHMMSS.md` by default.
+Notes:
+- AI audit uses provider tool-calling for planning. If tool-calling is unsupported, Supabash logs a warning and skips the agentic phase while still producing the baseline report.
+- Agentic planning uses a `profile` field (`fast|standard|aggressive`) to guide tool intensity (reserved for future compliance profiles).
+- AI audit writes JSON + Markdown by default; HTML/PDF exports are optional via `core.report_exports`.
 
 ### 3. Container Image Scan
 Scan a local Docker image for CVEs and configuration issues (via Trivy).
@@ -327,6 +306,8 @@ supabash audit [OPTIONS] TARGET
 - Options:
   - `--output`, `-o` — output JSON path (default: `reports/report-YYYYmmdd-HHMMSS.json`)
   - `--markdown`, `-m` — output Markdown path (default: derived from `--output`)
+  - `--status/--no-status` (default: `--status`) — print live progress
+  - `--status-file` — write JSON status updates while running
   - `--container-image`, `-c` — optional container image to scan with Trivy
   - `--force` — bypass allowed-hosts check
   - `--allow-public` — allow public IP targets (authorized only)
@@ -385,8 +366,8 @@ supabash audit [OPTIONS] TARGET
   - `--prowler-args` — extra Prowler CLI arguments
   - `--remediate` — LLM remediation (steps + code snippets)
   - `--no-llm` — disable LLM for this run
-  - `--agentic`, `--react` — agentic audit mode (baseline + bounded expansion)
-  - `--llm-plan` — LLM plans agentic expansion steps (only with `--agentic`)
+  - `--agentic` — agentic audit mode (baseline + bounded expansion)
+  - `--llm-plan/--no-llm-plan` — tool-calling LLM planning for agentic expansion (only with `--agentic`)
   - `--max-actions` (default: `10`) — cap agentic expansion length (only with `--agentic`)
   - `--max-remediations` (default: `5`) — cost control
   - `--min-remediation-severity` (default: `MEDIUM`) — `CRITICAL|HIGH|MEDIUM|LOW|INFO`
@@ -401,82 +382,11 @@ supabash ai-audit [OPTIONS] TARGET
 
 - Arguments: `TARGET` (required) — IP / hostname / URL / container ID
 - Options: same as `audit`, plus:
-  - default output is `reports/ai-audit-YYYYmmdd-HHMMSS.json` (+ `.md`)
-  - `--llm-plan` — LLM plans agentic expansion steps (fails run if planning fails)
-  - `--max-actions` (default: `10`) — cap agentic expansion length
-</details>
-
-<details>
-<summary><strong>react</strong> — ReAct loop (plan → act → summarize)</summary>
-
-```bash
-supabash react [OPTIONS] TARGET
-```
-
-- Arguments: `TARGET` (required) — IP / hostname / URL
-- Options:
-  - `--output`, `-o` — output JSON path (default: `reports/react-YYYYmmdd-HHMMSS.json`)
-  - `--markdown`, `-m` — output Markdown path (default: derived from `--output`)
+  - default output is `reports/ai-audit-YYYYmmdd-HHMMSS.json` (+ `.md`; html/pdf when enabled)
   - `--status/--no-status` (default: `--status`) — print live progress
   - `--status-file` — write JSON status updates while running
-  - `--llm-plan` — LLM plans next actions iteratively (fails run if planning fails)
-  - `--no-llm` — disable LLM for this run
-  - `--force` — bypass allowed-hosts check
-  - `--allow-public` — allow public IP targets (authorized only)
-  - `--yes` — skip consent prompt
-  - `--mode` (default: `normal`) — `normal|stealth|aggressive`
-  - `--nuclei-rate` (default: `0`) — nuclei rate-limit (requests/sec)
-  - `--gobuster-threads` (default: `10`) — gobuster threads
-  - `--gobuster-wordlist` — gobuster wordlist path
-  - `--hydra` — opt-in bruteforce (requires explicit wordlists + authorization)
-  - `--hydra-usernames` — usernames file or single username
-  - `--hydra-passwords` — passwords file or single password
-  - `--hydra-services` (default: `ssh,ftp`) — comma-separated services
-  - `--hydra-threads` (default: `4`) — hydra `-t` parallel tasks
-  - `--hydra-options` — extra hydra CLI options (advanced)
-  - `--medusa` — opt-in Medusa bruteforce (defaults module/port from nmap)
-  - `--medusa-usernames` — usernames file or single username
-  - `--medusa-passwords` — passwords file or single password
-  - `--medusa-module` — explicit module/service (optional)
-  - `--medusa-port` — explicit port (optional)
-  - `--medusa-threads` (default: `4`) — medusa `-t` threads
-  - `--medusa-timeout` (default: `10`) — timeout per connection (seconds)
-  - `--medusa-options` — extra medusa CLI options
-  - `--crackmapexec`, `--cme` — opt-in CrackMapExec/NetExec
-  - `--cme-protocol` (default: `smb`) — protocol (`smb|ssh|ldap|winrm|mssql|rdp`)
-  - `--cme-username` — username
-  - `--cme-password` — password
-  - `--cme-domain` — domain
-  - `--cme-hashes` — NTLM hashes (LM:NT or NT)
-  - `--cme-module` — module to run
-  - `--cme-module-options` — module options
-  - `--cme-enum` — enumeration flags (comma-separated)
-  - `--cme-args` — extra CME args (allows anonymous runs)
-  - `--theharvester` — opt-in OSINT (domain targets only)
-  - `--theharvester-sources` — comma-separated data sources
-  - `--theharvester-limit` — results per source (default: 500)
-  - `--theharvester-start` — start index (default: 0)
-  - `--theharvester-args` — extra theHarvester CLI args
-  - `--netdiscover` — opt-in LAN discovery (private CIDR only; requires sudo)
-  - `--netdiscover-range` — CIDR range (e.g. `192.168.1.0/24`)
-  - `--netdiscover-interface` — network interface (e.g. `eth0`)
-  - `--netdiscover-passive` — passive sniffing mode
-  - `--netdiscover-fast/--netdiscover-no-fast` — fast mode toggle
-  - `--netdiscover-args` — extra netdiscover CLI args
-  - `--aircrack`, `--aircrack-ng` — opt-in Aircrack-ng suite (WiFi)
-  - `--aircrack-interface` — wireless interface for airodump-ng (e.g. `wlan0mon`)
-  - `--aircrack-channel` — WiFi channel to lock during capture
-  - `--aircrack-args` — extra airodump-ng CLI args
-  - `--aircrack-airmon` — auto start/stop monitor mode with airmon-ng
-  - `--scoutsuite` — opt-in ScoutSuite (multi-cloud)
-  - `--scoutsuite-provider` (default: `aws`) — `aws|azure|gcp`
-  - `--scoutsuite-args` — extra ScoutSuite CLI arguments
-  - `--prowler` — opt-in Prowler (AWS)
-  - `--prowler-args` — extra Prowler CLI arguments
-  - `--remediate` — LLM remediation (steps + code snippets)
-  - `--max-remediations` (default: `5`) — cost control
-  - `--min-remediation-severity` (default: `MEDIUM`) — `CRITICAL|HIGH|MEDIUM|LOW|INFO`
-  - `--max-actions` (default: `10`) — cap the loop length
+  - `--llm-plan/--no-llm-plan` — tool-calling LLM planning for agentic expansion
+  - `--max-actions` (default: `10`) — cap agentic expansion length
 </details>
 
 <details>
@@ -534,7 +444,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `./debug.log` by default (override with `SUPABASH_LOG_DIR`).
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
-- Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`/`react`.
+- Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
 - Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
@@ -554,6 +464,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Tune web tooling: `supabash audit ... --nuclei-rate 10 --gobuster-threads 20` (and optionally `--gobuster-wordlist /path/to/list`).
 - Parallelize web tools: `supabash audit ... --parallel-web --max-workers 3` (URL targets can overlap recon with web tooling).
 - Safety caps (aggressive mode): Supabash enforces global caps (rate limits / concurrency) in `--mode aggressive`; configure via `core.aggressive_caps` in `config.yaml`.
+- Agentic profiles: AI audit planning uses `profile` (`fast|standard|aggressive`) as a stable knob for future compliance profiles (PCI, SOC 2, ISO 27001, DORA, NIS2, GDPR, BSI IT-Grundschutz).
 
 ---
 

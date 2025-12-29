@@ -57,20 +57,6 @@ class TestAIAuditCLI(unittest.TestCase):
         finally:
             core["report_exports"] = exports_prev
 
-    def test_audit_react_flag_is_alias_for_agentic(self):
-        core = main_module.config_manager.config.setdefault("core", {})
-        exports_prev = dict(core.get("report_exports", {}) or {})
-        core["report_exports"] = {"html": False, "pdf": False}
-        try:
-            with runner.isolated_filesystem():
-                with patch.object(main_module, "AIAuditOrchestrator", FakeAIAuditOrchestrator):
-                    result = runner.invoke(main_module.app, ["audit", "localhost", "--react", "--force", "--yes"])
-                self.assertEqual(result.exit_code, 0, result.stdout)
-                json_reports = list(Path("reports").glob("ai-audit-*.json"))
-                self.assertTrue(json_reports)
-        finally:
-            core["report_exports"] = exports_prev
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,5 @@
 import os
+import json
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
@@ -9,6 +10,14 @@ from supabash.logger import setup_logger
 from supabash.llm_cache import CacheSettings, LLMCache, make_cache_key
 
 logger = setup_logger(__name__)
+
+
+class ToolCallingNotSupported(RuntimeError):
+    pass
+
+
+class ToolCallingError(RuntimeError):
+    pass
 
 
 class LLMClient:
@@ -247,6 +256,118 @@ class LLMClient:
         except Exception as e:
             logger.error(f"LLM request failed: {e}")
             raise
+
+    def completion_with_tools(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        tools: List[Dict[str, Any]],
+        tool_choice: Optional[Dict[str, Any]] = None,
+        temperature: float = 0.2,
+    ) -> Dict[str, Any]:
+        """
+        Send a tool-calling request to the configured LLM and return the raw response.
+        """
+        settings = self._active_settings()
+        kwargs: Dict[str, Any] = {
+            "model": settings["model"],
+            "messages": messages,
+            "temperature": temperature,
+            "tools": tools,
+        }
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
+        if settings.get("api_key"):
+            kwargs["api_key"] = settings["api_key"]
+        if settings.get("api_base"):
+            kwargs["api_base"] = settings["api_base"]
+
+        logger.debug(f"Dispatching tool-call to model={settings['model']} provider={settings['provider']}")
+        try:
+            return litellm.completion(**kwargs)
+        except Exception as e:
+            logger.error(f"LLM tool-call failed: {e}")
+            raise
+
+    def _extract_tool_calls(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
+        try:
+            message = response["choices"][0]["message"]
+        except Exception:
+            return []
+        if not isinstance(message, dict):
+            return []
+        tool_calls = message.get("tool_calls") or []
+        if not tool_calls and message.get("function_call"):
+            tool_calls = [{"function": message.get("function_call")}]
+        out: List[Dict[str, Any]] = []
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                continue
+            fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+            name = fn.get("name") or call.get("name")
+            args_raw = fn.get("arguments") if fn else call.get("arguments")
+            args = None
+            if isinstance(args_raw, dict):
+                args = args_raw
+            elif isinstance(args_raw, str):
+                try:
+                    args = json.loads(args_raw)
+                except Exception as e:
+                    raise ToolCallingError(f"Tool call arguments invalid JSON: {e}") from e
+            elif args_raw is None:
+                args = None
+            else:
+                args = {"value": args_raw}
+            out.append(
+                {
+                    "id": call.get("id"),
+                    "name": name,
+                    "arguments": args,
+                    "raw_arguments": args_raw,
+                }
+            )
+        return out
+
+    def tool_call(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        tools: List[Dict[str, Any]],
+        tool_choice: Optional[Dict[str, Any]] = None,
+        temperature: float = 0.2,
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        """
+        Execute a tool-calling request and return (tool_calls, meta).
+        """
+        settings = self._active_settings()
+        response = self.completion_with_tools(
+            messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            temperature=temperature,
+        )
+        tool_calls = self._extract_tool_calls(response)
+        if not tool_calls:
+            raise ToolCallingNotSupported("No tool calls returned by provider/model")
+
+        usage = self._normalize_usage(response.get("usage"))
+        cost_usd = None
+        completion_cost = getattr(litellm, "completion_cost", None)
+        if callable(completion_cost):
+            try:
+                cost_usd = completion_cost(response)
+            except Exception:
+                cost_usd = None
+
+        meta = {
+            "provider": settings.get("provider"),
+            "model": settings.get("model"),
+            "usage": usage,
+            "tool_calling": True,
+        }
+        if cost_usd is not None:
+            meta["cost_usd"] = float(cost_usd)
+        return tool_calls, meta
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
         """

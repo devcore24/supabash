@@ -62,13 +62,6 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     err = report.get("error")
     if isinstance(err, str) and err.strip():
         errors.append(err.strip())
-    react = report.get("react")
-    if isinstance(react, dict):
-        planner = react.get("planner")
-        if isinstance(planner, dict):
-            perr = planner.get("error")
-            if isinstance(perr, str) and perr.strip() and perr.strip() not in errors:
-                errors.append(perr.strip())
     ai = report.get("ai_audit")
     if isinstance(ai, dict):
         planner = ai.get("planner")

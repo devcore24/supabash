@@ -22,7 +22,6 @@ from supabash.safety import is_allowed_target, is_public_ip_target
 from supabash.audit import AuditOrchestrator
 from supabash.ai_audit import AIAuditOrchestrator
 from supabash.session_state import default_chat_state_path, clear_state as clear_session_state
-from supabash.react import ReActOrchestrator
 from supabash.report_paths import build_report_paths
 from supabash.slash_parse import normalize_target_token
 from supabash.tool_settings import get_tool_timeout_seconds
@@ -58,6 +57,24 @@ def print_banner():
     text = Text(BANNER, style="bold cyan")
     panel = Panel(text, border_style="bold blue", title="v0.1.0-beta", subtitle="AI Security Agent")
     console.print(panel)
+
+def _report_formats_note(config: Optional[dict]) -> str:
+    cfg = config if isinstance(config, dict) else {}
+    core = cfg.get("core", {}) if isinstance(cfg.get("core", {}), dict) else {}
+    exports = core.get("report_exports", {}) if isinstance(core.get("report_exports", {}), dict) else {}
+    formats = []
+    if exports.get("html"):
+        formats.append("html")
+    formats.append("md")
+    if exports.get("pdf"):
+        formats.append("pdf")
+    if not formats:
+        return ""
+    if len(formats) == 1:
+        return f" (and in {formats[0]} files)"
+    if len(formats) == 2:
+        return f" (and in {formats[0]} and {formats[1]} files)"
+    return f" (and in {formats[0]}, {formats[1]}, and {formats[2]} files)"
 
 def _only_top_level_help_invocation(argv: list[str]) -> bool:
     """
@@ -363,6 +380,8 @@ def audit(
         "-m",
         help="Output Markdown path (default: derived from --output with .md)",
     ),
+    status: bool = typer.Option(True, "--status/--no-status", help="Print live progress updates during the run"),
+    status_file: Optional[str] = typer.Option(None, "--status-file", help="Write JSON status updates to this file while running"),
     allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
     allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
     consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
@@ -420,8 +439,12 @@ def audit(
     aircrack_airmon: bool = typer.Option(False, "--aircrack-airmon", help="Auto start/stop monitor mode with airmon-ng"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
-    agentic: bool = typer.Option(False, "--agentic", "--react", help="Run an agentic audit (baseline + ReAct-style expansion)"),
-    llm_plan: bool = typer.Option(False, "--llm-plan", help="Use the LLM to plan agentic expansion steps (requires LLM enabled)"),
+    agentic: bool = typer.Option(False, "--agentic", help="Run an agentic audit (baseline + tool-calling expansion)"),
+    llm_plan: bool = typer.Option(
+        True,
+        "--llm-plan/--no-llm-plan",
+        help="Use tool-calling LLM planning for agentic expansion (requires LLM enabled)",
+    ),
     max_actions: int = typer.Option(10, "--max-actions", help="Maximum agentic expansion actions (only with --agentic)"),
     max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
     min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
@@ -494,7 +517,66 @@ def audit(
     default_base = "ai-audit" if agentic and not output else "report"
     out_path, md_path = build_report_paths(output, markdown, default_basename=default_base)
 
-    console.print(f"[dim]Results will be saved to {out_path}[/dim]")
+    formats_note = _report_formats_note(config_manager.config)
+    console.print(f"[dim]Results will be saved to {out_path}{formats_note}[/dim]")
+
+    status_path = Path(status_file) if status_file else None
+    if status_path is not None and status_path.exists() and status_path.is_dir():
+        status_name = "ai_audit_status.json" if agentic else "audit_status.json"
+        status_path = status_path / status_name
+
+    progress_cb = None
+    if status or status_path is not None:
+        last_line = {"event": None, "tool": None, "message": None}
+
+        def progress_cb(event: str, tool: str, message: str, agg: dict):
+            try:
+                payload = {
+                    "event": event,
+                    "tool": tool,
+                    "message": message,
+                    "target": agg.get("target"),
+                    "mode": agg.get("mode"),
+                    "started_at": agg.get("started_at"),
+                    "report_kind": agg.get("report_kind"),
+                }
+                if status_path is not None:
+                    try:
+                        status_path.parent.mkdir(parents=True, exist_ok=True)
+                        status_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
+
+                if not status:
+                    return
+                if (
+                    last_line.get("event") == event
+                    and last_line.get("tool") == tool
+                    and last_line.get("message") == message
+                ):
+                    return
+                last_line.update({"event": event, "tool": tool, "message": message})
+
+                label = event
+                if event == "tool_start":
+                    label = "RUN"
+                elif event == "tool_end":
+                    label = "DONE"
+                elif event == "tool_skip":
+                    label = "SKIP"
+                elif event in ("phase_start", "phase_end"):
+                    label = "PHASE"
+                elif event in ("llm_start", "llm_error"):
+                    label = "LLM"
+
+                tool_txt = f" {tool}" if tool else ""
+                msg_txt = f": {message}" if message else ""
+                if event == "llm_error":
+                    console.print(f"[yellow][{label}]{tool_txt}{msg_txt}[/yellow]")
+                else:
+                    console.print(f"[dim][{label}]{tool_txt}{msg_txt}[/dim]")
+            except Exception:
+                return
 
     orchestrator = AIAuditOrchestrator() if agentic else AuditOrchestrator()
     run_kwargs = dict(
@@ -555,6 +637,7 @@ def audit(
         use_llm=not no_llm,
         max_remediations=max_remediations,
         min_remediation_severity=min_remediation_severity,
+        progress_cb=progress_cb,
     )
     if agentic:
         run_kwargs["llm_plan"] = bool(llm_plan)
@@ -617,6 +700,8 @@ def ai_audit(
         "-m",
         help="Output Markdown path (default: derived from --output with .md)",
     ),
+    status: bool = typer.Option(True, "--status/--no-status", help="Print live progress updates during the run"),
+    status_file: Optional[str] = typer.Option(None, "--status-file", help="Write JSON status updates to this file while running"),
     allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
     allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
     consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
@@ -672,7 +757,11 @@ def ai_audit(
     aircrack_channel: Optional[str] = typer.Option(None, "--aircrack-channel", help="WiFi channel to lock during capture"),
     aircrack_args: Optional[str] = typer.Option(None, "--aircrack-args", help="Extra airodump-ng CLI args"),
     aircrack_airmon: bool = typer.Option(False, "--aircrack-airmon", help="Auto start/stop monitor mode with airmon-ng"),
-    llm_plan: bool = typer.Option(False, "--llm-plan", help="Use the LLM to plan agentic expansion steps (requires LLM enabled)"),
+    llm_plan: bool = typer.Option(
+        True,
+        "--llm-plan/--no-llm-plan",
+        help="Use tool-calling LLM planning for agentic expansion (requires LLM enabled)",
+    ),
     max_actions: int = typer.Option(10, "--max-actions", help="Maximum agentic expansion actions"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
@@ -680,7 +769,7 @@ def ai_audit(
     min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
 ):
     """
-    Agentic audit: baseline audit pipeline + optional ReAct-style expansion.
+    Agentic audit: baseline audit pipeline + optional tool-calling expansion.
 
     Alias for: `supabash audit --agentic ...`
     """
@@ -689,6 +778,8 @@ def ai_audit(
         output=output,
         container_image=container_image,
         markdown=markdown,
+        status=status,
+        status_file=status_file,
         allow_unsafe=allow_unsafe,
         allow_public=allow_public,
         consent=consent,
@@ -752,289 +843,6 @@ def ai_audit(
         max_remediations=max_remediations,
         min_remediation_severity=min_remediation_severity,
     )
-
-@app.command()
-def react(
-    target: str = typer.Argument(..., help="Target IP or URL"),
-    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output JSON path (default: reports/react-YYYYmmdd-HHMMSS.json)"),
-    markdown: Optional[str] = typer.Option(None, "--markdown", "-m", help="Output Markdown path (default: derived from --output with .md)"),
-    status: bool = typer.Option(True, "--status/--no-status", help="Print live progress updates during the run"),
-    status_file: Optional[str] = typer.Option(None, "--status-file", help="Write JSON status updates to this file while running"),
-    llm_plan: bool = typer.Option(False, "--llm-plan", help="Use the LLM to iteratively plan next actions (fails the run if planning fails)"),
-    no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/planning/remediation for this run (offline/no-LLM mode)"),
-    allow_unsafe: bool = typer.Option(False, "--force", help="Bypass allowed-hosts safety check"),
-    allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
-    consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
-    mode: str = typer.Option("normal", "--mode", help="Scan mode: normal|stealth|aggressive"),
-    nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
-    gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
-    gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
-    hydra: bool = typer.Option(False, "--hydra", help="Run Hydra bruteforce (opt-in; requires explicit wordlists)"),
-    hydra_usernames: Optional[str] = typer.Option(None, "--hydra-usernames", help="Hydra usernames (path to file or single username)"),
-    hydra_passwords: Optional[str] = typer.Option(None, "--hydra-passwords", help="Hydra passwords (path to file or single password)"),
-    hydra_services: str = typer.Option("ssh,ftp", "--hydra-services", help="Comma-separated hydra services (e.g. ssh,ftp)"),
-    hydra_threads: int = typer.Option(4, "--hydra-threads", help="Hydra parallel tasks (-t)"),
-    hydra_options: Optional[str] = typer.Option(None, "--hydra-options", help="Extra Hydra CLI options (advanced)"),
-    medusa: bool = typer.Option(False, "--medusa", help="Run Medusa bruteforce (opt-in; requires explicit wordlists)"),
-    medusa_usernames: Optional[str] = typer.Option(None, "--medusa-usernames", help="Medusa usernames (path to file or single username)"),
-    medusa_passwords: Optional[str] = typer.Option(None, "--medusa-passwords", help="Medusa passwords (path to file or single password)"),
-    medusa_module: Optional[str] = typer.Option(None, "--medusa-module", help="Medusa module/service (default: derived from nmap)"),
-    medusa_port: Optional[int] = typer.Option(None, "--medusa-port", help="Medusa target port (default: derived from nmap)"),
-    medusa_threads: int = typer.Option(4, "--medusa-threads", help="Medusa parallel threads (-t)"),
-    medusa_timeout: int = typer.Option(10, "--medusa-timeout", help="Medusa timeout per connection (seconds)"),
-    medusa_options: Optional[str] = typer.Option(None, "--medusa-options", help="Extra Medusa CLI options (advanced)"),
-    crackmapexec: bool = typer.Option(False, "--crackmapexec", "--cme", help="Run CrackMapExec/NetExec (opt-in)"),
-    cme_protocol: str = typer.Option("smb", "--cme-protocol", help="CME protocol (smb, ssh, ldap, winrm, mssql, rdp)"),
-    cme_username: Optional[str] = typer.Option(None, "--cme-username", help="CME username"),
-    cme_password: Optional[str] = typer.Option(None, "--cme-password", help="CME password"),
-    cme_domain: Optional[str] = typer.Option(None, "--cme-domain", help="CME domain"),
-    cme_hashes: Optional[str] = typer.Option(None, "--cme-hashes", help="CME NTLM hashes (LM:NT or NT)"),
-    cme_module: Optional[str] = typer.Option(None, "--cme-module", help="CME module to run"),
-    cme_module_options: Optional[str] = typer.Option(None, "--cme-module-options", help="CME module options"),
-    cme_enum: Optional[str] = typer.Option(None, "--cme-enum", help="CME enumeration flags (comma-separated; e.g. shares,users)"),
-    cme_args: Optional[str] = typer.Option(None, "--cme-args", help="Extra CME CLI arguments (allows anonymous runs)"),
-    scoutsuite: bool = typer.Option(False, "--scoutsuite", help="Run ScoutSuite (multi-cloud; opt-in)"),
-    scoutsuite_provider: str = typer.Option("aws", "--scoutsuite-provider", help="ScoutSuite provider (aws, azure, gcp)"),
-    scoutsuite_args: Optional[str] = typer.Option(None, "--scoutsuite-args", help="Extra ScoutSuite CLI arguments"),
-    prowler: bool = typer.Option(False, "--prowler", help="Run Prowler (AWS; opt-in)"),
-    prowler_args: Optional[str] = typer.Option(None, "--prowler-args", help="Extra Prowler CLI arguments"),
-    theharvester: bool = typer.Option(False, "--theharvester", help="Run theHarvester OSINT (domain targets only; opt-in)"),
-    theharvester_sources: Optional[str] = typer.Option(None, "--theharvester-sources", help="theHarvester data sources (comma-separated)"),
-    theharvester_limit: Optional[int] = typer.Option(None, "--theharvester-limit", help="theHarvester results per source (default 500)"),
-    theharvester_start: Optional[int] = typer.Option(None, "--theharvester-start", help="theHarvester start index (default 0)"),
-    theharvester_args: Optional[str] = typer.Option(None, "--theharvester-args", help="Extra theHarvester CLI args"),
-    netdiscover: bool = typer.Option(False, "--netdiscover", help="Run netdiscover LAN discovery (opt-in)"),
-    netdiscover_range: Optional[str] = typer.Option(None, "--netdiscover-range", help="Netdiscover CIDR range (e.g. 192.168.1.0/24)"),
-    netdiscover_interface: Optional[str] = typer.Option(None, "--netdiscover-interface", help="Netdiscover interface (e.g. eth0)"),
-    netdiscover_passive: bool = typer.Option(False, "--netdiscover-passive", help="Netdiscover passive mode (sniff only)"),
-    netdiscover_fast: bool = typer.Option(True, "--netdiscover-fast/--netdiscover-no-fast", help="Netdiscover fast mode"),
-    netdiscover_args: Optional[str] = typer.Option(None, "--netdiscover-args", help="Extra netdiscover CLI args"),
-    aircrack: bool = typer.Option(False, "--aircrack", "--aircrack-ng", help="Run Aircrack-ng suite (WiFi; opt-in)"),
-    aircrack_interface: Optional[str] = typer.Option(None, "--aircrack-interface", help="Wireless interface for airodump-ng (e.g. wlan0mon)"),
-    aircrack_channel: Optional[str] = typer.Option(None, "--aircrack-channel", help="WiFi channel to lock during capture"),
-    aircrack_args: Optional[str] = typer.Option(None, "--aircrack-args", help="Extra airodump-ng CLI args"),
-    aircrack_airmon: bool = typer.Option(False, "--aircrack-airmon", help="Auto start/stop monitor mode with airmon-ng"),
-    remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate remediation steps + code snippets"),
-    max_remediations: int = typer.Option(5, "--max-remediations", help="Maximum findings to remediate (cost control)"),
-    min_remediation_severity: str = typer.Option("MEDIUM", "--min-remediation-severity", help="Only remediate findings at or above this severity"),
-    max_actions: int = typer.Option(10, "--max-actions", help="Maximum planned actions to execute in the loop"),
-):
-    """
-    ReAct loop (plan → execute → summarize) driven by scan results.
-    """
-    allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
-    if not allow_unsafe and not is_allowed_target(target, allowed):
-        console.print(f"[red]Target '{target}' not in allowed_hosts. Edit config.yaml or use --force to proceed.[/red]")
-        raise typer.Exit(code=1)
-
-    allow_public_cfg = bool(config_manager.config.get("core", {}).get("allow_public_ips", False))
-    if is_public_ip_target(target) and not (allow_public_cfg or allow_public):
-        console.print(
-            "[red]Refusing to scan public IP targets by default.[/red] "
-            "Set `core.allow_public_ips=true` in `config.yaml` or pass `--allow-public` (only if you are authorized)."
-        )
-        raise typer.Exit(code=1)
-
-    if mode not in ("normal", "stealth", "aggressive"):
-        console.print("[red]Invalid mode. Choose: normal, stealth, aggressive[/red]")
-        raise typer.Exit(code=1)
-
-    from supabash.safety import ensure_consent
-    if not ensure_consent(config_manager, assume_yes=consent):
-        console.print("[yellow]Consent not confirmed. Aborting.[/yellow]")
-        raise typer.Exit(code=1)
-
-    if hydra and (not hydra_usernames or not hydra_passwords):
-        console.print("[red]--hydra requires --hydra-usernames and --hydra-passwords[/red]")
-        raise typer.Exit(code=1)
-
-    out_path, md_path = build_report_paths(output, markdown, default_basename="react")
-
-    # Preflight: avoid permission errors when a previous sudo run created root-owned report files.
-    # If the chosen output file exists and isn't writable, fall back to a timestamped sibling path.
-    try:
-        if out_path.exists() and not os.access(out_path, os.W_OK):
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            alt_out = out_path.with_name(f"{out_path.stem}-{ts}{out_path.suffix}")
-            alt_md = alt_out.with_suffix(".md") if markdown is None else md_path
-            console.print(f"[yellow]Output path not writable: {out_path}[/yellow]")
-            console.print(f"[yellow]Writing to: {alt_out}[/yellow]")
-            out_path, md_path = alt_out, alt_md
-        if not out_path.parent.exists():
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-        if not os.access(out_path.parent, os.W_OK):
-            fallback_dir = Path.home() / ".supabash" / "reports"
-            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-            alt_out = fallback_dir / f"{out_path.stem}-{ts}{out_path.suffix}"
-            alt_md = alt_out.with_suffix(".md") if markdown is None else (fallback_dir / Path(markdown).name)
-            console.print(f"[yellow]Report directory not writable: {out_path.parent}[/yellow]")
-            console.print(f"[yellow]Writing to: {alt_out}[/yellow]")
-            out_path, md_path = alt_out, alt_md
-    except Exception:
-        pass
-
-    console.print(f"[dim]Results will be saved to {out_path}[/dim]")
-
-    status_path = Path(status_file) if status_file else None
-    if status_path is not None and status_path.exists() and status_path.is_dir():
-        status_path = status_path / "react_status.json"
-
-    last_line = {"event": None, "tool": None, "message": None}
-
-    def progress_cb(event: str, tool: str, message: str, agg: dict):
-        try:
-            payload = {
-                "event": event,
-                "tool": tool,
-                "message": message,
-                "target": agg.get("target"),
-                "mode": agg.get("mode"),
-                "started_at": agg.get("started_at"),
-                "react": agg.get("react", {}),
-            }
-            if status_path is not None:
-                try:
-                    status_path.parent.mkdir(parents=True, exist_ok=True)
-                    status_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-                except Exception:
-                    pass
-
-            if not status:
-                return
-            # De-dupe noisy repeats
-            if (
-                last_line.get("event") == event
-                and last_line.get("tool") == tool
-                and last_line.get("message") == message
-            ):
-                return
-            last_line.update({"event": event, "tool": tool, "message": message})
-
-            label = event
-            if event == "tool_start":
-                label = "RUN"
-            elif event == "tool_end":
-                label = "DONE"
-            elif event == "tool_skip":
-                label = "SKIP"
-            elif event == "plan_ready":
-                label = "PLAN"
-            elif event == "methodology":
-                label = "METHOD"
-            elif event == "action_selected":
-                label = "ACTION"
-            elif event == "llm_start":
-                label = "LLM"
-            elif event == "done":
-                label = "DONE"
-
-            tool_txt = f" {tool}" if tool else ""
-            msg_txt = f": {message}" if message else ""
-            console.print(f"[dim][{label}]{tool_txt}{msg_txt}[/dim]")
-        except Exception:
-            return
-
-    console.print(f"[bold red][*] Starting ReAct loop for {target}...[/bold red]")
-    orchestrator = ReActOrchestrator()
-    with console.status("[bold green]Running ReAct loop...[/bold green]"):
-        report = orchestrator.run(
-            target,
-            out_path,
-            mode=mode,
-            nuclei_rate_limit=nuclei_rate_limit,
-            gobuster_threads=gobuster_threads,
-            gobuster_wordlist=gobuster_wordlist,
-            run_hydra=hydra,
-            hydra_usernames=hydra_usernames,
-            hydra_passwords=hydra_passwords,
-            hydra_services=hydra_services,
-            hydra_threads=hydra_threads,
-            hydra_options=hydra_options,
-            run_medusa=medusa,
-            medusa_usernames=medusa_usernames,
-            medusa_passwords=medusa_passwords,
-            medusa_module=medusa_module,
-            medusa_port=medusa_port,
-            medusa_threads=medusa_threads,
-            medusa_timeout=medusa_timeout,
-            medusa_options=medusa_options,
-            run_crackmapexec=crackmapexec,
-            cme_protocol=cme_protocol,
-            cme_username=cme_username,
-            cme_password=cme_password,
-            cme_domain=cme_domain,
-            cme_hashes=cme_hashes,
-            cme_module=cme_module,
-            cme_module_options=cme_module_options,
-            cme_enum=cme_enum,
-            cme_args=cme_args,
-            run_theharvester=theharvester,
-            theharvester_sources=theharvester_sources,
-            theharvester_limit=theharvester_limit,
-            theharvester_start=theharvester_start,
-            theharvester_args=theharvester_args,
-            run_netdiscover=netdiscover,
-            netdiscover_range=netdiscover_range,
-            netdiscover_interface=netdiscover_interface,
-            netdiscover_passive=netdiscover_passive,
-            netdiscover_fast=netdiscover_fast,
-            netdiscover_args=netdiscover_args,
-            run_aircrack=aircrack,
-            aircrack_interface=aircrack_interface,
-            aircrack_channel=aircrack_channel,
-            aircrack_args=aircrack_args,
-            aircrack_airmon=aircrack_airmon,
-            run_scoutsuite=scoutsuite,
-            scoutsuite_provider=scoutsuite_provider,
-            scoutsuite_args=scoutsuite_args,
-            run_prowler=prowler,
-            prowler_args=prowler_args,
-            remediate=remediate,
-            max_remediations=max_remediations,
-            min_remediation_severity=min_remediation_severity,
-            max_actions=max_actions,
-            progress_cb=progress_cb,
-            llm_plan=llm_plan,
-            use_llm=not no_llm,
-        )
-
-    saved_path = report.get("saved_to")
-    run_error = report.get("error")
-    if saved_path:
-        if run_error:
-            console.print(f"[bold red]ReAct FAILED.[/bold red] Report saved to [cyan]{saved_path}[/cyan]")
-        else:
-            console.print(f"[bold green]ReAct complete.[/bold green] Report saved to [cyan]{saved_path}[/cyan]")
-    else:
-        if run_error:
-            console.print("[red]ReAct FAILED and did not write a report file.[/red]")
-        else:
-            console.print("[yellow]ReAct completed but did not write a report file.[/yellow]")
-        if "write_error" in report:
-            console.print(f"[red]{report['write_error']}[/red]")
-        if isinstance(run_error, str) and run_error.strip():
-            console.print(f"[red]{run_error}[/red]")
-
-    if saved_path:
-        try:
-            from supabash.report import write_markdown
-            from supabash.report_export import export_from_markdown_file
-            md_written = write_markdown(report, md_path)
-            console.print(f"[green]Markdown report written to {md_written}[/green]")
-            exports = export_from_markdown_file(Path(md_written), config=config_manager.config)
-            if exports.html_path:
-                console.print(f"[green]HTML report written to {exports.html_path}[/green]")
-            if exports.pdf_path:
-                console.print(f"[green]PDF report written to {exports.pdf_path}[/green]")
-            if exports.html_error:
-                console.print(f"[yellow]HTML export skipped:[/yellow] {exports.html_error}")
-            if exports.pdf_error:
-                console.print(f"[yellow]PDF export skipped:[/yellow] {exports.pdf_error}")
-        except Exception as e:
-            console.print(f"[yellow]Failed to write Markdown report:[/yellow] {e}")
-
-    if run_error:
-        raise typer.Exit(code=1)
 
 @app.command()
 def config(
@@ -1643,7 +1451,8 @@ def chat():
                 continue
 
             out_path, md_path = build_report_paths(output, markdown)
-            console.print(f"[dim]Results will be saved to {out_path}[/dim]")
+            formats_note = _report_formats_note(config_manager.config)
+            console.print(f"[dim]Results will be saved to {out_path}{formats_note}[/dim]")
 
             if bg:
                 try:
