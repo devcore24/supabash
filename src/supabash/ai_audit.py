@@ -40,6 +40,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
         *,
         container_image: Optional[str] = None,
         mode: str = "normal",
+        compliance_profile: Optional[str] = None,
         nuclei_rate_limit: int = 0,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
@@ -102,6 +103,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
     ) -> Dict[str, Any]:
         run_error: Optional[str] = None
         normalized = self._normalize_target(target)
+        normalized_compliance = self._normalize_compliance_profile(compliance_profile)
+        compliance_label = self._compliance_profile_label(normalized_compliance)
+        compliance_focus = None
+        if normalized_compliance:
+            profile_spec = self._compliance_profiles().get(normalized_compliance, {})
+            if isinstance(profile_spec, dict):
+                compliance_focus = profile_spec.get("focus")
 
         def canceled() -> bool:
             return bool(cancel_event and cancel_event.is_set())
@@ -120,6 +128,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
             None,
             container_image=container_image,
             mode=mode,
+            compliance_profile=normalized_compliance,
             nuclei_rate_limit=nuclei_rate_limit,
             gobuster_threads=gobuster_threads,
             gobuster_wordlist=gobuster_wordlist,
@@ -222,6 +231,20 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 "notes": "",
             },
         )
+        if normalized_compliance:
+            ai_obj["compliance_profile"] = normalized_compliance
+            if compliance_label:
+                ai_obj["compliance_framework"] = compliance_label
+            if isinstance(compliance_focus, str) and compliance_focus.strip():
+                ai_obj["compliance_focus"] = compliance_focus.strip()
+            note_text = compliance_label or normalized_compliance
+            ai_obj["notes"] = (ai_obj.get("notes") or "").strip()
+            compliance_note = f"Compliance profile requested: {note_text}"
+            if ai_obj["notes"]:
+                if compliance_note not in ai_obj["notes"]:
+                    ai_obj["notes"] = f"{ai_obj['notes']} | {compliance_note}"
+            else:
+                ai_obj["notes"] = compliance_note
 
         # Mark baseline results for visibility.
         for entry in agg.get("results", []) or []:
@@ -304,7 +327,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
             ai_obj["planner"]["warning"] = "LLM disabled; skipping agentic phase."
             ai_obj["agentic_skipped"] = True
         else:
-            profile_values = ("fast", "standard", "aggressive")
+            compliance_profiles = self._compliance_profiles()
+            profile_values = ("fast", "standard", "aggressive") + tuple(compliance_profiles.keys())
+            requested_compliance = normalized_compliance if normalized_compliance in compliance_profiles else None
             open_ports: List[int] = []
             try:
                 for entry in agg.get("results", []) or []:
@@ -428,6 +453,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         prof = "standard"
                     rate = base_rate
                     threads = base_threads
+                    if prof in compliance_profiles:
+                        settings = compliance_profiles.get(prof, {})
+                        rate = int(settings.get("rate_limit", base_rate))
+                        threads = int(settings.get("threads", base_threads))
+                        return rate, threads
                     if prof == "fast":
                         threads = max(5, threads // 2)
                         if rate > 0:
@@ -450,6 +480,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     profile = str(args.get("profile") or "standard").strip().lower()
                     if profile not in profile_values:
                         profile = "standard"
+                    if requested_compliance and profile != requested_compliance:
+                        profile = requested_compliance
                     filtered = {k: v for k, v in args.items() if k in allowed_argument_keys}
                     filtered["profile"] = profile
                     reasoning = str(item.get("reasoning") or "").strip()
@@ -505,6 +537,30 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     except Exception:
                         findings_preview = []
 
+                    compliance_block = {}
+                    if compliance_profiles:
+                        compliance_block["profiles"] = {
+                            key: {
+                                "label": spec.get("label"),
+                                "focus": spec.get("focus"),
+                                "preferred_tools": spec.get("preferred_tools", []),
+                            }
+                            for key, spec in compliance_profiles.items()
+                        }
+                    if requested_compliance:
+                        spec = compliance_profiles.get(requested_compliance, {})
+                        required_tools = spec.get("required_tools", []) if isinstance(spec.get("required_tools"), list) else []
+                        missing_required = [t for t in required_tools if t not in allowed_tools]
+                        compliance_block.update(
+                            {
+                                "requested_profile": requested_compliance,
+                                "framework": spec.get("label"),
+                                "focus": spec.get("focus"),
+                                "required_tools": required_tools,
+                                "missing_required_tools": missing_required,
+                            }
+                        )
+
                     context_obj = {
                         "target": target,
                         "mode": mode,
@@ -521,6 +577,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "results": results_summary[-12:],
                             "findings": findings_preview,
                         },
+                        "compliance": compliance_block,
                         "constraints": {
                             "profile_enum": list(profile_values),
                             "sqlmap_requires_parameterized_url": True,
@@ -540,7 +597,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if truncated:
                         messages.insert(1, {"role": "system", "content": "Note: Input was truncated to fit context limits."})
 
-                    note("llm_start", "planner", "Planning next steps with tool-calling", agg=agg)
+                    note("llm_start", "planner", "Formulating audit expansion plan with tool-calling", agg=agg)
                     tool_calls, meta = self.llm.tool_call(
                         messages,
                         tools=[build_tool_schema(allowed_tools)],
@@ -861,6 +918,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
             max_remediations=max_remediations,
             min_severity=min_remediation_severity,
         )
+        findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
 
         try:

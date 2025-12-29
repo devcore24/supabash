@@ -44,6 +44,121 @@ from supabash.aggressive_caps import apply_aggressive_caps
 
 logger = setup_logger(__name__)
 
+COMPLIANCE_PROFILE_ALIASES = {
+    "pci": "compliance_pci",
+    "pci_dss": "compliance_pci",
+    "pci-dss": "compliance_pci",
+    "soc2": "compliance_soc2",
+    "soc_2": "compliance_soc2",
+    "soc-2": "compliance_soc2",
+    "iso": "compliance_iso",
+    "iso27001": "compliance_iso",
+    "iso-27001": "compliance_iso",
+    "dora": "compliance_dora",
+    "nis2": "compliance_nis2",
+    "nis-2": "compliance_nis2",
+    "gdpr": "compliance_gdpr",
+    "bsi": "compliance_bsi",
+}
+
+COMPLIANCE_PROFILES = {
+    "compliance_pci": {
+        "label": "PCI-DSS 4.0",
+        "focus": "Cardholder data environment controls with emphasis on strong cryptography and vulnerability management.",
+        "preferred_tools": ["sslscan", "nuclei", "whatweb", "httpx", "sqlmap"],
+        "rate_limit": 10,
+        "threads": 10,
+        "required_tools": ["sslscan"],
+    },
+    "compliance_soc2": {
+        "label": "SOC 2 Type II",
+        "focus": "Security and availability controls with evidence of exposure management and vulnerability assessment.",
+        "preferred_tools": ["nuclei", "whatweb", "httpx", "sslscan"],
+        "rate_limit": 10,
+        "threads": 10,
+        "required_tools": [],
+    },
+    "compliance_iso": {
+        "label": "ISO/IEC 27001",
+        "focus": "Information security controls with structured evidence of vulnerability management and secure configuration.",
+        "preferred_tools": ["nuclei", "whatweb", "httpx", "sslscan"],
+        "rate_limit": 10,
+        "threads": 10,
+        "required_tools": [],
+    },
+    "compliance_dora": {
+        "label": "DORA",
+        "focus": "Operational resilience with emphasis on vulnerability detection and service exposure.",
+        "preferred_tools": ["nuclei", "whatweb", "httpx", "sslscan"],
+        "rate_limit": 8,
+        "threads": 8,
+        "required_tools": [],
+    },
+    "compliance_nis2": {
+        "label": "NIS2",
+        "focus": "Risk management and exposure reduction for critical services.",
+        "preferred_tools": ["nuclei", "whatweb", "httpx", "sslscan"],
+        "rate_limit": 8,
+        "threads": 8,
+        "required_tools": [],
+    },
+    "compliance_gdpr": {
+        "label": "GDPR",
+        "focus": "Data protection and exposure risk indicators for externally reachable services.",
+        "preferred_tools": ["whatweb", "httpx", "gobuster", "nuclei", "sqlmap"],
+        "rate_limit": 10,
+        "threads": 10,
+        "required_tools": [],
+    },
+    "compliance_bsi": {
+        "label": "BSI IT-Grundschutz",
+        "focus": "Baseline security controls with evidence of secure configuration and vulnerability management.",
+        "preferred_tools": ["nuclei", "whatweb", "httpx", "sslscan"],
+        "rate_limit": 10,
+        "threads": 10,
+        "required_tools": [],
+    },
+}
+
+COMPLIANCE_CONTROL_REFERENCES = {
+    "crypto": {
+        "compliance_pci": "PCI-DSS 4.0 Req 4.2 (Strong Cryptography)",
+        "compliance_soc2": "SOC 2 CC6.7 (Encryption Controls)",
+        "compliance_iso": "ISO/IEC 27001 A.10.1 (Cryptographic Controls)",
+        "compliance_dora": "DORA ICT Risk Mgmt (Security of Data in Transit)",
+        "compliance_nis2": "NIS2 Risk Mgmt (Network Security Measures)",
+        "compliance_gdpr": "GDPR Art. 32 (Encryption of Personal Data)",
+        "compliance_bsi": "BSI IT-Grundschutz: Cryptographic Safeguards",
+    },
+    "vuln_mgmt": {
+        "compliance_pci": "PCI-DSS 4.0 Req 11.3 (Vulnerability Management)",
+        "compliance_soc2": "SOC 2 CC7.1 (Vulnerability Management)",
+        "compliance_iso": "ISO/IEC 27001 A.12.6 (Technical Vulnerability Management)",
+        "compliance_dora": "DORA ICT Risk Mgmt (Vulnerability Handling)",
+        "compliance_nis2": "NIS2 Risk Mgmt (Vulnerability Handling)",
+        "compliance_gdpr": "GDPR Art. 32 (Security of Processing)",
+        "compliance_bsi": "BSI IT-Grundschutz: Vulnerability Management",
+    },
+    "access_control": {
+        "compliance_pci": "PCI-DSS 4.0 Req 8 (Access Control)",
+        "compliance_soc2": "SOC 2 CC6.1 (Logical Access)",
+        "compliance_iso": "ISO/IEC 27001 A.9 (Access Control)",
+        "compliance_dora": "DORA ICT Risk Mgmt (Access Control)",
+        "compliance_nis2": "NIS2 Risk Mgmt (Access Control)",
+        "compliance_gdpr": "GDPR Art. 32 (Access Control)",
+        "compliance_bsi": "BSI IT-Grundschutz: Access Control",
+    },
+    "data_protection": {
+        "compliance_pci": "PCI-DSS 4.0 Req 3 (Protect Stored Account Data)",
+        "compliance_soc2": "SOC 2 CC6.8 (Data Classification & Protection)",
+        "compliance_iso": "ISO/IEC 27001 A.8 (Asset Management)",
+        "compliance_dora": "DORA ICT Risk Mgmt (Data Protection)",
+        "compliance_nis2": "NIS2 Risk Mgmt (Data Protection)",
+        "compliance_gdpr": "GDPR Art. 5/32 (Data Protection)",
+        "compliance_bsi": "BSI IT-Grundschutz: Data Protection",
+    },
+}
+
 
 class AuditOrchestrator:
     """
@@ -144,6 +259,32 @@ class AuditOrchestrator:
             if isinstance(v, dict):
                 return v
         return {}
+
+    def _normalize_compliance_profile(self, profile: Optional[str]) -> Optional[str]:
+        if not profile:
+            return None
+        token = str(profile).strip().lower()
+        if not token:
+            return None
+        token = token.replace(" ", "_")
+        if token in COMPLIANCE_PROFILE_ALIASES:
+            return COMPLIANCE_PROFILE_ALIASES[token]
+        if token.startswith("compliance_"):
+            return token if token in COMPLIANCE_PROFILES else None
+        candidate = f"compliance_{token}"
+        return candidate if candidate in COMPLIANCE_PROFILES else None
+
+    def _compliance_profiles(self) -> Dict[str, Dict[str, Any]]:
+        return COMPLIANCE_PROFILES
+
+    def _compliance_profile_label(self, profile: Optional[str]) -> Optional[str]:
+        if not profile:
+            return None
+        settings = COMPLIANCE_PROFILES.get(profile)
+        if not settings:
+            return None
+        label = settings.get("label")
+        return str(label) if label else None
 
     def _tool_timeout_seconds(self, tool: str) -> Optional[int]:
         cfg = self._tool_config(tool)
@@ -499,6 +640,12 @@ class AuditOrchestrator:
             "findings_overview": counts,
             "findings": selected,
         }
+        compliance_profile = agg.get("compliance_profile")
+        if isinstance(compliance_profile, str) and compliance_profile.strip():
+            ctx["compliance_profile"] = compliance_profile.strip()
+            framework = agg.get("compliance_framework")
+            if isinstance(framework, str) and framework.strip():
+                ctx["compliance_framework"] = framework.strip()
 
         ai = agg.get("ai_audit")
         if isinstance(ai, dict):
@@ -1058,7 +1205,58 @@ class AuditOrchestrator:
                     })
         return findings
 
-    def _nmap_args_for_mode(self, mode: str) -> str:
+    def _apply_compliance_tags(
+        self,
+        agg: Dict[str, Any],
+        findings: List[Dict[str, Any]],
+        compliance_profile: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        profile = self._normalize_compliance_profile(compliance_profile) or self._normalize_compliance_profile(
+            agg.get("compliance_profile")
+        )
+        if not profile:
+            return findings
+        if profile not in COMPLIANCE_PROFILES:
+            return findings
+
+        def tag(control_key: str) -> Optional[str]:
+            ref = COMPLIANCE_CONTROL_REFERENCES.get(control_key, {}).get(profile)
+            if not ref:
+                return None
+            return f"NON-COMPLIANT: {ref}"
+
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            tool = str(finding.get("tool") or "").lower()
+            title = str(finding.get("title") or "").strip().lower()
+            tags: List[str] = []
+
+            if tool == "sslscan" and "weak tls protocol" in title:
+                ref = tag("crypto")
+                if ref:
+                    tags.append(ref)
+            if tool in ("nuclei", "sqlmap") or "sql injection" in title:
+                ref = tag("vuln_mgmt")
+                if ref:
+                    tags.append(ref)
+            if tool in ("hydra", "medusa") or "valid credentials" in title:
+                ref = tag("access_control")
+                if ref:
+                    tags.append(ref)
+            if tool == "supabase_rls" or "rls" in title:
+                ref = tag("data_protection")
+                if ref:
+                    tags.append(ref)
+
+            if tags:
+                finding["compliance_tags"] = tags
+        return findings
+
+    def _nmap_args_for_mode(self, mode: str, compliance_profile: Optional[str] = None) -> str:
+        normalized = self._normalize_compliance_profile(compliance_profile)
+        if normalized == "compliance_pci":
+            return "-sV --script ssl-enum-ciphers -p-"
         if mode == "stealth":
             return "-sS -T2"
         if mode == "aggressive":
@@ -1120,6 +1318,7 @@ class AuditOrchestrator:
         output: Optional[Path],
         container_image: Optional[str] = None,
         mode: str = "normal",
+        compliance_profile: Optional[str] = None,
         nuclei_rate_limit: int = 0,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
@@ -1180,6 +1379,13 @@ class AuditOrchestrator:
     ) -> Dict[str, Any]:
         normalized = self._normalize_target(target)
         scan_host = normalized["scan_host"]
+        normalized_compliance = self._normalize_compliance_profile(compliance_profile)
+        compliance_label = self._compliance_profile_label(normalized_compliance)
+        compliance_focus = None
+        if normalized_compliance:
+            profile_spec = COMPLIANCE_PROFILES.get(normalized_compliance)
+            if isinstance(profile_spec, dict):
+                compliance_focus = profile_spec.get("focus")
 
         cfg_obj = None
         try:
@@ -1236,9 +1442,16 @@ class AuditOrchestrator:
                 "scoutsuite_enabled": bool(run_scoutsuite),
                 "scoutsuite_provider": scoutsuite_provider,
                 "prowler_enabled": bool(run_prowler),
+                "compliance_profile": normalized_compliance,
             },
             "safety": {"aggressive_caps": caps_meta},
         }
+        if normalized_compliance:
+            agg["compliance_profile"] = normalized_compliance
+            if compliance_label:
+                agg["compliance_framework"] = compliance_label
+            if isinstance(compliance_focus, str) and compliance_focus.strip():
+                agg["compliance_focus"] = compliance_focus.strip()
         if container_image:
             agg["container_image"] = container_image
         report_root = Path(output).parent if output is not None else Path("reports")
@@ -1262,7 +1475,7 @@ class AuditOrchestrator:
                 "nmap",
                 lambda: self.scanners["nmap"].scan(
                     scan_host,
-                    arguments=self._nmap_args_for_mode(mode),
+                    arguments=self._nmap_args_for_mode(mode, compliance_profile=normalized_compliance),
                     cancel_event=cancel_event,
                     timeout_seconds=self._tool_timeout_seconds("nmap"),
                 ),
@@ -2437,6 +2650,7 @@ class AuditOrchestrator:
             max_remediations=max_remediations,
             min_severity=min_remediation_severity,
         )
+        findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
         agg["finished_at"] = time.time()
         try:

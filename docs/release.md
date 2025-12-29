@@ -99,6 +99,6 @@ pyinstaller -F -n supabash -m supabash.__main__
 
 - Version bumped in `pyproject.toml`
 - `README.md` and `TODO.md` up to date
+- Compliance profile outputs verified in reports (methodology + control tags)
 - Tests passing locally and in CI
 - `supabash doctor` works on a fresh system (or docs updated with manual steps)
-

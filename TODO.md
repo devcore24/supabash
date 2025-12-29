@@ -194,7 +194,10 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add opt-in CLI flags for Medusa + CrackMapExec with report findings.
 - [x] Add cloud posture tooling (ScoutSuite + Prowler) with opt-in flags and report findings.
 - [x] Add tool-calling agentic planning for AI audit (structured schema with profile + graceful fallback).
-- [ ] Map compliance profiles (PCI, SOC2, ISO, DORA, NIS2, GDPR, BSI) to agentic tool settings.
+- [x] Map compliance profiles (PCI, SOC2, ISO, DORA, NIS2, GDPR, BSI) to agentic tool settings.
+    - [x] Add compliance profiles to agentic schema and enforce audit-grade reasoning.
+    - [x] Apply profile-driven tool settings and compliance annotations in reports.
+    - [x] Surface compliance focus in report methodology for audit traceability.
 
 ### Next Tool Additions (Planned)
 - [x] **sslscan:** TLS configuration checks (run only when HTTPS ports are open).

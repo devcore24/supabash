@@ -13,6 +13,14 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"**Run Type:** {report_kind.strip().replace('_', '-')}")
     if report.get("container_image"):
         lines.append(f"**Container Image:** {report['container_image']}")
+    compliance_profile = report.get("compliance_profile")
+    if isinstance(compliance_profile, str) and compliance_profile.strip():
+        framework = report.get("compliance_framework")
+        label = framework if isinstance(framework, str) and framework.strip() else compliance_profile
+        lines.append(f"**Compliance Profile:** {label}")
+    compliance_focus = report.get("compliance_focus")
+    if isinstance(compliance_focus, str) and compliance_focus.strip():
+        lines.append(f"**Compliance Focus:** {compliance_focus.strip()}")
 
     llm_meta = report.get("llm")
     if isinstance(llm_meta, dict) and llm_meta.get("enabled") is False:
@@ -45,6 +53,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     lines.append("\n## Table of Contents")
     toc = [
         ("Summary", "#summary"),
+        ("Methodology", "#methodology"),
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Findings Overview", "#findings-overview"),
         ("Findings (Detailed)", "#findings-detailed"),
@@ -139,10 +148,22 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     if evidence:
                         lines.append(f"  - Evidence: {evidence}")
                     if rec:
-                        lines.append(f"  - Fix: {rec}")
+                        lines.append(f"  - Recommendation: {rec}")
         else:
             lines.append("\n## Summary")
             lines.append(str(summary))
+
+    # Methodology
+    lines.append("\n## Methodology")
+    lines.append("- Baseline: deterministic evidence collection with scope controls and safe defaults.")
+    if isinstance(report.get("ai_audit"), dict):
+        lines.append("- Agentic expansion: tool-calling planner proposes additional evidence collection within allowed scope.")
+    else:
+        lines.append("- Agentic expansion: not enabled for this run.")
+    if isinstance(compliance_profile, str) and compliance_profile.strip():
+        lines.append(f"- Compliance profile: {compliance_profile.strip()}")
+    if isinstance(compliance_focus, str) and compliance_focus.strip():
+        lines.append(f"- Compliance focus: {compliance_focus.strip()}")
 
     # Agentic expansion details (if present)
     ai = report.get("ai_audit")
@@ -177,14 +198,27 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             for a in actions[:50]:
                 if not isinstance(a, dict):
                     continue
-                action = a.get("action") or ""
                 status = "skipped" if a.get("skipped") else ("success" if a.get("success") else "failed")
+                tool = str(a.get("tool") or "").strip()
+                target = str(a.get("target") or "").strip()
+                profile = str(a.get("profile") or "").strip()
                 err = a.get("error")
-                if isinstance(action, str) and action.strip():
-                    line = f"- `{action.strip()}`: {status}"
-                    if isinstance(err, str) and err.strip():
-                        line = f"{line} — {err.strip()}"
+                reasoning = a.get("reasoning")
+                parts = []
+                if tool:
+                    parts.append(f"{tool}")
+                if target:
+                    parts.append(f"target={target}")
+                if profile:
+                    parts.append(f"profile={profile}")
+                action_line = " ".join(parts).strip()
+                if action_line:
+                    line = f"- {action_line}: {status}"
                     lines.append(line)
+                    if isinstance(reasoning, str) and reasoning.strip():
+                        lines.append(f"  - Rationale: {reasoning.strip()}")
+                    if isinstance(err, str) and err.strip():
+                        lines.append(f"  - Error: {err.strip()}")
 
     # Findings overview table
     sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
@@ -243,12 +277,12 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                 lines.append(f"  - Evidence: {evidence.strip()}")
             rec = f.get("recommendation")
             if isinstance(rec, str) and rec.strip():
-                lines.append(f"  - Fix: {rec.strip()}")
+                lines.append(f"  - Recommendation: {rec.strip()}")
             remediation = f.get("remediation")
             if isinstance(remediation, dict):
                 steps = remediation.get("steps")
                 if isinstance(steps, list) and steps:
-                    lines.append("  - Steps:")
+                    lines.append("  - Remediation Steps:")
                     for s in steps[:8]:
                         if isinstance(s, str) and s.strip():
                             lines.append(f"    - {s.strip()}")
@@ -258,6 +292,11 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     lines.append("```")
                     lines.append(code_sample.strip())
                     lines.append("```")
+            compliance_tags = f.get("compliance_tags")
+            if isinstance(compliance_tags, list) and compliance_tags:
+                tags = [str(t).strip() for t in compliance_tags if str(t).strip()]
+                if tags:
+                    lines.append(f"  - Compliance Impact: {'; '.join(tags)}")
 
     # Tools run (table + short notes)
     results = report.get("results", []) or []

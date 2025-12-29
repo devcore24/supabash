@@ -1,4 +1,4 @@
-ANALYZER_PROMPT = """You are a security analyst. Given tool outputs (or a condensed findings list), produce a concise summary of vulnerabilities with severity and evidence.
+ANALYZER_PROMPT = """You are a security auditor. Given tool outputs (or a condensed findings list), produce a concise, professional audit summary with severity and evidence.
 
 Input format:
 - nmap: open ports/services
@@ -17,7 +17,7 @@ Output JSON:
     {"severity": "HIGH|MEDIUM|LOW", "title": "...", "evidence": "...", "recommendation": "..."}
   ]
 }
-Keep it brief. If no issues, say so in summary and return empty findings.
+Keep it brief and evidence-based. If no issues, state that clearly and return empty findings.
 """
 
 PLANNER_PROMPT = """You are a security planner. Given current findings, propose next tools or focus areas.
@@ -30,13 +30,15 @@ Output JSON:
 Keep it actionable and short."""
 
 AGENTIC_TOOLCALL_PROMPT = """You are a security audit planner.
-Use the propose_actions tool to select the next safe actions.
+Use the propose_actions tool to select the next safe actions with audit-grade rationale.
 
 Rules:
 - Only choose tool_name values from the provided allowed tools list.
 - Use targets strictly from the provided allowed targets list.
-- Include a profile for every action: fast|standard|aggressive.
+- Include a profile for every action: fast|standard|aggressive or compliance_*.
 - Prefer 1-3 actions per step; avoid brute-force/exploitation.
+- The reasoning field must explain the audit rationale (e.g., control objective or evidence trigger).
+- If a compliance profile is requested, use that profile consistently across actions.
 """
 
 REMEDIATOR_PROMPT = """You are a security remediation assistant. Given a vulnerability finding, produce a concise fix.

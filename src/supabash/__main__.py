@@ -386,6 +386,11 @@ def audit(
     allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
     consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
     mode: str = typer.Option("normal", "--mode", help="Scan mode: normal|stealth|aggressive"),
+    compliance: Optional[str] = typer.Option(
+        None,
+        "--compliance",
+        help="Compliance profile for audit planning (pci, soc2, iso, dora, nis2, gdpr, bsi)",
+    ),
     nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
     gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
     gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
@@ -569,8 +574,24 @@ def audit(
                 elif event in ("llm_start", "llm_error"):
                     label = "LLM"
 
+                display_message = message
+                if event in ("tool_start", "tool_end"):
+                    action = "Evidence collection started" if event == "tool_start" else "Evidence collection completed"
+                    if tool:
+                        action = f"{action} ({tool})"
+                    display_message = f"{action}: {message}" if message else action
+                elif event in ("phase_start", "phase_end"):
+                    action = "Assessment phase started" if event == "phase_start" else "Assessment phase completed"
+                    if tool:
+                        action = f"{action} ({tool})"
+                    display_message = f"{action}: {message}" if message else action
+                elif event == "llm_start":
+                    display_message = f"Analyst reasoning: {message}" if message else "Analyst reasoning started"
+                elif event == "llm_error":
+                    display_message = f"Analyst reasoning error: {message}" if message else "Analyst reasoning error"
+
                 tool_txt = f" {tool}" if tool else ""
-                msg_txt = f": {message}" if message else ""
+                msg_txt = f": {display_message}" if display_message else ""
                 if event == "llm_error":
                     console.print(f"[yellow][{label}]{tool_txt}{msg_txt}[/yellow]")
                 else:
@@ -582,6 +603,7 @@ def audit(
     run_kwargs = dict(
         container_image=container_image,
         mode=mode,
+        compliance_profile=compliance,
         nuclei_rate_limit=nuclei_rate_limit,
         gobuster_threads=gobuster_threads,
         gobuster_wordlist=gobuster_wordlist,
@@ -706,6 +728,11 @@ def ai_audit(
     allow_public: bool = typer.Option(False, "--allow-public", help="Allow scanning public IP targets (requires authorization)"),
     consent: bool = typer.Option(False, "--yes", help="Skip consent prompt"),
     mode: str = typer.Option("normal", "--mode", help="Scan mode: normal|stealth|aggressive"),
+    compliance: Optional[str] = typer.Option(
+        None,
+        "--compliance",
+        help="Compliance profile for audit planning (pci, soc2, iso, dora, nis2, gdpr, bsi)",
+    ),
     nuclei_rate_limit: int = typer.Option(0, "--nuclei-rate", help="Nuclei request rate limit (per second)"),
     gobuster_threads: int = typer.Option(10, "--gobuster-threads", help="Gobuster thread count"),
     gobuster_wordlist: str = typer.Option(None, "--gobuster-wordlist", help="Gobuster wordlist path"),
@@ -784,6 +811,7 @@ def ai_audit(
         allow_public=allow_public,
         consent=consent,
         mode=mode,
+        compliance=compliance,
         nuclei_rate_limit=nuclei_rate_limit,
         gobuster_threads=gobuster_threads,
         gobuster_wordlist=gobuster_wordlist,

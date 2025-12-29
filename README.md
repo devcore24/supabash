@@ -16,21 +16,22 @@
 ![License](https://img.shields.io/badge/License-AGPLv3-blue)
 ![Status](https://img.shields.io/badge/Status-Beta-orange)
 
-> **⚠️ Development Status:** This project is currently in **Active Development (Phase 8)**. The CLI, 27 tool wrappers, chat control plane, audit reporting (JSON/Markdown), and LLM-based summary/remediation are implemented; remaining work focuses on hardening, configurability, and expanding the toolchain.
-> Progress: `[████████████████████]` **100%** (Core complete)
+> **⚠️ Development Status:** Supabash is in active development (hardening + expansion). The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown/HTML/pdf), and LLM summary/remediation are implemented; current work focuses on stability, configurability, and new tool coverage.
+> Progress: `[████████████████████]` **Core workflow complete; expansion ongoing**
 
-**Supabash** is an autonomous AI Security Agent designed for developers, pentesters, DevOps engineers, Red and Blue Teams who want to **automate security audits** without sacrificing depth or understanding. Unlike traditional wrapper scripts, Supabash acts as a **reasoning engine**: it intelligently orchestrates industry-standard security tools, analyzes their output in real-time, identifies security holes, and writes detailed audit reports with actionable remediation steps.
+**Supabash** is an autonomous AI security auditor for developers, pentesters, DevOps engineers, and Red/Blue Teams who need **repeatable, evidence-driven security audits**. Unlike simple wrapper scripts, Supabash operates as a **reasoning engine**: it orchestrates industry-standard tools, analyzes outputs in context, identifies exposure and misconfiguration, and produces audit-grade reports with prioritized remediation guidance.
 
 
 ---
 
 ## 🚀 Key Features
 
-*   **🤖 Autonomous Reasoning (Beta):** Tool-calling agentic planning expands audits safely and predictably.
-*   **🛡️ Auditing:** Scans infrastructure, web applications, and Docker container images (wireless is planned).
-*   **📝 Smart Reporting:** Generates human-readable audits containing detection details, severity levels, and **code-level fix suggestions**.
-*   **⚡ High-Performance:** Orchestrates fast scanners (Rust/Go) alongside deep-dive frameworks (Python/Ruby).
-*   **🔌 Extensible Design:** Modular wrappers; plugin registry planned.
+*   **🤖 Autonomous Reasoning (Beta):** Tool-calling planning proposes bounded, evidence-driven follow-ups.
+*   **🛡️ Audit Coverage:** Infrastructure, web apps, containers, and wireless (experimental) with scope controls.
+*   **📋 Compliance-Ready:** Optional compliance profiles (PCI, SOC2, ISO 27001, DORA, NIS2, GDPR, BSI) tune tool settings and annotate findings with control references.
+*   **📝 Audit Reporting:** Evidence, severity, and remediation guidance in JSON/Markdown/HTML/pdf outputs.
+*   **⚡ Performance:** Combines fast scanners (Rust/Go) with deep-dive frameworks (Python/Ruby).
+*   **🔌 Extensible Design:** Modular wrappers with a configurable tool registry (plugins planned).
 
 ---
 
@@ -217,15 +218,18 @@ Note: Supabash writes JSON + Markdown by default; HTML/PDF exports are optional 
 If web tools show `Executable not found`, install system requirements via `install.sh` or `docs/system-requirements.md`.
 
 ### 2b. AI Audit (Baseline + Agentic Expansion)
-AI audit combines the deterministic `audit` pipeline with a bounded, tool-calling expansion phase (useful when Nmap finds multiple web ports). It produces one unified report.
+AI audit combines the deterministic `audit` pipeline with a bounded, tool-calling expansion phase for additional evidence collection (useful when Nmap finds multiple web ports). It produces one unified report.
 ```bash
 supabash ai-audit 192.168.1.10 --yes
 supabash audit 192.168.1.10 --agentic --yes   # alias
 supabash ai-audit "http://192.168.1.10" --yes --llm-plan --max-actions 8
+supabash ai-audit 192.168.1.10 --yes --compliance pci
 ```
 Notes:
-- AI audit uses provider tool-calling for planning. If tool-calling is unsupported, Supabash logs a warning and skips the agentic phase while still producing the baseline report.
-- Agentic planning uses a `profile` field (`fast|standard|aggressive`) to guide tool intensity (reserved for future compliance profiles).
+- AI audit uses provider tool-calling to plan additional evidence collection. If tool-calling is unsupported, Supabash logs a warning, skips the agentic phase, and still produces the baseline report.
+- Agentic planning uses a `profile` field (`fast|standard|aggressive|compliance_*`) to guide assessment intensity and compliance posture.
+- Compliance profiles tune tool settings and annotate findings with control references when evidence supports a requirement.
+- Reports include compliance profile/focus in the methodology to document audit intent and scope.
 - AI audit writes JSON + Markdown by default; HTML/PDF exports are optional via `core.report_exports`.
 
 ### 3. Container Image Scan
@@ -313,6 +317,7 @@ supabash audit [OPTIONS] TARGET
   - `--allow-public` — allow public IP targets (authorized only)
   - `--yes` — skip consent prompt
   - `--mode` (default: `normal`) — `normal|stealth|aggressive`
+  - `--compliance` — compliance profile (`pci|soc2|iso|dora|nis2|gdpr|bsi`)
   - `--nuclei-rate` (default: `0`) — nuclei rate-limit (requests/sec)
   - `--gobuster-threads` (default: `10`) — gobuster threads
   - `--gobuster-wordlist` — gobuster wordlist path
@@ -383,6 +388,7 @@ supabash ai-audit [OPTIONS] TARGET
 - Arguments: `TARGET` (required) — IP / hostname / URL / container ID
 - Options: same as `audit`, plus:
   - default output is `reports/ai-audit-YYYYmmdd-HHMMSS.json` (+ `.md`; html/pdf when enabled)
+  - `--compliance` — compliance profile (`pci|soc2|iso|dora|nis2|gdpr|bsi`)
   - `--status/--no-status` (default: `--status`) — print live progress
   - `--status-file` — write JSON status updates while running
   - `--llm-plan/--no-llm-plan` — tool-calling LLM planning for agentic expansion
@@ -464,7 +470,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Tune web tooling: `supabash audit ... --nuclei-rate 10 --gobuster-threads 20` (and optionally `--gobuster-wordlist /path/to/list`).
 - Parallelize web tools: `supabash audit ... --parallel-web --max-workers 3` (URL targets can overlap recon with web tooling).
 - Safety caps (aggressive mode): Supabash enforces global caps (rate limits / concurrency) in `--mode aggressive`; configure via `core.aggressive_caps` in `config.yaml`.
-- Agentic profiles: AI audit planning uses `profile` (`fast|standard|aggressive`) as a stable knob for future compliance profiles (PCI, SOC 2, ISO 27001, DORA, NIS2, GDPR, BSI IT-Grundschutz).
+- Agentic profiles: AI audit planning uses `profile` (`fast|standard|aggressive|compliance_*`) to drive compliance-oriented tool settings and reporting.
 
 ---
 
@@ -526,26 +532,32 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 - **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
 
 ### Reporting
-- **Formats:** Timestamped JSON + Markdown reports under `reports/` (includes exact commands executed for auditability)
-- **Schema:** JSON reports include `schema_version` + `schema_validation` for sanity checks and forward compatibility
+- **Formats:** Timestamped JSON + Markdown reports under `reports/` with command traces for auditability
+- **Schema:** JSON reports include `schema_version` + `schema_validation` for validation and forward compatibility
 - **Styling:** Markdown reports include TOC + summary tables for readability
+- **Compliance context:** Reports capture compliance profile/focus and annotate relevant findings with control references
 - **Export:** Optional HTML/PDF export via WeasyPrint
 
 ---
 
 ## 📊 Example Audit Output
 
-When Supabash detects an issue, it provides context and solutions:
+When Supabash detects an issue, it provides evidence-based findings and remediation guidance:
 
 ```json
 {
   "severity": "HIGH",
-  "type": "SQL Injection",
+  "title": "SQL injection detected",
   "tool": "sqlmap",
-  "endpoint": "/login.php?user=",
-  "analysis": "The parameter 'user' is vulnerable to boolean-based blind SQLi.",
-  "remediation_hint": "Use prepared statements in PHP (PDO). Do not concatenate user input directly into SQL strings.",
-  "code_fix_example": "$stmt = $pdo->prepare('SELECT * FROM users WHERE user = :user');"
+  "evidence": "Parameter `user` appears vulnerable to boolean-based blind SQLi on /login.php?user=.",
+  "recommendation": "Use parameterized queries (PDO prepared statements) and validate input.",
+  "remediation": {
+    "steps": [
+      "Replace string concatenation with parameterized queries.",
+      "Add server-side input validation for `user`."
+    ],
+    "code_sample": "$stmt = $pdo->prepare('SELECT * FROM users WHERE user = :user');"
+  }
 }
 ```
 
