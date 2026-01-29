@@ -203,6 +203,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                 target = str(a.get("target") or "").strip()
                 profile = str(a.get("profile") or "").strip()
                 err = a.get("error")
+                reason = a.get("reason")
                 reasoning = a.get("reasoning")
                 parts = []
                 if tool:
@@ -217,7 +218,12 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     lines.append(line)
                     if isinstance(reasoning, str) and reasoning.strip():
                         lines.append(f"  - Rationale: {reasoning.strip()}")
-                    if isinstance(err, str) and err.strip():
+                    if status == "skipped":
+                        if isinstance(reason, str) and reason.strip():
+                            lines.append(f"  - Reason: {reason.strip()}")
+                        elif isinstance(err, str) and err.strip():
+                            lines.append(f"  - Reason: {err.strip()}")
+                    elif isinstance(err, str) and err.strip():
                         lines.append(f"  - Error: {err.strip()}")
 
     # Findings overview table

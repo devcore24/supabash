@@ -937,6 +937,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 "success": bool(entry.get("success")) if not entry.get("skipped") else False,
                                 "skipped": bool(entry.get("skipped")),
                                 "error": entry.get("error") or entry.get("reason"),
+                                "reason": entry.get("reason"),
                                 "started_at": started_at,
                                 "finished_at": finished_at,
                             }

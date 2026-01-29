@@ -67,3 +67,4 @@ chat_report.html
 chat_report.pdf
 reports/*
 !reports/.gitkeep
+
