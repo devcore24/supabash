@@ -506,6 +506,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "reasoning": reasoning,
                     }
 
+                def resolve_wordlist(value: Optional[str]) -> Optional[str]:
+                    if not value or not isinstance(value, str):
+                        return None
+                    candidate = value.strip()
+                    if not candidate:
+                        return None
+                    path = Path(candidate).expanduser()
+                    if not path.is_absolute():
+                        data_dir = Path(__file__).resolve().parent / "data" / "wordlists"
+                        path = data_dir / candidate
+                    return str(path) if path.exists() else None
+
                 def parse_tool_calls(tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
                     actions: List[Dict[str, Any]] = []
                     notes = ""
@@ -638,10 +650,17 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     profile = action["profile"]
                     target = args.get("target") if isinstance(args.get("target"), str) else None
 
+                    action_target = None
+                    action_port = None
+
                     if canceled():
                         entry = {"tool": tool, "success": False, "skipped": True, "reason": "Canceled"}
                     elif tool_specs.get(tool, {}).get("target_kind") == "web":
-                        if not target:
+                        action_target = target
+                        action_key = (tool, action_target or "")
+                        if action_key in agentic_success:
+                            entry = self._skip_tool(tool, "Already completed in agentic phase")
+                        elif not target:
                             entry = self._skip_tool(tool, "Missing target")
                         elif target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
                             entry = self._skip_tool(tool, "Target not in allowed web targets")
@@ -653,7 +672,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             rate_limit = clamp_int(rate_limit, base_rate, 0, 100)
                             threads = clamp_int(threads, base_threads, 1, 50)
                             rate_limit, threads = apply_profile(profile, rate_limit, threads)
-                            wordlist = args.get("wordlist") if isinstance(args.get("wordlist"), str) else gobuster_wordlist
+                            proposed_wordlist = args.get("wordlist") if isinstance(args.get("wordlist"), str) else None
+                            safe_wordlist = resolve_wordlist(proposed_wordlist) or resolve_wordlist(gobuster_wordlist)
 
                             if tool == "httpx":
                                 entry = self._run_tool(
@@ -686,12 +706,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     ),
                                 )
                             elif tool == "gobuster":
-                                if wordlist:
+                                if safe_wordlist:
                                     entry = self._run_tool(
                                         tool,
                                         lambda: self.scanners["gobuster"].scan(
                                             target,
-                                            wordlist=wordlist,
+                                            wordlist=safe_wordlist,
                                             threads=threads,
                                             cancel_event=cancel_event,
                                             timeout_seconds=self._tool_timeout_seconds("gobuster"),
@@ -712,7 +732,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     tool,
                                     lambda: self.scanners["ffuf"].scan(
                                         target,
-                                        wordlist=wordlist,
+                                        wordlist=safe_wordlist,
                                         threads=threads,
                                         cancel_event=cancel_event,
                                         timeout_seconds=self._tool_timeout_seconds("ffuf"),
@@ -761,7 +781,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             else:
                                 entry = self._skip_tool(tool, "Unsupported agentic action")
                     elif tool == "dnsenum":
-                        if not self._should_run_dnsenum(scan_host):
+                        action_target = scan_host
+                        action_key = (tool, action_target or "")
+                        if action_key in agentic_success:
+                            entry = self._skip_tool(tool, "Already completed in agentic phase")
+                        elif not self._should_run_dnsenum(scan_host):
                             entry = self._skip_tool(tool, "Not a domain target")
                         else:
                             entry = self._run_tool(
@@ -773,7 +797,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 ),
                             )
                     elif tool == "subfinder":
-                        if not self._should_run_dnsenum(scan_host):
+                        action_target = scan_host
+                        action_key = (tool, action_target or "")
+                        if action_key in agentic_success:
+                            entry = self._skip_tool(tool, "Already completed in agentic phase")
+                        elif not self._should_run_dnsenum(scan_host):
                             entry = self._skip_tool(tool, "Not a domain target")
                         else:
                             entry = self._run_tool(
@@ -792,7 +820,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             port = int(port) if port is not None else None
                         except Exception:
                             port = None
-                        if port is None:
+                        action_target = scan_host
+                        action_port = port
+                        action_key = (tool, action_target or "", str(action_port or ""))
+                        if action_key in agentic_success:
+                            entry = self._skip_tool(tool, "Already completed in agentic phase")
+                        elif port is None:
                             entry = self._skip_tool(tool, "No TLS ports detected (443/8443)")
                         else:
                             entry = self._run_tool(
@@ -805,7 +838,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 ),
                             )
                     elif tool == "enum4linux-ng":
-                        if not smb_ports:
+                        action_target = scan_host
+                        action_key = (tool, action_target or "")
+                        if action_key in agentic_success:
+                            entry = self._skip_tool(tool, "Already completed in agentic phase")
+                        elif not smb_ports:
                             entry = self._skip_tool(tool, "No SMB ports detected (139/445)")
                         else:
                             entry = self._run_tool(
@@ -817,7 +854,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 ),
                             )
                     elif tool == "trivy":
-                        if not container_image:
+                        action_target = container_image
+                        action_key = (tool, action_target or "")
+                        if action_key in agentic_success:
+                            entry = self._skip_tool(tool, "Already completed in agentic phase")
+                        elif not container_image:
                             entry = self._skip_tool(tool, "No container image provided")
                         else:
                             entry = self._run_tool(
@@ -835,8 +876,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if target:
                         entry["target"] = target
                     entry["profile"] = profile
+                    if entry.get("success") and not entry.get("skipped"):
+                        if tool_specs.get(tool, {}).get("target_kind") == "web":
+                            agentic_success.add((tool, action_target or ""))
+                        elif tool in ("dnsenum", "subfinder", "enum4linux-ng"):
+                            agentic_success.add((tool, scan_host or ""))
+                        elif tool == "sslscan":
+                            agentic_success.add((tool, scan_host or "", str(action_port or "")))
+                        elif tool == "trivy":
+                            agentic_success.add((tool, container_image or ""))
                     return entry
 
+                agentic_success: set[tuple] = set()
                 actions_executed = 0
                 while actions_executed < int(max_actions):
                     if canceled():
