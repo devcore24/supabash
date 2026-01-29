@@ -125,6 +125,7 @@ tools:
     enabled: true
     timeout_seconds: 10
     max_pages: 5
+    # extra_urls: ["http://127.0.0.1:4001"]
   hydra:
     enabled: false
     timeout_seconds: 3600

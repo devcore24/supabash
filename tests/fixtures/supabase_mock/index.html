@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Supabase Mock</title>
+  </head>
+  <body>
+    <h1>Supabase Mock</h1>
+    <script>
+      const supabaseUrl = "http://127.0.0.1:4001";
+      const supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.sig";
+      const serviceRoleKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.sig";
+      supabase.rpc('list_users');
+      window.__supabaseMock = { supabaseUrl, supabaseKey, serviceRoleKey };
+    </script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+id: supabash-supabase-min
+info:
+  name: Supabase Mock Minimal Reachability Check
+  author: supabash
+  severity: info
+  description: Minimal template used to keep Supabase integration tests fast.
+  tags: supabash,integration
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    matchers:
+      - type: status
+        status:
+          - 200
+          - 302

@@ -95,10 +95,11 @@ Supabash orchestrates the following security tools. **28 wrappers are currently 
 *   🔜 **Loot Manager** (Automated evidence collection)
 
 ### 📦 Container & Cloud
-*   ✅ **ScoutSuite** (Multi-cloud posture assessment)
-*   ✅ **Prowler** (AWS security best-practice checks)
+*   ✅ **ScoutSuite** (Multi-cloud posture assessment — **beta coverage, not exhaustive**)
+*   ✅ **Prowler** (AWS security best-practice checks — **beta coverage, not exhaustive**)
 *   ✅ **Trivy** (Container image CVE scanning)
-*   ✅ **Supabase Audit** (RLS, URL/key/RPC exposure checks)
+*   ✅ **Supabase Audit** (RLS, URL/key/RPC exposure checks — **beta heuristics, not exhaustive**)
+*   🔜 **Firebase Audit** (rules misconfig, public buckets, exposed keys)
 
 ---
 
@@ -156,12 +157,13 @@ supabash doctor --verbose
 
 - Docker-based harness: `docker-compose.integration.yml`
 - Guide: `docs/integration-testing.md`
-  - Targets: OWASP Juice Shop (`:3000`) + DVWA (`:3001`)
+  - Targets: OWASP Juice Shop (`:3002`) + DVWA (`:3001`) + Supabase mock (`:4001`)
 
 Enable the opt-in integration tests (skipped unless `SUPABASH_INTEGRATION=1`):
 ```bash
 SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest tests.test_integration_dvwa -q
 SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest tests.test_integration_juiceshop -q
+SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest tests.test_integration_supabase -q
 SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest discover -s tests -q
 ```
 
@@ -216,6 +218,7 @@ supabash audit 192.168.1.10 --yes --prowler
 ```
 Note: Supabash writes JSON + Markdown by default; HTML/PDF exports are optional via `core.report_exports`. Avoid running `supabash audit` with `sudo` unless you need root-only scan modes; otherwise your report files may be owned by root.
 If web tools show `Executable not found`, install system requirements via `install.sh` or `docs/system-requirements.md`.
+Cloud posture checks and Supabase audits are **beta** and not comprehensive; validate findings with manual review where required.
 
 ### 2b. AI Audit (Baseline + Agentic Expansion)
 AI audit combines the deterministic `audit` pipeline with a bounded, tool-calling expansion phase for additional evidence collection (useful when Nmap finds multiple web ports). It produces one unified report.
@@ -523,10 +526,10 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 ### Container & Cloud (4 tools)
 | Tool | Purpose | Trigger |
 |------|---------|---------|
-| **ScoutSuite** | Multi-cloud posture assessment | `--scoutsuite` |
-| **Prowler** | AWS security best-practice checks | `--prowler` |
+| **ScoutSuite** | Multi-cloud posture assessment (beta coverage) | `--scoutsuite` |
+| **Prowler** | AWS security best-practice checks (beta coverage) | `--prowler` |
 | **Trivy** | Container image CVE scanning | `--container-image` |
-| **Supabase Audit** | RLS, URL/key/RPC exposure checks | Auto (web targets) |
+| **Supabase Audit** | RLS, URL/key/RPC exposure checks (beta heuristics) | Auto (web targets) |
 
 ### AI & Orchestration
 - **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.

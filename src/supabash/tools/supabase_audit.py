@@ -36,6 +36,7 @@ class SupabaseAuditScanner:
         targets: Sequence[str],
         *,
         max_pages: int = 5,
+        supabase_urls_override: Optional[Sequence[str]] = None,
         timeout_seconds: Optional[int] = None,
         cancel_event=None,
     ) -> Dict[str, Any]:
@@ -95,6 +96,15 @@ class SupabaseAuditScanner:
             for rpc in self._extract_rpc_candidates(text):
                 if rpc not in rpc_candidates:
                     rpc_candidates.append(rpc)
+
+        if supabase_urls_override:
+            for u in supabase_urls_override:
+                normalized = self._normalize_supabase_url(u)
+                if not normalized:
+                    continue
+                if normalized not in found_supabase_urls:
+                    found_supabase_urls.append(normalized)
+                exposed_urls.append({"supabase_url": normalized, "source": "override"})
 
         exposures = self._probe_supabase_endpoints(
             found_supabase_urls,

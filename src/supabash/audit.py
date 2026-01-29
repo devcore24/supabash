@@ -1,5 +1,6 @@
 import json
 import ipaddress
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -2720,6 +2721,15 @@ class AuditOrchestrator:
             except Exception:
                 max_pages = 5
             max_pages = max(1, max_pages)
+            extra_urls: List[str] = []
+            cfg_extra = supabase_cfg.get("extra_urls")
+            if isinstance(cfg_extra, str):
+                extra_urls.extend([u.strip() for u in cfg_extra.split(",") if u.strip()])
+            elif isinstance(cfg_extra, list):
+                extra_urls.extend([str(u).strip() for u in cfg_extra if str(u).strip()])
+            env_extra = os.getenv("SUPABASH_SUPABASE_URLS", "").strip()
+            if env_extra:
+                extra_urls.extend([u.strip() for u in env_extra.split(",") if u.strip()])
             note("tool_start", "supabase_audit", "Running supabase security checks")
             agg["results"].append(
                 self._run_tool_if_enabled(
@@ -2727,6 +2737,7 @@ class AuditOrchestrator:
                     lambda: self.scanners["supabase_audit"].scan(
                         web_targets,
                         max_pages=max_pages,
+                        supabase_urls_override=extra_urls or None,
                         cancel_event=cancel_event,
                         timeout_seconds=self._tool_timeout_seconds("supabase_audit"),
                     ),

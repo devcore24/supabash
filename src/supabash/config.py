@@ -86,7 +86,7 @@ DEFAULT_CONFIG = {
         # Informational only: offline exploit reference lookups based on service fingerprints (opt-in)
         "searchsploit": {"enabled": False, "timeout_seconds": 120},
         "trivy": {"enabled": True, "timeout_seconds": 1800},
-        "supabase_audit": {"enabled": True, "timeout_seconds": 10, "max_pages": 5},
+        "supabase_audit": {"enabled": True, "timeout_seconds": 10, "max_pages": 5, "extra_urls": []},
         # Credentials brute forcing should remain opt-in/manual for safety.
         "hydra": {"enabled": False, "timeout_seconds": 3600},
     },

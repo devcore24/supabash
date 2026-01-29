@@ -68,6 +68,11 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Implement the RLS (Row Level Security) checker for Supabase URLs.
     - [x] Wire into audit aggregation (report.json output).
     - [x] Consolidate Supabase checks (RLS + URL/key/RPC exposure).
+    - [ ] Harden Supabase audit coverage (expand test matrix; reduce false negatives/positives).
+- [ ] **Firebase Specific Module (Planned)**
+    - [ ] Detect exposed Firebase project URLs and API keys in web content.
+    - [ ] Probe public Firestore/Realtime Database rules (read/write exposure).
+    - [ ] Check Storage bucket access policies for public exposure signals.
 - [x] **Wireless Module (Experimental)**
     - [x] **Aircrack-ng:** Basic wrapper for monitoring and capturing (requires hardware access).
 
@@ -194,6 +199,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add OSINT/LAN CLI flags for theHarvester + netdiscover.
 - [x] Add opt-in CLI flags for Medusa + CrackMapExec with report findings.
 - [x] Add cloud posture tooling (ScoutSuite + Prowler) with opt-in flags and report findings.
+- [ ] Harden cloud posture coverage (beta today; expand checks, validate findings).
 - [x] Add tool-calling agentic planning for AI audit (structured schema with profile + graceful fallback).
 - [x] Map compliance profiles (PCI, SOC2, ISO, DORA, NIS2, GDPR, BSI) to agentic tool settings.
     - [x] Add compliance profiles to agentic schema and enforce audit-grade reasoning.
@@ -217,6 +223,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] Add **Medusa** (parallel network login brute-forcer; alternative to Hydra).
 - [x] Add **ScoutSuite** (multi-cloud posture assessment; AWS/Azure/GCP).
 - [x] Add **Prowler** (AWS security best-practice checks).
+- [ ] Expand cloud posture validation (baseline coverage is beta/WIP).
 - [x] Add **Aircrack-ng:** WiFi security auditing (requires hardware; experimental).
 
 ### Future Tool Additions (Backlog)
