@@ -19,8 +19,9 @@
 > **⚠️ Development Status:** Supabash is in active development. The core CLI and baseline audit pipeline are usable, but agentic planning, cloud posture checks, and Supabase heuristics are still **beta** and coverage is not exhaustive. Expect breaking changes as we harden reliability, safety caps, and compliance mapping.  
 > **Status:** **Beta (stabilization + coverage in progress)**
 
-**Supabash** is an autonomous AI security auditor for developers, DevOps engineers, and security (Red/Blue/Purple) teams who need **repeatable, evidence-driven security audits**. It orchestrates industry-standard tools, correlates their outputs, and produces audit-grade reports—while making it clear where results are heuristic or experimental.
+**Supabash** is an autonomous AI security auditor for developers, DevOps engineers, and security (Red/Blue/Purple) teams who need **repeatable, evidence-driven security audits**. It orchestrates industry-standard tools, correlates their outputs, and produces audit-grade reports, while making it clear where results are heuristic or experimental.
 
+Example: [reports / audits](example_reports/)
 
 ---
 
