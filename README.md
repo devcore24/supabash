@@ -19,7 +19,9 @@
 > **⚠️ Development Status:** Supabash is in active development. The core CLI and baseline audit pipeline are usable, but agentic planning, cloud posture checks, and Supabase heuristics are still **beta** and coverage is not exhaustive. Expect breaking changes as we harden reliability, safety caps, and compliance mapping.  
 > **Status:** **Beta (stabilization + coverage in progress)**
 
-**Supabash** is an autonomous AI security auditor for developers, DevOps engineers, and security (Red/Blue/Purple) teams who need **repeatable, evidence-driven security audits**. It orchestrates industry-standard tools, correlates their outputs, and produces audit-grade reports, while making it clear where results are heuristic or experimental.
+**Supabash** is an autonomous AI security auditor for developers, DevOps engineers, and security (Red/Blue/Purple) teams who need **repeatable, evidence-driven security audits**. It orchestrates industry-standard tools, correlates their outputs, and produces audit-grade reports, while making it clear where results are heuristic or experimental.  
+Supabash requires Linux (Kali, Ubuntu, Debian) or WSL2.  
+macOS: manual/experimental setup only, untested.  
 
 Example: [reports / audits](example_reports/)
 
@@ -108,7 +110,7 @@ Supabash orchestrates the following security tools. **28 wrappers are currently 
 
 Supabash requires **Linux** (Kali, Ubuntu, Debian) or **WSL2**.
 
-### One-Command Setup
+### Quick Setup
 We provide a bootstrap script to install Python dependencies and system binaries automatically.
 
 ```bash
@@ -117,6 +119,13 @@ cd supabash
 chmod +x install.sh
 sudo ./install.sh
 ```
+
+or
+
+```bash
+git clone https://github.com/yourusername/supabash.git && cd supabash && chmod +x install.sh && sudo ./install.sh
+```
+
 
 Notes:
 - The installer can update **Nuclei templates** for your (non-root) user after installing `nuclei` (recommended). Disable with `SUPABASH_UPDATE_NUCLEI_TEMPLATES=0 sudo ./install.sh`.
