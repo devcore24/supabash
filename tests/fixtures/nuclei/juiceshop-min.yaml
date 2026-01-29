@@ -1,0 +1,16 @@
+id: supabash-juiceshop-min
+info:
+  name: Juice Shop Minimal Reachability Check
+  author: supabash
+  severity: info
+  description: Minimal template used to keep integration tests fast.
+  tags: supabash,integration
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+    matchers:
+      - type: status
+        status:
+          - 200
+          - 302

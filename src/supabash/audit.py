@@ -24,7 +24,7 @@ from supabash.tools import (
     Enum4linuxNgScanner,
     SubfinderScanner,
     TrivyScanner,
-    SupabaseRLSChecker,
+    SupabaseAuditScanner,
     SearchsploitScanner,
     WPScanScanner,
     TheHarvesterScanner,
@@ -187,7 +187,7 @@ class AuditOrchestrator:
             "enum4linux-ng": Enum4linuxNgScanner(),
             "subfinder": SubfinderScanner(),
             "trivy": TrivyScanner(),
-            "supabase_rls": SupabaseRLSChecker(),
+            "supabase_audit": SupabaseAuditScanner(),
             "searchsploit": SearchsploitScanner(),
             "wpscan": WPScanScanner(),
             "theharvester": TheHarvesterScanner(),
@@ -1193,16 +1193,120 @@ class AuditOrchestrator:
                                 "tool": "aircrack-ng",
                             }
                         )
-            # Supabase RLS check
-            if tool == "supabase_rls":
-                if data.get("risk"):
-                    findings.append({
-                        "severity": "HIGH",
-                        "title": "Supabase RLS may be disabled",
-                        "evidence": f"Unauthenticated request returned HTTP {data.get('status')}",
-                        "recommendation": "Enable RLS and verify policies for affected tables/views.",
-                        "tool": "supabase_rls",
-                    })
+            # Supabase security audit (URLs/keys/RPC exposure)
+            if tool == "supabase_audit":
+                for item in data.get("exposed_urls", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    supabase_url = str(item.get("supabase_url") or "").strip()
+                    source = str(item.get("source") or "").strip()
+                    evidence = supabase_url
+                    if source:
+                        evidence = f"{supabase_url} (source={source})"
+                    if evidence.strip():
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "Supabase project URL exposed in client content",
+                                "evidence": evidence.strip(),
+                                "tool": "supabase_audit",
+                            }
+                        )
+                for key in data.get("keys", []) or []:
+                    if not isinstance(key, dict):
+                        continue
+                    key_type = str(key.get("type") or "unknown").lower()
+                    masked = str(key.get("value") or "").strip()
+                    source = str(key.get("source") or "").strip()
+                    evidence_parts = []
+                    if masked:
+                        evidence_parts.append(f"key={masked}")
+                    if source:
+                        evidence_parts.append(f"source={source}")
+                    evidence = ", ".join(evidence_parts)
+                    if key_type == "service_role":
+                        findings.append(
+                            {
+                                "severity": "CRITICAL",
+                                "title": "Supabase service role key exposed",
+                                "evidence": evidence or "Service role key detected in client content",
+                                "recommendation": "Rotate the service role key immediately and remove it from client-side code.",
+                                "tool": "supabase_audit",
+                            }
+                        )
+                    elif key_type == "anon":
+                        findings.append(
+                            {
+                                "severity": "LOW",
+                                "title": "Supabase anon key exposed in client content",
+                                "evidence": evidence or "Anon key detected in client content",
+                                "recommendation": "Verify RLS policies and limit anon key usage to least privilege.",
+                                "tool": "supabase_audit",
+                            }
+                        )
+                    else:
+                        findings.append(
+                            {
+                                "severity": "MEDIUM",
+                                "title": "Potential Supabase API key exposed",
+                                "evidence": evidence or "Potential key detected in client content",
+                                "recommendation": "Validate the key type and rotate if sensitive.",
+                                "tool": "supabase_audit",
+                            }
+                        )
+                for exposure in data.get("exposures", []) or []:
+                    if not isinstance(exposure, dict):
+                        continue
+                    exp_type = str(exposure.get("type") or "").strip()
+                    url = str(exposure.get("url") or "").strip()
+                    status = exposure.get("status")
+                    evidence = url
+                    if status is not None:
+                        evidence = f"{url} (HTTP {status})"
+                    if exp_type == "rest_api_public":
+                        findings.append(
+                            {
+                                "severity": "HIGH",
+                                "title": "Supabase REST API accessible without authentication",
+                                "evidence": evidence,
+                                "recommendation": "Enforce RLS and require API keys/auth for REST endpoints.",
+                                "tool": "supabase_audit",
+                            }
+                        )
+                    elif exp_type == "rpc_root_public":
+                        findings.append(
+                            {
+                                "severity": "MEDIUM",
+                                "title": "Supabase RPC endpoint exposed without authentication",
+                                "evidence": evidence,
+                                "recommendation": "Restrict RPC access with policies and authentication.",
+                                "tool": "supabase_audit",
+                            }
+                        )
+                    elif exp_type == "rpc_public":
+                        rpc_name = str(exposure.get("rpc") or "").strip()
+                        title = "Supabase RPC callable without authentication"
+                        if rpc_name:
+                            title = f"Supabase RPC '{rpc_name}' callable without authentication"
+                        findings.append(
+                            {
+                                "severity": "HIGH",
+                                "title": title,
+                                "evidence": evidence,
+                                "recommendation": "Require authentication for RPCs and enforce RLS or role checks.",
+                                "tool": "supabase_audit",
+                            }
+                        )
+                    elif exp_type == "rls_misconfig":
+                        findings.append(
+                            {
+                                "severity": "HIGH",
+                                "title": "Supabase RLS may be disabled",
+                                "evidence": evidence,
+                                "recommendation": "Enable RLS and verify policies for affected tables/views.",
+                                "tool": "supabase_audit",
+                            }
+                        )
         return findings
 
     def _apply_compliance_tags(
@@ -1244,7 +1348,7 @@ class AuditOrchestrator:
                 ref = tag("access_control")
                 if ref:
                     tags.append(ref)
-            if tool == "supabase_rls" or "rls" in title:
+            if tool == "supabase_audit" and "rls" in title:
                 ref = tag("data_protection")
                 if ref:
                     tags.append(ref)
@@ -1320,6 +1424,9 @@ class AuditOrchestrator:
         mode: str = "normal",
         compliance_profile: Optional[str] = None,
         nuclei_rate_limit: int = 0,
+        nuclei_tags: Optional[str] = None,
+        nuclei_severity: Optional[str] = None,
+        nuclei_templates: Optional[str] = None,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
         run_nikto: bool = False,
@@ -1395,6 +1502,28 @@ class AuditOrchestrator:
             cfg_obj = None
         cfg_dict = cfg_obj if isinstance(cfg_obj, dict) else {}
 
+        if int(nuclei_rate_limit or 0) <= 0:
+            cfg_rate = self._tool_config("nuclei").get("rate_limit")
+            try:
+                cfg_rate_int = int(cfg_rate)
+            except Exception:
+                cfg_rate_int = 0
+            if cfg_rate_int > 0:
+                nuclei_rate_limit = cfg_rate_int
+
+        if not nuclei_tags:
+            cfg_tags = self._tool_config("nuclei").get("tags")
+            if isinstance(cfg_tags, str) and cfg_tags.strip():
+                nuclei_tags = cfg_tags.strip()
+        if not nuclei_severity:
+            cfg_sev = self._tool_config("nuclei").get("severity")
+            if isinstance(cfg_sev, str) and cfg_sev.strip():
+                nuclei_severity = cfg_sev.strip()
+        if not nuclei_templates:
+            cfg_templates = self._tool_config("nuclei").get("templates")
+            if isinstance(cfg_templates, str) and cfg_templates.strip():
+                nuclei_templates = cfg_templates.strip()
+
         nuclei_rate_limit, gobuster_threads, max_workers, caps_meta = apply_aggressive_caps(
             mode,
             config=cfg_dict,
@@ -1412,6 +1541,7 @@ class AuditOrchestrator:
             "started_at": time.time(),
             "tuning": {
                 "nuclei_rate_limit": nuclei_rate_limit or None,
+                "nuclei_templates": nuclei_templates,
                 "gobuster_threads": gobuster_threads,
                 "gobuster_wordlist": gobuster_wordlist,
                 "nikto_enabled": bool(run_nikto),
@@ -1992,7 +2122,10 @@ class AuditOrchestrator:
                     "nuclei",
                     lambda: self.scanners["nuclei"].scan(
                         web_target,
+                        templates=nuclei_templates,
                         rate_limit=nuclei_rate_limit or None,
+                        tags=nuclei_tags,
+                        severity=nuclei_severity,
                         cancel_event=cancel_event,
                         timeout_seconds=self._tool_timeout_seconds("nuclei"),
                     ),
@@ -2093,10 +2226,12 @@ class AuditOrchestrator:
                             "nuclei",
                             lambda: self.scanners["nuclei"].scan(
                                 web_target,
-                                rate_limit=nuclei_rate_limit or None,
-                                cancel_event=cancel_event,
-                                timeout_seconds=self._tool_timeout_seconds("nuclei"),
-                            ),
+                            rate_limit=nuclei_rate_limit or None,
+                            tags=nuclei_tags,
+                            severity=nuclei_severity,
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                        ),
                         )
                     ] = "nuclei"
                 else:
@@ -2572,28 +2707,32 @@ class AuditOrchestrator:
         else:
             agg["results"].append(self._skip_tool("sqlmap", "No parameterized URL provided (include '?' in target URL)"))
 
-        # Supabase RLS heuristic (only for supabase-like URLs)
-        supabase_url = None
-        for u in web_targets:
-            if "supabase" in u:
-                supabase_url = u
-                break
-        if supabase_url:
+        # Supabase security audit (URLs/keys/RPC exposure)
+        if web_targets and self._has_scanner("supabase_audit"):
             if canceled():
                 agg["canceled"] = True
                 agg["finished_at"] = time.time()
                 return agg
-            note("tool_start", "supabase_rls", "Running supabase RLS check")
+            supabase_cfg = self._tool_config("supabase_audit")
+            max_pages = supabase_cfg.get("max_pages", 5)
+            try:
+                max_pages = int(max_pages)
+            except Exception:
+                max_pages = 5
+            max_pages = max(1, max_pages)
+            note("tool_start", "supabase_audit", "Running supabase security checks")
             agg["results"].append(
                 self._run_tool_if_enabled(
-                    "supabase_rls",
-                    lambda: self.scanners["supabase_rls"].check(
-                        supabase_url,
-                        timeout_seconds=self._tool_timeout_seconds("supabase_rls"),
+                    "supabase_audit",
+                    lambda: self.scanners["supabase_audit"].scan(
+                        web_targets,
+                        max_pages=max_pages,
+                        cancel_event=cancel_event,
+                        timeout_seconds=self._tool_timeout_seconds("supabase_audit"),
                     ),
                 )
             )
-            note("tool_end", "supabase_rls", "Finished supabase RLS check")
+            note("tool_end", "supabase_audit", "Finished supabase security checks")
 
         if container_image:
             if canceled():

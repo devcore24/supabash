@@ -42,6 +42,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
         mode: str = "normal",
         compliance_profile: Optional[str] = None,
         nuclei_rate_limit: int = 0,
+        nuclei_tags: Optional[str] = None,
+        nuclei_severity: Optional[str] = None,
+        nuclei_templates: Optional[str] = None,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
         parallel_web: bool = False,
@@ -130,6 +133,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
             mode=mode,
             compliance_profile=normalized_compliance,
             nuclei_rate_limit=nuclei_rate_limit,
+            nuclei_tags=nuclei_tags,
+            nuclei_severity=nuclei_severity,
+            nuclei_templates=nuclei_templates,
             gobuster_threads=gobuster_threads,
             gobuster_wordlist=gobuster_wordlist,
             run_nikto=run_nikto,
@@ -271,6 +277,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
             tuned_nuclei = tuning.get("nuclei_rate_limit")
             if tuned_nuclei is not None:
                 nuclei_rate_limit = int(tuned_nuclei)
+            if not nuclei_tags:
+                tuned_tags = tuning.get("nuclei_tags")
+                if isinstance(tuned_tags, str) and tuned_tags.strip():
+                    nuclei_tags = tuned_tags.strip()
+            if not nuclei_severity:
+                tuned_sev = tuning.get("nuclei_severity")
+                if isinstance(tuned_sev, str) and tuned_sev.strip():
+                    nuclei_severity = tuned_sev.strip()
             tuned_gobuster = tuning.get("gobuster_threads")
             if tuned_gobuster is not None:
                 gobuster_threads = int(tuned_gobuster)
@@ -665,6 +679,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     lambda: self.scanners["nuclei"].scan(
                                         target,
                                         rate_limit=rate_limit or None,
+                                        tags=nuclei_tags,
+                                        severity=nuclei_severity,
                                         cancel_event=cancel_event,
                                         timeout_seconds=self._tool_timeout_seconds("nuclei"),
                                     ),

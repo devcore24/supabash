@@ -16,7 +16,7 @@
 ![License](https://img.shields.io/badge/License-AGPLv3-blue)
 ![Status](https://img.shields.io/badge/Status-Beta-orange)
 
-> **⚠️ Development Status:** Supabash is in active development (hardening + expansion). The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown/HTML/pdf), and LLM summary/remediation are implemented; current work focuses on stability, configurability, and new tool coverage.
+> **⚠️ Development Status:** Supabash is in active development (hardening + expansion). The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown/HTML/pdf), and LLM summary/remediation are implemented; current work focuses on stability, configurability, and new tool coverage.  
 > Progress: `[████████████████████]` **Core workflow complete; expansion ongoing**
 
 **Supabash** is an autonomous AI security auditor for developers, pentesters, DevOps engineers, and Red/Blue Teams who need **repeatable, evidence-driven security audits**. Unlike simple wrapper scripts, Supabash operates as a **reasoning engine**: it orchestrates industry-standard tools, analyzes outputs in context, identifies exposure and misconfiguration, and produces audit-grade reports with prioritized remediation guidance.
@@ -37,7 +37,7 @@
 
 ## 🛠️ The Arsenal (Toolset)
 
-Supabash orchestrates the following security tools. **27 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
+Supabash orchestrates the following security tools. **28 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
 
 ### 🔍 Recon & Discovery
 *   ✅ **Nmap** (Network mapping & service detection)
@@ -98,7 +98,7 @@ Supabash orchestrates the following security tools. **27 wrappers are currently 
 *   ✅ **ScoutSuite** (Multi-cloud posture assessment)
 *   ✅ **Prowler** (AWS security best-practice checks)
 *   ✅ **Trivy** (Container image CVE scanning)
-*   ✅ **Supabase RLS** (Row-Level Security checker)
+*   ✅ **Supabase Audit** (RLS, URL/key/RPC exposure checks)
 
 ---
 
@@ -450,6 +450,8 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `./debug.log` by default (override with `SUPABASH_LOG_DIR`).
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
+- Set a default Nuclei throttling rate via `tools.nuclei.rate_limit` (overridden by `--nuclei-rate`).
+- Optionally scope Nuclei templates with `tools.nuclei.tags` or `tools.nuclei.severity` for faster audits.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
@@ -474,10 +476,10 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 
 ---
 
-## ✅ Implemented Wrappers (27 Tools)
+## ✅ Implemented Wrappers (28 Tools)
 
 ### Core Audit Pipeline (runs by default)
-Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase RLS/Trivy/WPScan)
+Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase Audit/Trivy/WPScan)
 
 ### Recon & Discovery (9 tools)
 | Tool | Purpose | Trigger |
@@ -524,7 +526,7 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 | **ScoutSuite** | Multi-cloud posture assessment | `--scoutsuite` |
 | **Prowler** | AWS security best-practice checks | `--prowler` |
 | **Trivy** | Container image CVE scanning | `--container-image` |
-| **Supabase RLS** | Row-Level Security checker | Auto (Supabase URLs) |
+| **Supabase Audit** | RLS, URL/key/RPC exposure checks | Auto (web targets) |
 
 ### AI & Orchestration
 - **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.

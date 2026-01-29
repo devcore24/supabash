@@ -52,7 +52,7 @@ class TestRemediation(unittest.TestCase):
             "gobuster": FakeScanner("gobuster"),
             "sqlmap": FakeScanner("sqlmap"),
             "trivy": FakeScanner("trivy"),
-            "supabase_rls": FakeScanner("supabase_rls"),
+            "supabase_audit": FakeScanner("supabase_audit"),
         }
         orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
         out = artifact_path("remediation_report.json")

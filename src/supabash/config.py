@@ -64,7 +64,13 @@ DEFAULT_CONFIG = {
         "subfinder": {"enabled": False, "timeout_seconds": 600},
         "httpx": {"enabled": True, "timeout_seconds": 300},
         "whatweb": {"enabled": True, "timeout_seconds": 300},
-        "nuclei": {"enabled": True, "timeout_seconds": 1800},
+        "nuclei": {
+            "enabled": True,
+            "timeout_seconds": 1800,
+            "rate_limit": 10,
+            "tags": "",
+            "severity": "",
+        },
         "gobuster": {"enabled": True, "timeout_seconds": 1800},
         # Content discovery (alternative/fallback to gobuster; keep opt-in by default to reduce noise)
         "ffuf": {"enabled": False, "timeout_seconds": 1800},
@@ -80,7 +86,7 @@ DEFAULT_CONFIG = {
         # Informational only: offline exploit reference lookups based on service fingerprints (opt-in)
         "searchsploit": {"enabled": False, "timeout_seconds": 120},
         "trivy": {"enabled": True, "timeout_seconds": 1800},
-        "supabase_rls": {"enabled": True, "timeout_seconds": 10},
+        "supabase_audit": {"enabled": True, "timeout_seconds": 10, "max_pages": 5},
         # Credentials brute forcing should remain opt-in/manual for safety.
         "hydra": {"enabled": False, "timeout_seconds": 3600},
     },

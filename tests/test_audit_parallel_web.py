@@ -45,7 +45,7 @@ class TestAuditParallelWeb(unittest.TestCase):
             "gobuster": SignalScanner(threading.Event(), "gobuster"),
             "sqlmap": SignalScanner(threading.Event(), "sqlmap"),
             "trivy": SignalScanner(threading.Event(), "trivy"),
-            "supabase_rls": type("Noop", (), {"check": lambda self, url: {"success": True, "data": {}}})(),
+            "supabase_audit": type("Noop", (), {"scan": lambda self, urls, **kw: {"success": True, "data": {}}})(),
         }
 
         orch = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
@@ -101,7 +101,7 @@ class TestAuditParallelWeb(unittest.TestCase):
             "gobuster": SlowScanner("gobuster", 0.03),
             "sqlmap": SlowScanner("sqlmap", 0.01),
             "trivy": SlowScanner("trivy", 0.01),
-            "supabase_rls": type("Noop", (), {"check": lambda self, url, **kw: {"success": True, "data": {}, "command": "rls"}})(),
+            "supabase_audit": type("Noop", (), {"scan": lambda self, urls, **kw: {"success": True, "data": {}, "command": "supabase_audit"}})(),
         }
 
         orch = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())

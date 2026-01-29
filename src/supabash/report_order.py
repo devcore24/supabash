@@ -31,7 +31,7 @@ DEFAULT_TOOL_ORDER: Tuple[str, ...] = (
     "medusa",
     "crackmapexec",
     "searchsploit",
-    "supabase_rls",
+    "supabase-audit",
     "trivy",
     "scoutsuite",
     "prowler",

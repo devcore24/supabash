@@ -68,7 +68,7 @@ class TestAggressiveCaps(unittest.TestCase):
                 "dnsenum": SpyScanner("dnsenum"),
                 "enum4linux-ng": SpyScanner("enum4linux-ng"),
                 "trivy": SpyScanner("trivy"),
-                "supabase_rls": type("Noop", (), {"check": lambda self, url, **kw: {"success": True, "data": {}, "command": "rls"}})(),
+                "supabase_audit": type("Noop", (), {"scan": lambda self, urls, **kw: {"success": True, "data": {}, "command": "supabase_audit"}})(),
             },
             llm_client=FakeLLM(cfg),
         )

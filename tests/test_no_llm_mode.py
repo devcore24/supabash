@@ -37,7 +37,7 @@ class TestNoLLMMode(unittest.TestCase):
             "dnsenum": FakeScanner("dnsenum", {"success": True, "scan_data": {}, "command": "dnsenum t"}),
             "enum4linux-ng": FakeScanner("enum4linux-ng", {"success": True, "raw_output": "", "command": "enum4linux-ng t"}),
             "trivy": FakeScanner("trivy", {"success": True, "findings": [], "command": "trivy t"}),
-            "supabase_rls": type("Noop", (), {"check": lambda self, url, **kw: {"success": True, "data": {}, "command": "rls"}})(),
+            "supabase_audit": type("Noop", (), {"scan": lambda self, urls, **kw: {"success": True, "data": {}, "command": "supabase_audit"}})(),
         }
         orch = AuditOrchestrator(scanners=scanners, llm_client=BombLLM())
         out = artifact_path("no_llm_audit.json")

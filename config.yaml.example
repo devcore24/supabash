@@ -9,7 +9,7 @@ core:
   - 127.0.0.1
   - 10.0.0.0/24
   consent_accepted: true
-  allow_public_ips: false  
+  allow_public_ips: false
 llm:
   enabled: true
   max_input_chars: 12000
@@ -77,6 +77,9 @@ tools:
   nuclei:
     enabled: true
     timeout_seconds: 1800
+    rate_limit: 10
+    tags: ""
+    severity: ""
   gobuster:
     enabled: true
     timeout_seconds: 1800
@@ -118,9 +121,10 @@ tools:
     enabled: false
     timeout_seconds: 3600
     # arguments: "--severity high"
-  supabase_rls:
+  supabase_audit:
     enabled: true
     timeout_seconds: 10
+    max_pages: 5
   hydra:
     enabled: false
     timeout_seconds: 3600

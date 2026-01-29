@@ -9,7 +9,7 @@ from .httpx import HttpxScanner
 from .sqlmap import SqlmapScanner
 from .hydra import HydraRunner
 from .trivy import TrivyScanner
-from .supabase_rls import SupabaseRLSChecker
+from .supabase_audit import SupabaseAuditScanner
 from .sslscan import SslscanScanner
 from .dnsenum import DnsenumScanner
 from .enum4linux_ng import Enum4linuxNgScanner
@@ -38,7 +38,7 @@ __all__ = [
     "SqlmapScanner",
     "HydraRunner",
     "TrivyScanner",
-    "SupabaseRLSChecker",
+    "SupabaseAuditScanner",
     "SslscanScanner",
     "DnsenumScanner",
     "Enum4linuxNgScanner",

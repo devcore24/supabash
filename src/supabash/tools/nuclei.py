@@ -18,6 +18,8 @@ class NucleiScanner:
         self,
         target: str,
         templates: str = None,
+        tags: Optional[str] = None,
+        severity: Optional[str] = None,
         rate_limit: int = None,
         silent: bool = False,
         cancel_event=None,
@@ -47,6 +49,10 @@ class NucleiScanner:
             command.append("-silent")
         if templates:
             command.extend(["-t", templates])
+        if tags:
+            command.extend(["-tags", tags])
+        if severity:
+            command.extend(["-severity", severity])
         if rate_limit:
             command.extend(["-rate-limit", str(rate_limit)])
 

@@ -63,7 +63,7 @@ class TestToolRegistry(unittest.TestCase):
                 "dnsenum": SpyScanner("dnsenum"),
                 "enum4linux-ng": SpyScanner("enum4linux-ng"),
                 "trivy": SpyScanner("trivy"),
-                "supabase_rls": SpyScanner("supabase_rls"),
+                "supabase_audit": SpyScanner("supabase_audit"),
             },
             llm_client=FakeLLM(cfg),
         )

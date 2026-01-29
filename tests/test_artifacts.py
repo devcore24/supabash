@@ -27,11 +27,11 @@ def artifact_path(name: str) -> Path:
 
 def cleanup_artifact(path: Path) -> None:
     """
-    Default: remove artifacts so tests are repeatable.
-    Set SUPABASH_KEEP_TEST_REPORTS=1 to keep them for inspection.
+    Default: keep artifacts so tests are inspectable.
+    Set SUPABASH_KEEP_TEST_REPORTS=0 to remove them after a run.
     """
-    keep = os.environ.get("SUPABASH_KEEP_TEST_REPORTS", "").strip().lower() in {"1", "true", "yes"}
-    if keep:
+    keep_env = os.environ.get("SUPABASH_KEEP_TEST_REPORTS", "").strip().lower()
+    if keep_env in {"", "1", "true", "yes"}:
         return
     try:
         path.unlink(missing_ok=True)  # py3.11+
@@ -41,4 +41,3 @@ def cleanup_artifact(path: Path) -> None:
                 path.unlink()
         except Exception:
             pass
-
