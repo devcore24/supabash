@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 from threading import Event
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from supabash.audit import AuditOrchestrator
