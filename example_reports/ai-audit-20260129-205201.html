@@ -1,0 +1,461 @@
+<h1 id="supabash-audit-report">Supabash Audit Report</h1>
+<p><strong>Target:</strong> localhost
+<strong>Run Type:</strong> ai-audit</p>
+<h2 id="run-info">Run Info</h2>
+<ul>
+<li>started_at: 2026-01-29 19:52:01 UTC</li>
+<li>finished_at: 2026-01-29 20:02:32 UTC</li>
+</ul>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ul>
+<li><a href="#summary">Summary</a></li>
+<li><a href="#methodology">Methodology</a></li>
+<li><a href="#agentic-expansion">Agentic Expansion</a></li>
+<li><a href="#findings-overview">Findings Overview</a></li>
+<li><a href="#findings-detailed">Findings (Detailed)</a></li>
+<li><a href="#tools-run">Tools Run</a></li>
+<li><a href="#commands-executed">Commands Executed</a></li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p>The localhost environment exposes an unauthenticated Prometheus instance and multiple metrics/debug endpoints, increasing the risk of information disclosure and potential lateral movement, alongside several open services that should be access‑controlled. No critical remote‑code execution issues were identified in this scan.</p>
+<h3 id="llm-usage">LLM Usage</h3>
+<ul>
+<li>total_tokens=12660</li>
+<li>cost_usd=0.029580</li>
+</ul>
+<h3 id="findings">Findings</h3>
+<ul>
+<li><strong>HIGH</strong> Unauthenticated Prometheus monitoring interface exposed</li>
+<li>Evidence: Nuclei detected accessible Prometheus configuration API at http://localhost:9090/api/v1/status/config from an unauthenticated context.</li>
+<li>Recommendation: Restrict access to the Prometheus UI and APIs (e.g., bind to localhost only, place behind VPN/reverse proxy with authentication, or use network ACLs/firewall rules). Disable or limit sensitive endpoints (config, flags) where possible and avoid exposing Prometheus directly to untrusted networks.</li>
+<li><strong>MEDIUM</strong> Prometheus metrics endpoint exposed on application port 8080</li>
+<li>Evidence: Nuclei identified a Prometheus /metrics endpoint at http://localhost:8080/metrics.</li>
+<li>Recommendation: Limit access to /metrics to trusted monitoring infrastructure only (IP allowlist, mTLS, or authenticated reverse proxy). Review exported metrics for sensitive data (user identifiers, internal hostnames, tokens) and remove or redact as needed.</li>
+<li><strong>MEDIUM</strong> Prometheus metrics endpoint exposed on Prometheus port 9090</li>
+<li>Evidence: Nuclei identified a Prometheus /metrics endpoint at http://localhost:9090/metrics.</li>
+<li>Recommendation: Restrict network access to the metrics endpoint to monitoring systems or internal networks only, and ensure no secrets or sensitive identifiers are present in metric labels or values.</li>
+<li><strong>LOW</strong> Go pprof debug endpoint exposed</li>
+<li>Evidence: Nuclei detected an accessible Go pprof heap debug page at http://localhost:9090/debug/pprof/heap?debug=1.</li>
+<li>Recommendation: Disable pprof in production or restrict it to localhost/admin-only networks. If needed for operations, protect it behind authentication and ensure it is not reachable from untrusted clients, as profiles can leak memory contents and internal implementation details.</li>
+<li><strong>LOW</strong> Multiple open TCP services without documented access controls</li>
+<li>Evidence: Nmap reported open ports: 3000/tcp (ppp), 4000/tcp (remoteanything), 5050/tcp (mmcc), 5432/tcp (PostgreSQL 9.6.0+), 8080/tcp (http-proxy), 9090/tcp (Golang net/http server), 9100/tcp (jetdirect).</li>
+<li>Recommendation: Harden network exposure by closing unused ports, binding services to localhost where possible, and enforcing firewall rules to limit access to required internal ranges only. For PostgreSQL and other stateful services, ensure strong authentication, TLS (if applicable), and least-privilege accounts.</li>
+</ul>
+<h2 id="methodology">Methodology</h2>
+<ul>
+<li>Baseline: deterministic evidence collection with scope controls and safe defaults.</li>
+<li>Agentic expansion: tool-calling planner proposes additional evidence collection within allowed scope.</li>
+</ul>
+<h2 id="agentic-expansion">Agentic Expansion</h2>
+<ul>
+<li>phase: baseline+agentic</li>
+<li>baseline_finished_at: 2026-01-29 19:56:10 UTC</li>
+<li>max_actions: 10</li>
+<li>notes: Prior scans already identified Prometheus on 9090 and metrics on 8080; this final action concentrates on structured HTTP vulnerability evidence for the main application endpoint to close the audit loop.</li>
+<li>planner: tool_calling</li>
+</ul>
+<h3 id="actions">Actions</h3>
+<ul>
+<li>gobuster target=http://localhost:8080 profile=standard: failed</li>
+<li>Rationale: Baseline web enumeration on primary HTTP proxy (8080) to identify hidden paths that may expose sensitive data or admin interfaces, supporting vulnerability management controls for all compliance profiles.</li>
+<li>Error: Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:8080/132cb166-b432-4ee1-b8ed-9573bca5da50 =&gt; 501 (Length: 191). To continue please exclude the status code or the length</li>
+<li>gobuster target=http://localhost:9090 profile=standard: success</li>
+<li>Rationale: Directory and file brute-forcing on secondary Golang HTTP service (9090) to discover additional attack surface and potential misconfigurations, complementing earlier tech stack and header findings.</li>
+<li>nuclei target=http://localhost:9090 profile=standard: success</li>
+<li>Rationale: Template-based vulnerability scan on the 9090 Golang service to mirror coverage already obtained on 8080, checking for missing security headers, exposed metrics, and common misconfigurations for audit evidence.</li>
+<li>httpx target=http://localhost:8080 profile=compliance_soc2: success</li>
+<li>Rationale: Run HTTPX against the primary web target to confirm service availability, HTTP methods, and response metadata as supporting evidence for SOC 2 vulnerability management and service inventory controls. Baseline tech and status info also helps contextualize existing nuclei findings.</li>
+<li>httpx target=http://localhost:9090 profile=compliance_soc2: skipped</li>
+<li>Rationale: Profile the Prometheus endpoint with HTTPX to capture headers, status codes, and supported methods as evidence for exposure of monitoring interfaces, supporting SOC 2 controls around secure configuration and restricted management access.</li>
+<li>Reason: Target not in allowed web targets</li>
+<li>nuclei target=http://localhost:9090 profile=compliance_soc2: skipped</li>
+<li>Rationale: A focused follow-up nuclei run on the Prometheus endpoint to ensure coverage of authentication, access control, and debug/metrics exposures, deepening evidence for the previously detected unauthenticated Prometheus instance in line with SOC 2 vulnerability assessment requirements.</li>
+<li>Reason: Already completed in agentic phase</li>
+<li>whatweb target=http://localhost:8080 profile=standard: success</li>
+<li>Rationale: Identify web stack and technologies on the primary web target to correlate with existing Prometheus/pprof findings and support technology-specific control checks (headers, frameworks, versions).</li>
+<li>httpx target=http://localhost:8080 profile=standard: skipped</li>
+<li>Rationale: Collect HTTP response metadata (status codes, redirects, TLS/HTTP options) for the main web target to validate exposure, methods, and header behavior as supporting evidence for configuration and hardening controls.</li>
+<li>Reason: Already completed in agentic phase</li>
+<li>nuclei target=http://localhost:8080 profile=standard: success</li>
+<li>Rationale: Run a focused vulnerability and misconfiguration scan against the main web target to complement existing nuclei results on port 9090 and check for similar unauthenticated or missing-control issues on the application entry point.</li>
+</ul>
+<h2 id="findings-overview">Findings Overview</h2>
+<h3 id="summary-llm">Summary (LLM)</h3>
+<table>
+<thead>
+<tr>
+<th>Severity</th>
+<th style="text-align: right;">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CRITICAL</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td>HIGH</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>MEDIUM</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>LOW</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+<h3 id="detailed-tools">Detailed (Tools)</h3>
+<table>
+<thead>
+<tr>
+<th>Severity</th>
+<th style="text-align: right;">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CRITICAL</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td>HIGH</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>MEDIUM</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td>LOW</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td style="text-align: right;">53</td>
+</tr>
+</tbody>
+</table>
+<h2 id="findings-detailed">Findings (Detailed)</h2>
+<ul>
+<li><strong>INFO</strong> Open port 3000/tcp (nmap)</li>
+<li>Evidence: ppp</li>
+<li><strong>INFO</strong> Open port 4000/tcp (nmap)</li>
+<li>Evidence: remoteanything</li>
+<li><strong>INFO</strong> Open port 5050/tcp (nmap)</li>
+<li>Evidence: mmcc</li>
+<li><strong>INFO</strong> Open port 5432/tcp (nmap)</li>
+<li>Evidence: postgresql PostgreSQL DB 9.6.0 or later</li>
+<li><strong>INFO</strong> Open port 8080/tcp (nmap)</li>
+<li>Evidence: http-proxy</li>
+<li><strong>INFO</strong> Open port 9090/tcp (nmap)</li>
+<li>Evidence: http Golang net/http server</li>
+<li><strong>INFO</strong> Open port 9100/tcp (nmap)</li>
+<li>Evidence: jetdirect</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Country, IP</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Country, IP</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>MEDIUM</strong> Prometheus Metrics - Detect (nuclei)</li>
+<li>Evidence: http://localhost:8080/metrics</li>
+<li><strong>INFO</strong> Allowed Options Method (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> CAA Record (nuclei)</li>
+<li>Evidence: localhost</li>
+<li><strong>INFO</strong> Allowed Options Method (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li><strong>MEDIUM</strong> Prometheus Metrics - Detect (nuclei)</li>
+<li>Evidence: http://localhost:8080/metrics</li>
+<li><strong>INFO</strong> CAA Record (nuclei)</li>
+<li>Evidence: localhost</li>
+<li><strong>INFO</strong> Wappalyzer Technology Detection (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> Wappalyzer Technology Detection (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> Wappalyzer Technology Detection (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> FingerprintHub Technology Fingerprint (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>MEDIUM</strong> Prometheus Metrics - Detect (nuclei)</li>
+<li>Evidence: http://localhost:9090/metrics</li>
+<li><strong>LOW</strong> Go pprof Debug Page (nuclei)</li>
+<li>Evidence: http://localhost:9090/debug/pprof/heap?debug=1</li>
+<li><strong>INFO</strong> Prometheus flags API endpoint (nuclei)</li>
+<li>Evidence: http://localhost:9090/api/v1/status/flags</li>
+<li><strong>HIGH</strong> Prometheus Monitoring System - Unauthenticated (nuclei)</li>
+<li>Evidence: http://localhost:9090/api/v1/status/config</li>
+<li><strong>INFO</strong> Allowed Options Method (nuclei)</li>
+<li>Evidence: http://localhost:9090</li>
+<li><strong>INFO</strong> CAA Record (nuclei)</li>
+<li>Evidence: localhost</li>
+</ul>
+<h2 id="tools-run">Tools Run</h2>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Status</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>nmap</td>
+<td>success</td>
+<td><code>nmap localhost -oX - -sV -O</code></td>
+</tr>
+<tr>
+<td>httpx</td>
+<td>success</td>
+<td><code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-1ztkltwj/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></td>
+</tr>
+<tr>
+<td>httpx</td>
+<td>success</td>
+<td><code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-khg2m_hd/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></td>
+</tr>
+<tr>
+<td>httpx</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>httpx</strong>: ⏭️ skipped — Target not in allowed web targets</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>httpx</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>httpx</strong>: ⏭️ skipped — Already completed in agentic phase</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>whatweb</td>
+<td>success</td>
+<td><code>whatweb http://localhost:8080 --log-json -</code></td>
+</tr>
+<tr>
+<td>whatweb</td>
+<td>success</td>
+<td><code>whatweb http://localhost:8080 --log-json -</code></td>
+</tr>
+<tr>
+<td>wpscan</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>wpscan</strong>: ⏭️ skipped — WordPress not detected by whatweb</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>success</td>
+<td><code>nuclei -u http://localhost:8080 -jsonl -rate-limit 100</code></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>success</td>
+<td><code>nuclei -u http://localhost:8080 -jsonl -rate-limit 50</code></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>success</td>
+<td><code>nuclei -u http://localhost:9090 -jsonl -rate-limit 50</code></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>nuclei</strong>: ⏭️ skipped — Already completed in agentic phase</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>gobuster</td>
+<td>success</td>
+<td><code>gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 20 -q -z --no-error</code></td>
+</tr>
+<tr>
+<td>gobuster</td>
+<td>failed</td>
+<td><code>gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></td>
+</tr>
+<tr>
+<td>- <strong>gobuster</strong>: ❌ failed — Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:8080/d44b344f-9405-4de5-8809-ae34e5865c23 =&gt; 501 (Length: 191). To continue please exclude the status code or the length</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>gobuster</td>
+<td>failed</td>
+<td><code>gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 20 -q -z --no-error</code></td>
+</tr>
+<tr>
+<td>- <strong>gobuster</strong>: ❌ failed — Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:8080/132cb166-b432-4ee1-b8ed-9573bca5da50 =&gt; 501 (Length: 191). To continue please exclude the status code or the length</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>katana</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>katana</strong>: ⏭️ skipped — Disabled by config (tools.<name>.enabled=false)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>dnsenum</td>
+<td>failed</td>
+<td><code>dnsenum localhost</code></td>
+</tr>
+<tr>
+<td>- <strong>dnsenum</strong>: ❌ failed — localhost NS record query failed: NXDOMAIN</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>sslscan</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>sslscan</strong>: ⏭️ skipped — No TLS ports detected (443/8443)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>enum4linux-ng</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>enum4linux-ng</strong>: ⏭️ skipped — No SMB ports detected (139/445)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>sqlmap</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>sqlmap</strong>: ⏭️ skipped — No parameterized URL provided (include '?' in target URL)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>searchsploit</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>- <strong>searchsploit</strong>: ⏭️ skipped — Disabled by config (tools.<name>.enabled=false)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>supabase_audit</td>
+<td>success</td>
+<td><code>supabase_audit</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="commands-executed">Commands Executed</h2>
+<ul>
+<li><strong>nmap</strong>: <code>nmap localhost -oX - -sV -O</code></li>
+<li><strong>httpx</strong>: <code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-1ztkltwj/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></li>
+<li><strong>httpx</strong>: <code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-khg2m_hd/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></li>
+<li><strong>whatweb</strong>: <code>whatweb http://localhost:8080 --log-json -</code></li>
+<li><strong>whatweb</strong>: <code>whatweb http://localhost:8080 --log-json -</code></li>
+<li><strong>nuclei</strong>: <code>nuclei -u http://localhost:8080 -jsonl -rate-limit 100</code></li>
+<li><strong>nuclei</strong>: <code>nuclei -u http://localhost:8080 -jsonl -rate-limit 50</code></li>
+<li><strong>nuclei</strong>: <code>nuclei -u http://localhost:9090 -jsonl -rate-limit 50</code></li>
+<li><strong>gobuster</strong>: <code>gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 20 -q -z --no-error</code></li>
+<li><strong>gobuster</strong>: <code>gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></li>
+<li><strong>gobuster</strong>: <code>gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 20 -q -z --no-error</code></li>
+<li><strong>dnsenum</strong>: <code>dnsenum localhost</code></li>
+<li><strong>supabase_audit</strong>: <code>supabase_audit</code></li>
+</ul>
