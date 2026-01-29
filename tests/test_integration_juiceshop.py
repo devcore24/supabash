@@ -120,6 +120,7 @@ class TestIntegrationJuiceShop(unittest.TestCase):
                 nuclei_templates=_nuclei_templates(),
                 nuclei_tags=_nuclei_tags(),
                 nuclei_severity=_nuclei_severity(),
+                web_targets_override=[target],
             )
             self.assertTrue(out.exists())
             md_path = Path(str(out) + ".md")

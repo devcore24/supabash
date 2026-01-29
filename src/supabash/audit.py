@@ -2,7 +2,7 @@ import json
 import ipaddress
 import os
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 import time
 from threading import Event
@@ -1428,6 +1428,7 @@ class AuditOrchestrator:
         nuclei_tags: Optional[str] = None,
         nuclei_severity: Optional[str] = None,
         nuclei_templates: Optional[str] = None,
+        web_targets_override: Optional[Sequence[str]] = None,
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
         run_nikto: bool = False,
@@ -2311,7 +2312,11 @@ class AuditOrchestrator:
         # Recon & web scans (optional parallel overlap)
         nmap_entry: Optional[Dict[str, Any]] = None
         web_targets: List[str] = []
-        if normalized["base_url"]:
+        lock_web_targets = False
+        if web_targets_override:
+            web_targets = [str(u).strip() for u in list(web_targets_override) if str(u).strip()]
+            lock_web_targets = bool(web_targets)
+        if not web_targets and normalized["base_url"]:
             web_targets = [normalized["base_url"]]
         agg["web_targets"] = web_targets
 
@@ -2493,12 +2498,12 @@ class AuditOrchestrator:
                 agg["finished_at"] = time.time()
                 return agg
 
-            if not web_targets and nmap_entry.get("success"):
+            if not lock_web_targets and not web_targets and nmap_entry.get("success"):
                 web_targets = []
 
             if nmap_entry.get("success"):
                 # Domain enumeration (opt-in): expand candidates beyond nmap-derived ports.
-                if self._tool_enabled("subfinder", default=False) and self._has_scanner("subfinder") and self._should_run_dnsenum(scan_host):
+                if (not lock_web_targets) and self._tool_enabled("subfinder", default=False) and self._has_scanner("subfinder") and self._should_run_dnsenum(scan_host):
                     subfinder_entry = run_subfinder(scan_host)
                     agg["results"].append(subfinder_entry)
                     if subfinder_entry.get("success"):
@@ -2510,11 +2515,12 @@ class AuditOrchestrator:
                                 web_targets.append(f"https://{h}")
 
                 # Always include nmap-derived web targets too.
-                derived = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
-                for u in derived:
-                    if u not in web_targets:
-                        web_targets.append(u)
-                agg["web_targets"] = web_targets
+                if not lock_web_targets:
+                    derived = self._web_targets_from_nmap(scan_host, nmap_entry.get("data", {}).get("scan_data", {}))
+                    for u in derived:
+                        if u not in web_targets:
+                            web_targets.append(u)
+                    agg["web_targets"] = web_targets
 
             # Probe derived web targets (best-effort) to avoid false-positives from service detection.
             if web_targets and self._has_scanner("httpx"):

@@ -290,20 +290,70 @@ class LLMClient:
             raise
 
     def _extract_tool_calls(self, response: Dict[str, Any]) -> List[Dict[str, Any]]:
+        def _coerce_dict(value: Any) -> Dict[str, Any]:
+            if isinstance(value, dict):
+                return value
+            model_dump = getattr(value, "model_dump", None)
+            if callable(model_dump):
+                try:
+                    out = model_dump()
+                    if isinstance(out, dict):
+                        return out
+                except Exception:
+                    pass
+            dict_fn = getattr(value, "dict", None)
+            if callable(dict_fn):
+                try:
+                    out = dict_fn()
+                    if isinstance(out, dict):
+                        return out
+                except Exception:
+                    pass
+            try:
+                raw = getattr(value, "__dict__", None)
+                if isinstance(raw, dict):
+                    return raw
+            except Exception:
+                pass
+            return {}
+
+        def _coerce_list(value: Any) -> List[Any]:
+            if isinstance(value, list):
+                return value
+            if value is None:
+                return []
+            return [value]
+
+        if not isinstance(response, dict):
+            response = _coerce_dict(response)
         try:
-            message = response["choices"][0]["message"]
+            choice0 = response.get("choices", [])[0]
         except Exception:
             return []
+        if not isinstance(choice0, dict):
+            choice0 = _coerce_dict(choice0)
+        message = choice0.get("message")
         if not isinstance(message, dict):
+            message = _coerce_dict(message)
+        if not message:
             return []
-        tool_calls = message.get("tool_calls") or []
+
+        tool_calls = message.get("tool_calls")
+        if tool_calls is None:
+            tool_calls = getattr(message, "tool_calls", None)
+        tool_calls = _coerce_list(tool_calls)
         if not tool_calls and message.get("function_call"):
             tool_calls = [{"function": message.get("function_call")}]
+
         out: List[Dict[str, Any]] = []
         for call in tool_calls:
             if not isinstance(call, dict):
+                call = _coerce_dict(call)
+            if not call:
                 continue
-            fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+            fn = call.get("function")
+            if not isinstance(fn, dict):
+                fn = _coerce_dict(fn)
             name = fn.get("name") or call.get("name")
             args_raw = fn.get("arguments") if fn else call.get("arguments")
             args = None

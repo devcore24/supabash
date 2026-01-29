@@ -169,6 +169,11 @@ SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest discover -s tests -q
 
 ---
 
+## 🧭 AI Audit Workflow
+
+For a clear breakdown of how `ai-audit` selects tools and produces its final report:
+- [AI Audit Workflow](docs/ai-audit-workflow.md)
+
 ## 💻 Usage
 
 Once installed, the `supabash` command is available globally.

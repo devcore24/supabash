@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -43,8 +44,9 @@ class HttpxScanner:
         input_file = tmpdir / "targets.txt"
         input_file.write_text("\n".join(inputs) + "\n", encoding="utf-8")
 
+        httpx_bin = self._resolve_httpx_binary()
         command = [
-            "httpx",
+            httpx_bin,
             "-silent",
             "-json",
             "-l",
@@ -116,3 +118,9 @@ class HttpxScanner:
                 logger.debug(f"Skipping invalid JSON line from httpx: {s[:120]}")
         return items
 
+    def _resolve_httpx_binary(self) -> str:
+        # Prefer system-installed ProjectDiscovery httpx over any venv-provided httpx CLI.
+        for candidate in ("/usr/local/bin/httpx", "/usr/bin/httpx"):
+            if Path(candidate).is_file():
+                return candidate
+        return shutil.which("httpx") or "httpx"
