@@ -2,9 +2,9 @@ id: supabash-juiceshop-min
 info:
   name: Juice Shop Minimal Reachability Check
   author: supabash
-  severity: info
+  severity: high
   description: Minimal template used to keep integration tests fast.
-  tags: supabash,integration
+  tags: exposure,misconfig,default-login
 http:
   - method: GET
     path:

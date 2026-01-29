@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-import uuid
+from datetime import datetime
 from pathlib import Path
 
 
@@ -21,8 +21,21 @@ def artifact_path(name: str) -> Path:
     safe = safe.replace("/", "-")
     if not safe:
         safe = "artifact"
-    suffix = uuid.uuid4().hex[:8]
-    return artifacts_dir() / f"{safe}-{suffix}"
+    base = safe
+    ext = ""
+    if "." in safe:
+        base, ext = safe.rsplit(".", 1)
+        ext = f".{ext}"
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    candidate = artifacts_dir() / f"{base}-{stamp}{ext}"
+    if not candidate.exists():
+        return candidate
+    counter = 1
+    while True:
+        candidate = artifacts_dir() / f"{base}-{stamp}-{counter}{ext}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
 
 
 def cleanup_artifact(path: Path) -> None:

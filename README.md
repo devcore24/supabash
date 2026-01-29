@@ -16,10 +16,10 @@
 ![License](https://img.shields.io/badge/License-AGPLv3-blue)
 ![Status](https://img.shields.io/badge/Status-Beta-orange)
 
-> **⚠️ Development Status:** Supabash is in active development (hardening + expansion). The CLI, core tool wrappers, chat control plane, audit reporting (JSON/Markdown/HTML/pdf), and LLM summary/remediation are implemented; current work focuses on stability, configurability, and new tool coverage.  
-> Progress: `[████████████████████]` **Core workflow complete; expansion ongoing**
+> **⚠️ Development Status:** Supabash is in active development. The core CLI and baseline audit pipeline are usable, but agentic planning, cloud posture checks, and Supabase heuristics are still **beta** and coverage is not exhaustive. Expect breaking changes as we harden reliability, safety caps, and compliance mapping.  
+> **Status:** **Beta (stabilization + coverage in progress)**
 
-**Supabash** is an autonomous AI security auditor for developers, pentesters, DevOps engineers, and Red/Blue Teams who need **repeatable, evidence-driven security audits**. Unlike simple wrapper scripts, Supabash operates as a **reasoning engine**: it orchestrates industry-standard tools, analyzes outputs in context, identifies exposure and misconfiguration, and produces audit-grade reports with prioritized remediation guidance.
+**Supabash** is an autonomous AI security auditor for developers, DevOps engineers, and security (Red/Blue/Purple) teams who need **repeatable, evidence-driven security audits**. It orchestrates industry-standard tools, correlates their outputs, and produces audit-grade reports—while making it clear where results are heuristic or experimental.
 
 
 ---

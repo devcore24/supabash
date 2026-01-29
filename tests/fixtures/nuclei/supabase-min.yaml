@@ -2,9 +2,9 @@ id: supabash-supabase-min
 info:
   name: Supabase Mock Minimal Reachability Check
   author: supabash
-  severity: info
+  severity: high
   description: Minimal template used to keep Supabase integration tests fast.
-  tags: supabash,integration
+  tags: exposure,misconfig,default-login
 http:
   - method: GET
     path:

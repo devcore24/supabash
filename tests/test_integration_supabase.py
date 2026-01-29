@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 from supabash.audit import AuditOrchestrator
+from supabash.report import write_markdown
 from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
@@ -109,6 +110,8 @@ class TestIntegrationSupabase(unittest.TestCase):
                 nuclei_severity=_nuclei_severity(),
             )
             self.assertTrue(out.exists())
+            md_path = Path(str(out) + ".md")
+            write_markdown(report, md_path)
             self.assertEqual(report.get("target"), target)
             web_targets = report.get("web_targets") or []
             self.assertIn(target, web_targets)
