@@ -960,6 +960,23 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if plan.get("stop") or not plan_actions_list:
                         break
 
+                    def _baseline_would_skip(action: Dict[str, Any]) -> bool:
+                        tool = action.get("tool")
+                        spec = tool_specs.get(tool, {})
+                        if spec.get("target_kind") != "web":
+                            return False
+                        args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                        target = args.get("target") if isinstance(args.get("target"), str) else None
+                        if not target:
+                            return True
+                        if target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
+                            return True
+                        return (tool, target) in baseline_success
+
+                    if plan_actions_list and all(_baseline_would_skip(a) for a in plan_actions_list if isinstance(a, dict)):
+                        ai_obj["notes"] = "Planner proposed only baseline-completed web actions; stopping agentic loop."
+                        break
+
                     for action in plan_actions_list:
                         if actions_executed >= int(max_actions) or canceled():
                             break
