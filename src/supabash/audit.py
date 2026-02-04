@@ -1360,7 +1360,7 @@ class AuditOrchestrator:
 
     def _nmap_args_for_mode(self, mode: str, compliance_profile: Optional[str] = None) -> str:
         normalized = self._normalize_compliance_profile(compliance_profile)
-        if normalized == "compliance_pci":
+        if normalized and normalized.startswith("compliance_"):
             return "-sV --script ssl-enum-ciphers -p-"
         if mode == "stealth":
             return "-sS -T2"
@@ -2800,17 +2800,16 @@ class AuditOrchestrator:
             if not entry.get("success"):
                 continue
             findings = entry.get("data", {}).get("findings")
-            if not isinstance(findings, list) or not findings:
-                continue
+            count = len(findings) if isinstance(findings, list) else 0
             target = str(entry.get("target") or "").strip() or "unknown-target"
-            ffuf_fallback_hits.append((target, len(findings)))
+            ffuf_fallback_hits.append((target, count))
         if ffuf_fallback_hits:
             total = sum(n for _, n in ffuf_fallback_hits)
             targets = ", ".join(f"{t} ({n})" for t, n in ffuf_fallback_hits[:3])
             if len(ffuf_fallback_hits) > 3:
                 targets = f"{targets}, ..."
             note = (
-                "ffuf fallback (after gobuster failure) found "
+                "ffuf fallback (after gobuster failure) ran and found "
                 f"{total} paths across {len(ffuf_fallback_hits)} target(s): {targets}."
             )
             agg.setdefault("summary_notes", []).append(note)

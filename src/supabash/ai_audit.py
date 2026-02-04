@@ -974,7 +974,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return (tool, target) in baseline_success
 
                     if plan_actions_list and all(_baseline_would_skip(a) for a in plan_actions_list if isinstance(a, dict)):
-                        ai_obj["notes"] = "Planner proposed only baseline-completed web actions; stopping agentic loop."
+                        if actions_executed == 0 and not ai_obj.get("actions"):
+                            ai_obj["notes"] = "Planner proposed only baseline-completed web actions; stopping agentic loop."
                         break
 
                     for action in plan_actions_list:
@@ -1055,17 +1056,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
             if not entry.get("success"):
                 continue
             findings = entry.get("data", {}).get("findings")
-            if not isinstance(findings, list) or not findings:
-                continue
+            count = len(findings) if isinstance(findings, list) else 0
             target = str(entry.get("target") or "").strip() or "unknown-target"
-            ffuf_fallback_hits.append((target, len(findings)))
+            ffuf_fallback_hits.append((target, count))
         if ffuf_fallback_hits:
             total = sum(n for _, n in ffuf_fallback_hits)
             targets = ", ".join(f"{t} ({n})" for t, n in ffuf_fallback_hits[:3])
             if len(ffuf_fallback_hits) > 3:
                 targets = f"{targets}, ..."
             note = (
-                "ffuf fallback (after gobuster failure) found "
+                "ffuf fallback (after gobuster failure) ran and found "
                 f"{total} paths across {len(ffuf_fallback_hits)} target(s): {targets}."
             )
             agg.setdefault("summary_notes", []).append(note)
