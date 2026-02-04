@@ -2118,8 +2118,8 @@ class AuditOrchestrator:
                         note("tool_end", "wpscan", "Finished wpscan")
                     else:
                         wpscan_entry = self._skip_tool("wpscan", "WordPress not detected by whatweb")
-                    else:
-                        wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
+                else:
+                    wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
                 results.append(tag(wpscan_entry))
                 if canceled() or (isinstance(wpscan_entry.get("data"), dict) and wpscan_entry["data"].get("canceled")):
                     return results
