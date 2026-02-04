@@ -89,6 +89,12 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         if isinstance(summary, dict):
             lines.append("\n## Summary")
             lines.append(summary.get("summary", ""))
+            summary_notes = report.get("summary_notes")
+            if isinstance(summary_notes, list) and summary_notes:
+                lines.append("\n### Notes")
+                for note in summary_notes:
+                    if isinstance(note, str) and note.strip():
+                        lines.append(f"- {note.strip()}")
             llm_meta = report.get("llm")
             if isinstance(llm_meta, dict):
                 calls = llm_meta.get("calls")
@@ -152,6 +158,12 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         else:
             lines.append("\n## Summary")
             lines.append(str(summary))
+            summary_notes = report.get("summary_notes")
+            if isinstance(summary_notes, list) and summary_notes:
+                lines.append("\n### Notes")
+                for note in summary_notes:
+                    if isinstance(note, str) and note.strip():
+                        lines.append(f"- {note.strip()}")
 
     # Methodology
     lines.append("\n## Methodology")

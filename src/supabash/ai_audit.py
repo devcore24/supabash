@@ -398,6 +398,24 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     continue
                 allowed_tools.append(tool)
 
+            baseline_success: set[tuple] = set()
+            for entry in agg.get("results", []) or []:
+                if not isinstance(entry, dict) or not entry.get("success"):
+                    continue
+                tool = entry.get("tool")
+                if tool_specs.get(tool, {}).get("target_kind") != "web":
+                    continue
+                if tool == "httpx":
+                    alive = entry.get("data", {}).get("alive")
+                    if isinstance(alive, list):
+                        for u in alive:
+                            u = str(u).strip()
+                            if u:
+                                baseline_success.add((tool, u))
+                target = entry.get("target")
+                if isinstance(target, str) and target.strip():
+                    baseline_success.add((tool, target.strip()))
+
             if not allowed_tools:
                 ai_obj["planner"]["warning"] = "No eligible tools available for agentic phase."
                 ai_obj["agentic_skipped"] = True
@@ -658,12 +676,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     elif tool_specs.get(tool, {}).get("target_kind") == "web":
                         action_target = target
                         action_key = (tool, action_target or "")
-                        if action_key in agentic_success:
-                            entry = self._skip_tool(tool, "Already completed in agentic phase")
-                        elif not target:
+                        if not target:
                             entry = self._skip_tool(tool, "Missing target")
                         elif target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
                             entry = self._skip_tool(tool, "Target not in allowed web targets")
+                        elif action_key in baseline_success:
+                            entry = self._skip_tool(tool, "Already completed in baseline phase")
+                        elif action_key in agentic_success:
+                            entry = self._skip_tool(tool, "Already completed in agentic phase")
                         else:
                             base_rate = int(nuclei_rate_limit or 0)
                             base_threads = int(gobuster_threads or 10)
@@ -1006,6 +1026,32 @@ class AIAuditOrchestrator(AuditOrchestrator):
         # Recompute summary/findings on the combined results.
         agg["finished_at"] = time.time()
         agg["results"] = stable_sort_results(agg.get("results", []) or [])
+
+        ffuf_fallback_hits: List[Tuple[str, int]] = []
+        for entry in agg.get("results", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("tool") != "ffuf" or entry.get("fallback_for") != "gobuster":
+                continue
+            if entry.get("phase") != "agentic":
+                continue
+            if not entry.get("success"):
+                continue
+            findings = entry.get("data", {}).get("findings")
+            if not isinstance(findings, list) or not findings:
+                continue
+            target = str(entry.get("target") or "").strip() or "unknown-target"
+            ffuf_fallback_hits.append((target, len(findings)))
+        if ffuf_fallback_hits:
+            total = sum(n for _, n in ffuf_fallback_hits)
+            targets = ", ".join(f"{t} ({n})" for t, n in ffuf_fallback_hits[:3])
+            if len(ffuf_fallback_hits) > 3:
+                targets = f"{targets}, ..."
+            note = (
+                "ffuf fallback (after gobuster failure) found "
+                f"{total} paths across {len(ffuf_fallback_hits)} target(s): {targets}."
+            )
+            agg.setdefault("summary_notes", []).append(note)
 
         # Label LLM status for visibility
         if not llm_enabled:

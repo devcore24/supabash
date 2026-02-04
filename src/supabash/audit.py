@@ -2078,6 +2078,11 @@ class AuditOrchestrator:
             return entry
 
         def run_web_tools(web_target: str) -> List[Dict[str, Any]]:
+            def tag(entry: Dict[str, Any]) -> Dict[str, Any]:
+                if isinstance(entry, dict):
+                    entry.setdefault("target", web_target)
+                return entry
+
             if not parallel_web:
                 # Sequential (default)
                 results: List[Dict[str, Any]] = []
@@ -2091,7 +2096,7 @@ class AuditOrchestrator:
                     ),
                 )
                 note("tool_end", "whatweb", "Finished whatweb")
-                results.append(whatweb_entry)
+                results.append(tag(whatweb_entry))
                 if canceled() or (isinstance(whatweb_entry.get("data"), dict) and whatweb_entry["data"].get("canceled")):
                     return results
 
@@ -2113,9 +2118,9 @@ class AuditOrchestrator:
                         note("tool_end", "wpscan", "Finished wpscan")
                     else:
                         wpscan_entry = self._skip_tool("wpscan", "WordPress not detected by whatweb")
-                else:
-                    wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
-                results.append(wpscan_entry)
+                    else:
+                        wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
+                results.append(tag(wpscan_entry))
                 if canceled() or (isinstance(wpscan_entry.get("data"), dict) and wpscan_entry["data"].get("canceled")):
                     return results
 
@@ -2133,7 +2138,7 @@ class AuditOrchestrator:
                     ),
                 )
                 note("tool_end", "nuclei", "Finished nuclei")
-                results.append(nuclei_entry)
+                results.append(tag(nuclei_entry))
                 if canceled() or (isinstance(nuclei_entry.get("data"), dict) and nuclei_entry["data"].get("canceled")):
                     return results
 
@@ -2160,7 +2165,7 @@ class AuditOrchestrator:
                         ),
                     )
                 note("tool_end", "gobuster", "Finished gobuster")
-                results.append(gobuster_entry)
+                results.append(tag(gobuster_entry))
 
                 # Optional fallback: ffuf (-ac) can handle wildcard/soft-404 responses
                 # where gobuster refuses to continue.
@@ -2180,23 +2185,24 @@ class AuditOrchestrator:
                             timeout_seconds=self._tool_timeout_seconds("ffuf"),
                         ),
                     )
+                    ffuf_entry["fallback_for"] = "gobuster"
+                    ffuf_entry["reason"] = "Fallback after gobuster failure"
                     note("tool_end", "ffuf", "Finished ffuf")
-                    results.append(ffuf_entry)
+                    results.append(tag(ffuf_entry))
 
                 if self._has_scanner("katana"):
                     note("tool_start", "katana", "Running katana (crawl)")
-                    results.append(
-                        self._run_tool_if_enabled(
-                            "katana",
-                            lambda: self.scanners["katana"].crawl(
-                                web_target,
-                                depth=int(self._tool_config("katana").get("depth", 3) or 3),
-                                concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
-                                cancel_event=cancel_event,
-                                timeout_seconds=self._tool_timeout_seconds("katana"),
-                            ),
-                        )
+                    katana_entry = self._run_tool_if_enabled(
+                        "katana",
+                        lambda: self.scanners["katana"].crawl(
+                            web_target,
+                            depth=int(self._tool_config("katana").get("depth", 3) or 3),
+                            concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("katana"),
+                        ),
                     )
+                    results.append(tag(katana_entry))
                     note("tool_end", "katana", "Finished katana")
                 return results
 
@@ -2219,7 +2225,7 @@ class AuditOrchestrator:
                         )
                     ] = "whatweb"
                 else:
-                    results.append(self._skip_disabled("whatweb"))
+                    results.append(tag(self._skip_disabled("whatweb")))
                 note("tool_start", "nuclei", "Running nuclei")
                 if self._tool_enabled("nuclei", default=True):
                     futures[
@@ -2228,16 +2234,16 @@ class AuditOrchestrator:
                             "nuclei",
                             lambda: self.scanners["nuclei"].scan(
                                 web_target,
-                            rate_limit=nuclei_rate_limit or None,
-                            tags=nuclei_tags,
-                            severity=nuclei_severity,
-                            cancel_event=cancel_event,
-                            timeout_seconds=self._tool_timeout_seconds("nuclei"),
-                        ),
+                                rate_limit=nuclei_rate_limit or None,
+                                tags=nuclei_tags,
+                                severity=nuclei_severity,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                            ),
                         )
                     ] = "nuclei"
                 else:
-                    results.append(self._skip_disabled("nuclei"))
+                    results.append(tag(self._skip_disabled("nuclei")))
                 note("tool_start", "gobuster", "Running gobuster")
                 if gobuster_wordlist:
                     if self._tool_enabled("gobuster", default=True):
@@ -2255,7 +2261,7 @@ class AuditOrchestrator:
                             )
                         ] = "gobuster"
                     else:
-                        results.append(self._skip_disabled("gobuster"))
+                        results.append(tag(self._skip_disabled("gobuster")))
                 else:
                     if self._tool_enabled("gobuster", default=True):
                         futures[
@@ -2271,7 +2277,7 @@ class AuditOrchestrator:
                             )
                         ] = "gobuster"
                     else:
-                        results.append(self._skip_disabled("gobuster"))
+                        results.append(tag(self._skip_disabled("gobuster")))
 
                 for fut in as_completed(futures):
                     tool = futures.get(fut, "tool")
@@ -2279,7 +2285,7 @@ class AuditOrchestrator:
                         entry = fut.result()
                     except Exception as e:
                         entry = {"tool": tool, "success": False, "error": str(e)}
-                    results.append(entry)
+                    results.append(tag(entry))
                     note("tool_end", tool, f"Finished {tool}")
             whatweb_entry = None
             for entry in results:
@@ -2306,7 +2312,7 @@ class AuditOrchestrator:
                     wpscan_entry = self._skip_tool("wpscan", "WordPress not detected by whatweb")
             else:
                 wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
-            results.append(wpscan_entry)
+            results.append(tag(wpscan_entry))
             return results
 
         # Recon & web scans (optional parallel overlap)
@@ -2784,6 +2790,31 @@ class AuditOrchestrator:
             agg["canceled"] = True
             agg["finished_at"] = time.time()
             return agg
+
+        ffuf_fallback_hits = []
+        for entry in agg.get("results", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("tool") != "ffuf" or entry.get("fallback_for") != "gobuster":
+                continue
+            if not entry.get("success"):
+                continue
+            findings = entry.get("data", {}).get("findings")
+            if not isinstance(findings, list) or not findings:
+                continue
+            target = str(entry.get("target") or "").strip() or "unknown-target"
+            ffuf_fallback_hits.append((target, len(findings)))
+        if ffuf_fallback_hits:
+            total = sum(n for _, n in ffuf_fallback_hits)
+            targets = ", ".join(f"{t} ({n})" for t, n in ffuf_fallback_hits[:3])
+            if len(ffuf_fallback_hits) > 3:
+                targets = f"{targets}, ..."
+            note = (
+                "ffuf fallback (after gobuster failure) found "
+                f"{total} paths across {len(ffuf_fallback_hits)} target(s): {targets}."
+            )
+            agg.setdefault("summary_notes", []).append(note)
+
         findings = self._collect_findings(agg)
         if llm_enabled:
             note("llm_start", "summary", "Summarizing with LLM")
