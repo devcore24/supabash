@@ -84,7 +84,7 @@ tools:
     enabled: true
     timeout_seconds: 1800
   ffuf:
-    enabled: false
+    enabled: true
     timeout_seconds: 1800
   katana:
     enabled: false
