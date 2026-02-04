@@ -326,7 +326,7 @@ supabash audit [OPTIONS] TARGET
 
 - Arguments: `TARGET` (required) — IP / hostname / URL / container ID
 - Options:
-  - `--output`, `-o` — output JSON path (default: `reports/report-YYYYmmdd-HHMMSS.json`)
+  - `--output`, `-o` — output JSON path (default: `reports/report-YYYYmmdd-HHMMSS.json`; when `--agentic` is set, uses `reports/ai-audit-<profile>-YYYYmmdd-HHMMSS.json` if `--compliance` is provided, otherwise `reports/ai-audit-YYYYmmdd-HHMMSS.json`)
   - `--markdown`, `-m` — output Markdown path (default: derived from `--output`)
   - `--status/--no-status` (default: `--status`) — print live progress
   - `--status-file` — write JSON status updates while running
@@ -405,7 +405,7 @@ supabash ai-audit [OPTIONS] TARGET
 
 - Arguments: `TARGET` (required) — IP / hostname / URL / container ID
 - Options: same as `audit`, plus:
-  - default output is `reports/ai-audit-YYYYmmdd-HHMMSS.json` (+ `.md`; html/pdf when enabled)
+- default output is `reports/ai-audit-<profile>-YYYYmmdd-HHMMSS.json` when `--compliance` is set, otherwise `reports/ai-audit-YYYYmmdd-HHMMSS.json` (+ `.md`; html/pdf when enabled)
   - `--compliance` — compliance profile (`pci|soc2|iso|dora|nis2|gdpr|bsi`)
   - `--status/--no-status` (default: `--status`) — print live progress
   - `--status-file` — write JSON status updates while running

@@ -19,7 +19,7 @@ from supabash.tools.masscan import MasscanScanner
 from supabash.tools.rustscan import RustscanScanner
 from supabash.chat import ChatSession
 from supabash.safety import is_allowed_target, is_public_ip_target
-from supabash.audit import AuditOrchestrator
+from supabash.audit import AuditOrchestrator, COMPLIANCE_PROFILE_ALIASES, COMPLIANCE_PROFILES
 from supabash.ai_audit import AIAuditOrchestrator
 from supabash.session_state import default_chat_state_path, clear_state as clear_session_state
 from supabash.report_paths import build_report_paths
@@ -35,6 +35,24 @@ console = Console()
 core_config = config_manager.config.get("core", {})
 log_level = core_config.get("log_level", "INFO")
 logger = setup_logger(log_level=log_level)
+
+
+def _compliance_slug(profile: Optional[str]) -> Optional[str]:
+    if not profile:
+        return None
+    token = str(profile).strip().lower().replace(" ", "_")
+    if not token:
+        return None
+    if token in COMPLIANCE_PROFILE_ALIASES:
+        token = COMPLIANCE_PROFILE_ALIASES[token]
+    elif token.startswith("compliance_"):
+        token = token if token in COMPLIANCE_PROFILES else None
+    else:
+        candidate = f"compliance_{token}"
+        token = candidate if candidate in COMPLIANCE_PROFILES else None
+    if not token:
+        return None
+    return token.replace("compliance_", "")
 
 SCANNERS = {
     "nmap": NmapScanner,
@@ -371,7 +389,11 @@ def audit(
         None,
         "--output",
         "-o",
-        help="Output JSON path (default: reports/report-YYYYmmdd-HHMMSS.json)",
+        help=(
+            "Output JSON path (default: reports/report-YYYYmmdd-HHMMSS.json; "
+            "when --agentic is set, uses reports/ai-audit-<profile>-YYYYmmdd-HHMMSS.json if "
+            "--compliance is provided, otherwise reports/ai-audit-YYYYmmdd-HHMMSS.json)"
+        ),
     ),
     container_image: str = typer.Option(None, "--container-image", "-c", help="Optional container image to scan with Trivy"),
     markdown: Optional[str] = typer.Option(
@@ -522,6 +544,10 @@ def audit(
         raise typer.Exit(code=1)
 
     default_base = "ai-audit" if agentic and not output else "report"
+    if agentic and not output:
+        compliance_slug = _compliance_slug(compliance)
+        if compliance_slug:
+            default_base = f"ai-audit-{compliance_slug}"
     out_path, md_path = build_report_paths(output, markdown, default_basename=default_base)
 
     formats_note = _report_formats_note(config_manager.config)
@@ -717,7 +743,10 @@ def ai_audit(
         None,
         "--output",
         "-o",
-        help="Output JSON path (default: reports/ai-audit-YYYYmmdd-HHMMSS.json)",
+        help=(
+            "Output JSON path (default: reports/ai-audit-<profile>-YYYYmmdd-HHMMSS.json "
+            "when --compliance is set, otherwise reports/ai-audit-YYYYmmdd-HHMMSS.json)"
+        ),
     ),
     container_image: str = typer.Option(None, "--container-image", "-c", help="Optional container image to scan with Trivy"),
     markdown: Optional[str] = typer.Option(
