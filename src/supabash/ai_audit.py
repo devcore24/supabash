@@ -727,6 +727,29 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                             timeout_seconds=self._tool_timeout_seconds("gobuster"),
                                         ),
                                     )
+                                if (
+                                    not entry.get("success")
+                                    and self._has_scanner("ffuf")
+                                    and self._tool_enabled("ffuf", default=False)
+                                ):
+                                    ffuf_entry = self._run_tool(
+                                        "ffuf",
+                                        lambda: self.scanners["ffuf"].scan(
+                                            target,
+                                            wordlist=safe_wordlist,
+                                            threads=max(10, int(threads)),
+                                            cancel_event=cancel_event,
+                                            timeout_seconds=self._tool_timeout_seconds("ffuf"),
+                                        ),
+                                    )
+                                    ffuf_entry["phase"] = "agentic"
+                                    ffuf_entry["target"] = target
+                                    ffuf_entry["profile"] = profile
+                                    ffuf_entry["fallback_for"] = "gobuster"
+                                    ffuf_entry["reason"] = "Fallback after gobuster failure"
+                                    entry["_extra_results"] = [ffuf_entry]
+                                    if ffuf_entry.get("success"):
+                                        agentic_success.add(("ffuf", target))
                             elif tool == "ffuf":
                                 entry = self._run_tool(
                                     tool,
@@ -926,6 +949,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         finished_at = time.time()
                         note("tool_end", action["tool"], f"Finished {action['tool']} (agentic)", agg=agg)
 
+                        extra_results = entry.pop("_extra_results", None)
                         agg.setdefault("results", []).append(entry)
                         ai_obj["actions"].append(
                             {
@@ -942,6 +966,26 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 "finished_at": finished_at,
                             }
                         )
+                        if isinstance(extra_results, list):
+                            for extra in extra_results:
+                                if not isinstance(extra, dict):
+                                    continue
+                                agg.setdefault("results", []).append(extra)
+                                ai_obj["actions"].append(
+                                    {
+                                        "tool": extra.get("tool"),
+                                        "target": extra.get("target"),
+                                        "profile": extra.get("profile") or action.get("profile"),
+                                        "reasoning": extra.get("reason") or "Fallback after gobuster failure",
+                                        "phase": "agentic",
+                                        "success": bool(extra.get("success")) if not extra.get("skipped") else False,
+                                        "skipped": bool(extra.get("skipped")),
+                                        "error": extra.get("error") or extra.get("reason"),
+                                        "reason": extra.get("reason"),
+                                        "started_at": extra.get("started_at", started_at),
+                                        "finished_at": extra.get("finished_at", finished_at),
+                                    }
+                                )
                         actions_executed += 1
                         if action["tool"] == "httpx" and entry.get("success"):
                             alive = entry.get("data", {}).get("alive")

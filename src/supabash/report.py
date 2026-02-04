@@ -245,6 +245,33 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     if not isinstance(agg_findings, list):
         agg_findings = []
 
+    def dedupe_info_findings(findings: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+        if not findings:
+            return findings, 0
+        seen = set()
+        deduped: List[Dict[str, Any]] = []
+        removed = 0
+        for f in findings:
+            if not isinstance(f, dict):
+                deduped.append(f)
+                continue
+            sev = str(f.get("severity", "")).upper()
+            if sev != "INFO":
+                deduped.append(f)
+                continue
+            title = str(f.get("title", "")).strip().lower()
+            evidence = str(f.get("evidence", "")).strip().lower()
+            tool = str(f.get("tool", "")).strip().lower()
+            key = (title, evidence, tool)
+            if key in seen:
+                removed += 1
+                continue
+            seen.add(key)
+            deduped.append(f)
+        return deduped, removed
+
+    agg_findings, info_deduped = dedupe_info_findings(agg_findings)
+
     summary_findings = []
     if isinstance(summary, dict):
         sf = summary.get("findings", [])
@@ -270,6 +297,8 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     # Detailed Findings (aggregated)
     if isinstance(agg_findings, list) and agg_findings:
         lines.append("\n## Findings (Detailed)")
+        if info_deduped > 0:
+            lines.append(f"_Note: {info_deduped} repeated INFO findings were deduplicated for readability._")
         for f in agg_findings:
             if not isinstance(f, dict):
                 continue
