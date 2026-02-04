@@ -41,6 +41,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+-
 
 # IDEs
 .vscode/
@@ -68,3 +69,5 @@ chat_report.pdf
 reports/*
 !reports/.gitkeep
 
+# stray tool output in repo root
+/-
