@@ -311,6 +311,8 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         lines.append("\n## Findings (Detailed)")
         if info_deduped > 0:
             lines.append(f"_Note: {info_deduped} repeated INFO findings were deduplicated for readability._")
+        # Blank line before list to ensure markdown parsers render list items correctly in HTML/PDF.
+        lines.append("")
         for f in agg_findings:
             if not isinstance(f, dict):
                 continue

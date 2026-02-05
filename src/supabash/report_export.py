@@ -107,8 +107,23 @@ def export_from_markdown_file(
             HTML = getattr(weasy, "HTML", None)
             if HTML is None:
                 raise RuntimeError("weasyprint.HTML not available")
+            CSS = getattr(weasy, "CSS", None)
             pdf_path = md_path.with_suffix(".pdf")
-            HTML(string=html_text or "", base_url=str(md_path.parent)).write_pdf(str(pdf_path))
+            # Slightly smaller base font size for PDF readability in long reports.
+            pdf_styles = None
+            if CSS is not None:
+                pdf_styles = [
+                    CSS(
+                        string=(
+                            "body { font-size: 11px; line-height: 1.35; } "
+                            "code, pre { font-size: 10px; }"
+                        )
+                    )
+                ]
+            HTML(string=html_text or "", base_url=str(md_path.parent)).write_pdf(
+                str(pdf_path),
+                stylesheets=pdf_styles,
+            )
             out.pdf_path = pdf_path
         except Exception as e:
             out.pdf_error = f"Failed to write PDF: {e}"
