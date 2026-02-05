@@ -20,13 +20,13 @@
 > **Status:** **Beta (stabilization + coverage in progress)**
 
 **Supabash** is an agentic AI security assessment tool that generates readiness reports and evidence for audit prep. 
-Supabash supports **compliance readiness** (control mapping and evidence packs) to help teams prepare for third‑party assessments and certifications (SOC 2 / ISO 27001 / PCI DSS / DORA / NIS2 / GDPR / BSI). It produces **Supabash Audit (Readiness)** reports.  
+Supabash supports **compliance readiness** (control mapping and evidence packs) to help teams prepare for third‑party assessments and certifications (SOC 2 / ISO 27001 / PCI DSS / DORA / NIS2 / GDPR / BSI). It produces **Supabash Audit (Readiness)** reports. Example: [reports](example_reports/)
 
 Requirements:
 Supabash requires Linux (Kali, Ubuntu, Debian) or WSL2.  
 macOS: manual/experimental setup only, untested.  
 
-Example: [reports](example_reports/)
+
 
 ---
 
