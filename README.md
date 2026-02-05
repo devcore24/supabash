@@ -19,20 +19,21 @@
 > **⚠️ Development Status:** Supabash is in active development. The core CLI and baseline audit pipeline are usable, but agentic planning, cloud posture checks, and Supabase heuristics are still **beta** and coverage is not exhaustive. Expect breaking changes as we harden reliability, safety caps, and compliance mapping.  
 > **Status:** **Beta (stabilization + coverage in progress)**
 
-**Supabash** is an autonomous AI security auditor for developers, DevOps engineers, and security (Red/Blue/Purple) teams who need **repeatable, evidence-driven security audits**. It orchestrates industry-standard tools, correlates their outputs, and produces audit-grade reports, while making it clear where results are heuristic or experimental.  
+**Supabash** runs a **Supabash Audit (Readiness)**: an automated AI security assessment and evidence-collection report for developers, DevOps engineers, and security (Red/Blue/Purple) teams. It orchestrates industry-standard tools, correlates their outputs, and produces **readiness reports and audit-supporting evidence**—while making it clear where results are heuristic or experimental.  
+Supabash supports **compliance readiness** (control mapping and evidence packs) but **does not** provide independent assurance or issue certifications (SOC/ISO/PCI).  
 Supabash requires Linux (Kali, Ubuntu, Debian) or WSL2.  
 macOS: manual/experimental setup only, untested.  
 
-Example: [reports / audits](example_reports/)
+Example: [reports](example_reports/)
 
 ---
 
 ## 🚀 Key Features
 
 *   **🤖 Autonomous Reasoning (Beta):** Tool-calling planning proposes bounded, evidence-driven follow-ups.
-*   **🛡️ Audit Coverage:** Infrastructure, web apps, containers, and wireless (experimental) with scope controls.
-*   **📋 Compliance-Ready:** Optional compliance profiles (PCI, SOC2, ISO 27001, DORA, NIS2, GDPR, BSI) tune tool settings and annotate findings with control references.
-*   **📝 Audit Reporting:** Evidence, severity, and remediation guidance in JSON/Markdown/HTML/pdf outputs.
+*   **🛡️ Assessment Coverage:** Infrastructure, web apps, containers, and wireless (experimental) with scope controls.
+*   **📋 Compliance-Mapped:** Optional compliance profiles (PCI, SOC2, ISO 27001, DORA, NIS2, GDPR, BSI) tune tool settings and annotate findings with control references for readiness.
+*   **📝 Assessment Reporting + Evidence Packs:** Evidence, severity, and remediation guidance in JSON/Markdown/HTML/pdf outputs.
 *   **⚡ Performance:** Combines fast scanners (Rust/Go) with deep-dive frameworks (Python/Ruby).
 *   **🔌 Extensible Design:** Modular wrappers with a configurable tool registry (plugins planned).
 
@@ -73,10 +74,10 @@ Supabash orchestrates the following security tools. **28 wrappers are currently 
 *   🔜 **Impacket Suite** (Network protocols & packet manipulation)
 
 ### 📡 Wireless
-*   ✅ **Aircrack-ng Suite** (WiFi security auditing)
+*   ✅ **Aircrack-ng Suite** (WiFi security assessment)
 *   🔜 **Reaver** (WPS attack tool)
 *   🔜 **Bettercap** (MITM & network utility)
-*   🔜 **Wifite** (Automated wireless auditor)
+*   🔜 **Wifite** (Automated wireless assessment)
 *   🔜 **Hostapd** (Rogue AP creation)
 
 ### 🕵️ Intel & OSINT
@@ -560,7 +561,7 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 
 ---
 
-## 📊 Example Audit Output
+## 📊 Example Report Output
 
 When Supabash detects an issue, it provides evidence-based findings and remediation guidance:
 
@@ -583,9 +584,13 @@ When Supabash detects an issue, it provides evidence-based findings and remediat
 
 ---
 
+## ⚖️ Assurance Disclaimer (SOC/ISO/PCI)
+
+Supabash Audit (Readiness) is **not** an independent attestation. Supabash is **not** a CPA firm or certification body and does **not** perform independent attestation engagements. Outputs are **not** SOC 1/2/3 reports and are **not** ISO certifications. Supabash is intended for **readiness, internal review, and evidence collection** to support third‑party assessments.
+
 ## ⚠️ Legal Disclaimer
 
-**Supabash is for educational purposes and authorized security auditing only.**
+**Supabash is for educational purposes and authorized security assessment/testing only.**
 
 Usage of Supabash for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state, and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program.
 

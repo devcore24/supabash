@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 def generate_markdown(report: Dict[str, Any]) -> str:
     lines = []
     target = report.get("target", "unknown")
-    lines.append(f"# Supabash Audit Report\n")
+    lines.append(f"# Supabash Audit (Readiness) Report\n")
     lines.append(f"**Target:** {target}")
+    lines.append("**Assessment Type:** Supabash Audit (Readiness)")
     report_kind = report.get("report_kind")
     if isinstance(report_kind, str) and report_kind.strip():
         lines.append(f"**Run Type:** {report_kind.strip().replace('_', '-')}")
