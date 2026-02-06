@@ -206,6 +206,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
             except Exception:
                 pass
             if output is not None:
+                self._write_evidence_pack(baseline, output)
                 try:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     output.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
@@ -1102,6 +1103,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
             pass
 
         if output is not None:
+            self._write_evidence_pack(agg, output)
             try:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with open(output, "w") as f:

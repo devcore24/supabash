@@ -29,7 +29,7 @@ class TestReport(unittest.TestCase):
             "findings": [{"severity": "HIGH", "title": "SQLi", "tool": "sqlmap"}],
         }
         md = generate_markdown(report)
-        self.assertIn("Supabash Audit Report", md)
+        self.assertIn("Supabash Audit", md)
         self.assertIn("example.com", md)
         self.assertIn("SQLi", md)
         self.assertIn("nmap", md)
@@ -41,6 +41,31 @@ class TestReport(unittest.TestCase):
         self.assertIn("| Tool | Status | Command |", md)
         self.assertIn("Commands Executed", md)
         self.assertIn("nmap example.com", md)
+
+    def test_generate_markdown_includes_evidence_pack_section(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "evidence_pack": {
+                "dir": "evidence/ai-audit-pci-20260206-000000",
+                "manifest": "evidence/ai-audit-pci-20260206-000000/manifest.json",
+                "artifact_count": 3,
+                "runtime": {
+                    "python_version": "3.12.3",
+                    "platform": "Linux-x86_64",
+                    "llm_providers": ["openai"],
+                    "llm_models": ["gpt-5.1"],
+                    "tool_versions": {"nmap": "Nmap version 7.94"},
+                },
+            },
+        }
+        md = generate_markdown(report)
+        self.assertIn("## Evidence Pack", md)
+        self.assertIn("directory:", md)
+        self.assertIn("manifest:", md)
+        self.assertIn("artifact_count: 3", md)
+        self.assertIn("### Runtime Metadata", md)
+        self.assertIn("### Tool Versions", md)
 
     def test_write_markdown(self):
         report = {"target": "t", "results": []}

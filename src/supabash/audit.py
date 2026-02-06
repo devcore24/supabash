@@ -1,6 +1,11 @@
 import json
 import ipaddress
 import os
+import hashlib
+import platform
+import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
@@ -158,6 +163,25 @@ COMPLIANCE_CONTROL_REFERENCES = {
         "compliance_gdpr": "GDPR Art. 5/32 (Data Protection)",
         "compliance_bsi": "BSI IT-Grundschutz: Data Protection",
     },
+}
+
+EVIDENCE_VERSION_COMMANDS: Dict[str, List[List[str]]] = {
+    "nmap": [["nmap", "--version"]],
+    "httpx": [["httpx", "-version"], ["httpx", "--version"]],
+    "whatweb": [["whatweb", "--version"]],
+    "nuclei": [["nuclei", "-version"], ["nuclei", "--version"]],
+    "gobuster": [["gobuster", "version"], ["gobuster", "--version"]],
+    "ffuf": [["ffuf", "-V"], ["ffuf", "--version"]],
+    "katana": [["katana", "-version"], ["katana", "--version"]],
+    "sqlmap": [["sqlmap", "--version"]],
+    "sslscan": [["sslscan", "--version"]],
+    "dnsenum": [["dnsenum", "--help"]],
+    "subfinder": [["subfinder", "-version"], ["subfinder", "--version"]],
+    "trivy": [["trivy", "--version"]],
+    "wpscan": [["wpscan", "--version"]],
+    "hydra": [["hydra", "-h"]],
+    "medusa": [["medusa", "-h"]],
+    "nikto": [["nikto", "-Version"]],
 }
 
 
@@ -325,6 +349,156 @@ class AuditOrchestrator:
         if enabled is None:
             return bool(default)
         return bool(enabled)
+
+    def _safe_filename_fragment(self, value: Any, fallback: str = "item") -> str:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            raw = fallback
+        cleaned = re.sub(r"[^a-z0-9._-]+", "_", raw)
+        cleaned = cleaned.strip("._-")
+        return cleaned or fallback
+
+    def _sha256_file(self, path: Path) -> str:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+
+    def _best_effort_tool_version(self, tool: str) -> Optional[str]:
+        commands = EVIDENCE_VERSION_COMMANDS.get(str(tool or "").strip().lower(), [])
+        for cmd in commands:
+            try:
+                out = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=6,
+                    check=False,
+                )
+                text = (out.stdout or out.stderr or "").strip()
+                if not text:
+                    continue
+                first = text.splitlines()[0].strip()
+                if first:
+                    return first
+            except Exception:
+                continue
+        return None
+
+    def _collect_runtime_metadata(self, agg: Dict[str, Any]) -> Dict[str, Any]:
+        runtime: Dict[str, Any] = {
+            "python_version": platform.python_version(),
+            "platform": platform.platform(),
+            "executable": sys.executable,
+            "target": agg.get("target"),
+            "scan_host": agg.get("scan_host"),
+            "compliance_profile": agg.get("compliance_profile"),
+            "compliance_framework": agg.get("compliance_framework"),
+        }
+        llm = agg.get("llm")
+        if isinstance(llm, dict):
+            providers: List[str] = []
+            models: List[str] = []
+            calls = llm.get("calls")
+            if isinstance(calls, list):
+                for c in calls:
+                    if not isinstance(c, dict):
+                        continue
+                    p = c.get("provider")
+                    m = c.get("model")
+                    if isinstance(p, str) and p.strip() and p.strip() not in providers:
+                        providers.append(p.strip())
+                    if isinstance(m, str) and m.strip() and m.strip() not in models:
+                        models.append(m.strip())
+            if providers:
+                runtime["llm_providers"] = providers
+            if models:
+                runtime["llm_models"] = models
+
+        tool_versions: Dict[str, str] = {}
+        seen_tools = set()
+        for entry in agg.get("results", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            tool = str(entry.get("tool") or "").strip().lower()
+            if not tool or tool in seen_tools:
+                continue
+            seen_tools.add(tool)
+            version = self._best_effort_tool_version(tool)
+            if isinstance(version, str) and version:
+                tool_versions[tool] = version
+        if tool_versions:
+            runtime["tool_versions"] = tool_versions
+        return runtime
+
+    def _write_evidence_pack(self, agg: Dict[str, Any], output: Optional[Path]) -> None:
+        if output is None:
+            return
+        try:
+            report_root = output.parent
+            evidence_dir = report_root / "evidence" / output.stem
+            results_dir = evidence_dir / "results"
+            results_dir.mkdir(parents=True, exist_ok=True)
+
+            artifacts: List[Dict[str, Any]] = []
+            now = time.time()
+            for idx, entry in enumerate(agg.get("results", []) or []):
+                if not isinstance(entry, dict):
+                    continue
+                tool = self._safe_filename_fragment(entry.get("tool"), fallback="tool")
+                artifact_name = f"{idx:03d}-{tool}.json"
+                artifact_path = results_dir / artifact_name
+                payload = {
+                    "tool": entry.get("tool"),
+                    "status": "skipped"
+                    if entry.get("skipped")
+                    else ("success" if entry.get("success") else "failed"),
+                    "target": entry.get("target"),
+                    "command": entry.get("command"),
+                    "phase": entry.get("phase"),
+                    "reason": entry.get("reason"),
+                    "error": entry.get("error"),
+                    "fallback_for": entry.get("fallback_for"),
+                    "data": entry.get("data"),
+                }
+                artifact_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                rel_path = str(artifact_path.relative_to(report_root))
+                artifacts.append(
+                    {
+                        "kind": "tool_result",
+                        "tool": entry.get("tool"),
+                        "status": payload["status"],
+                        "path": rel_path,
+                        "sha256": self._sha256_file(artifact_path),
+                        "bytes": artifact_path.stat().st_size,
+                        "created_at": now,
+                    }
+                )
+
+            runtime = self._collect_runtime_metadata(agg)
+            manifest = {
+                "version": 1,
+                "generated_at": now,
+                "report_file": str(output.name),
+                "artifact_count": len(artifacts),
+                "runtime": runtime,
+                "artifacts": artifacts,
+            }
+            manifest_path = evidence_dir / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+            agg["evidence_pack"] = {
+                "dir": str(evidence_dir.relative_to(report_root)),
+                "manifest": str(manifest_path.relative_to(report_root)),
+                "artifact_count": len(artifacts),
+                "runtime": runtime,
+            }
+        except Exception as e:
+            agg["evidence_pack_error"] = str(e)
 
     def _whatweb_detects_wordpress(self, whatweb_entry: Optional[Dict[str, Any]]) -> bool:
         if not isinstance(whatweb_entry, dict):
@@ -2943,6 +3117,8 @@ class AuditOrchestrator:
             pass
 
         if output is not None:
+            # Persist tool artifacts + manifest for audit-prep reproducibility.
+            self._write_evidence_pack(agg, output)
             try:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with open(output, "w") as f:

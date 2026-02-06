@@ -60,6 +60,13 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertIn("schema_version", data)
         self.assertIn("schema_validation", data)
         self.assertEqual(data["container_image"], "alpine:latest")
+        self.assertIn("evidence_pack", data)
+        evidence_pack = data.get("evidence_pack", {})
+        manifest_rel = evidence_pack.get("manifest")
+        self.assertIsInstance(manifest_rel, str)
+        if isinstance(manifest_rel, str):
+            manifest_path = output.parent / manifest_rel
+            self.assertTrue(manifest_path.exists())
         # ensure all tools ran
         tool_names = [r["tool"] for r in data["results"]]
         self.assertIn("trivy", tool_names)

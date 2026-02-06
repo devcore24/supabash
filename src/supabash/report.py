@@ -108,6 +108,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("Methodology", "#methodology"),
         ("Scope & Assumptions", "#scope--assumptions") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
         ("Compliance Coverage Matrix", "#compliance-coverage-matrix") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
+        ("Evidence Pack", "#evidence-pack") if isinstance(report.get("evidence_pack"), dict) else None,
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Findings Overview", "#findings-overview"),
         ("Findings (Detailed)", "#findings-detailed") if has_findings else None,
@@ -355,6 +356,46 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             status, evidence, notes = _coverage_status(tools_list, status_index)
             lines.append(f"| {area} | {status} | {evidence} | {notes} |")
         lines.append("\n- Status legend: `Covered` = all mapped checks succeeded, `Partial` = some succeeded, `Not Assessed` = no successful mapped checks.")
+
+    evidence_pack = report.get("evidence_pack")
+    if isinstance(evidence_pack, dict):
+        lines.append("\n## Evidence Pack")
+        ep_dir = evidence_pack.get("dir")
+        ep_manifest = evidence_pack.get("manifest")
+        ep_count = evidence_pack.get("artifact_count")
+        if isinstance(ep_dir, str) and ep_dir.strip():
+            lines.append(f"- directory: `{ep_dir.strip()}`")
+        if isinstance(ep_manifest, str) and ep_manifest.strip():
+            lines.append(f"- manifest: `{ep_manifest.strip()}`")
+        if isinstance(ep_count, int):
+            lines.append(f"- artifact_count: {ep_count}")
+
+        runtime = evidence_pack.get("runtime")
+        if isinstance(runtime, dict) and runtime:
+            lines.append("\n### Runtime Metadata")
+            pyv = runtime.get("python_version")
+            if isinstance(pyv, str) and pyv.strip():
+                lines.append(f"- python_version: {pyv.strip()}")
+            plat = runtime.get("platform")
+            if isinstance(plat, str) and plat.strip():
+                lines.append(f"- platform: {plat.strip()}")
+            providers = runtime.get("llm_providers")
+            if isinstance(providers, list) and providers:
+                vals = [str(v).strip() for v in providers if str(v).strip()]
+                if vals:
+                    lines.append(f"- llm_providers: {', '.join(vals)}")
+            models = runtime.get("llm_models")
+            if isinstance(models, list) and models:
+                vals = [str(v).strip() for v in models if str(v).strip()]
+                if vals:
+                    lines.append(f"- llm_models: {', '.join(vals)}")
+            tool_versions = runtime.get("tool_versions")
+            if isinstance(tool_versions, dict) and tool_versions:
+                lines.append("\n### Tool Versions")
+                for tool_name in sorted(tool_versions.keys()):
+                    version = str(tool_versions.get(tool_name) or "").strip()
+                    if version:
+                        lines.append(f"- `{tool_name}`: {version}")
 
     # Agentic expansion details (if present)
     ai = report.get("ai_audit")
