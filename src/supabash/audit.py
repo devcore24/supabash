@@ -409,6 +409,19 @@ class AuditOrchestrator:
         cleaned = cleaned.strip("._-")
         return cleaned or fallback
 
+    def _strip_ansi(self, text: Any) -> str:
+        value = str(text or "")
+        return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", value)
+
+    def _fmt_unix_utc(self, ts: Any) -> Optional[str]:
+        try:
+            if ts is None:
+                return None
+            v = float(ts)
+            return datetime.fromtimestamp(v, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        except Exception:
+            return None
+
     def _sha256_file(self, path: Path) -> str:
         h = hashlib.sha256()
         with open(path, "rb") as f:
@@ -430,30 +443,85 @@ class AuditOrchestrator:
                     timeout=6,
                     check=False,
                 )
-                text = (out.stdout or out.stderr or "").strip()
+                text = self._strip_ansi((out.stdout or out.stderr or "").strip())
                 if not text:
                     continue
-                first = text.splitlines()[0].strip()
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                if not lines:
+                    continue
+                first = lines[0]
                 if first:
                     return first
             except Exception:
                 continue
         return None
 
+    def _collect_nuclei_metadata(self) -> Dict[str, Any]:
+        details: Dict[str, Any] = {}
+        commands = EVIDENCE_VERSION_COMMANDS.get("nuclei", [])
+        for cmd in commands:
+            try:
+                out = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    check=False,
+                )
+                text = self._strip_ansi((out.stdout or out.stderr or "").strip())
+                if not text:
+                    continue
+                for raw_line in text.splitlines():
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    low = line.lower()
+                    if "nuclei engine version" in low and ":" in line:
+                        details["engine_version"] = line.split(":", 1)[1].strip()
+                    elif "nuclei templates version" in low and ":" in line:
+                        details["templates_version"] = line.split(":", 1)[1].strip()
+                    elif "nuclei templates loaded" in low and ":" in line:
+                        details["templates_loaded"] = line.split(":", 1)[1].strip()
+                if details:
+                    return details
+            except Exception:
+                continue
+        return details
+
     def _collect_runtime_metadata(self, agg: Dict[str, Any]) -> Dict[str, Any]:
         runtime: Dict[str, Any] = {
             "python_version": platform.python_version(),
             "platform": platform.platform(),
             "executable": sys.executable,
+            "working_directory": str(Path.cwd()),
+            "schema_version": agg.get("schema_version"),
+            "report_kind": agg.get("report_kind"),
             "target": agg.get("target"),
             "scan_host": agg.get("scan_host"),
             "compliance_profile": agg.get("compliance_profile"),
             "compliance_framework": agg.get("compliance_framework"),
         }
+        started_at = agg.get("started_at")
+        finished_at = agg.get("finished_at")
+        started_at_utc = self._fmt_unix_utc(started_at)
+        finished_at_utc = self._fmt_unix_utc(finished_at)
+        if isinstance(started_at_utc, str):
+            runtime["started_at_utc"] = started_at_utc
+        if isinstance(finished_at_utc, str):
+            runtime["finished_at_utc"] = finished_at_utc
+        try:
+            if started_at is not None and finished_at is not None:
+                duration = max(0.0, float(finished_at) - float(started_at))
+                runtime["duration_seconds"] = round(duration, 3)
+        except Exception:
+            pass
         llm = agg.get("llm")
         if isinstance(llm, dict):
             providers: List[str] = []
             models: List[str] = []
+            total_tokens = 0
+            total_cost = 0.0
+            have_cost = False
             calls = llm.get("calls")
             if isinstance(calls, list):
                 for c in calls:
@@ -465,10 +533,26 @@ class AuditOrchestrator:
                         providers.append(p.strip())
                     if isinstance(m, str) and m.strip() and m.strip() not in models:
                         models.append(m.strip())
+                    usage = c.get("usage")
+                    if isinstance(usage, dict):
+                        tt = usage.get("total_tokens")
+                        if isinstance(tt, int):
+                            total_tokens += tt
+                    cost = c.get("cost_usd")
+                    if isinstance(cost, (int, float)):
+                        total_cost += float(cost)
+                        have_cost = True
             if providers:
                 runtime["llm_providers"] = providers
             if models:
                 runtime["llm_models"] = models
+            if total_tokens > 0 or have_cost:
+                usage_obj: Dict[str, Any] = {}
+                if total_tokens > 0:
+                    usage_obj["total_tokens"] = total_tokens
+                if have_cost:
+                    usage_obj["cost_usd"] = round(total_cost, 6)
+                runtime["llm_usage"] = usage_obj
 
         tool_versions: Dict[str, str] = {}
         seen_tools = set()
@@ -484,6 +568,10 @@ class AuditOrchestrator:
                 tool_versions[tool] = version
         if tool_versions:
             runtime["tool_versions"] = tool_versions
+
+        nuclei_meta = self._collect_nuclei_metadata()
+        if nuclei_meta:
+            runtime["nuclei"] = nuclei_meta
         return runtime
 
     def _write_evidence_pack(self, agg: Dict[str, Any], output: Optional[Path]) -> None:
@@ -531,11 +619,20 @@ class AuditOrchestrator:
                 )
 
             runtime = self._collect_runtime_metadata(agg)
+            status_counts = {
+                "success": sum(1 for a in artifacts if a.get("status") == "success"),
+                "failed": sum(1 for a in artifacts if a.get("status") == "failed"),
+                "skipped": sum(1 for a in artifacts if a.get("status") == "skipped"),
+            }
             manifest = {
-                "version": 1,
+                "version": 2,
                 "generated_at": now,
+                "generated_at_utc": self._fmt_unix_utc(now),
                 "report_file": str(output.name),
+                "report_kind": agg.get("report_kind"),
+                "schema_version": agg.get("schema_version"),
                 "artifact_count": len(artifacts),
+                "artifact_status_counts": status_counts,
                 "runtime": runtime,
                 "artifacts": artifacts,
             }
@@ -546,6 +643,9 @@ class AuditOrchestrator:
                 "dir": str(evidence_dir.relative_to(report_root)),
                 "manifest": str(manifest_path.relative_to(report_root)),
                 "artifact_count": len(artifacts),
+                "artifact_status_counts": status_counts,
+                "generated_at_utc": manifest.get("generated_at_utc"),
+                "manifest_version": manifest.get("version"),
                 "runtime": runtime,
             }
         except Exception as e:

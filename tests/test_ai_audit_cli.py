@@ -57,6 +57,25 @@ class TestAIAuditCLI(unittest.TestCase):
         finally:
             core["report_exports"] = exports_prev
 
+    def test_ai_audit_compliance_uses_prefixed_basename(self):
+        core = main_module.config_manager.config.setdefault("core", {})
+        exports_prev = dict(core.get("report_exports", {}) or {})
+        core["report_exports"] = {"html": False, "pdf": False}
+        try:
+            with runner.isolated_filesystem():
+                with patch.object(main_module, "AIAuditOrchestrator", FakeAIAuditOrchestrator):
+                    result = runner.invoke(
+                        main_module.app,
+                        ["ai-audit", "localhost", "--compliance", "pci", "--force", "--yes"],
+                    )
+                self.assertEqual(result.exit_code, 0, result.stdout)
+                json_reports = list(Path("reports").glob("ai-audit-pci-*.json"))
+                md_reports = list(Path("reports").glob("ai-audit-pci-*.md"))
+                self.assertTrue(json_reports)
+                self.assertTrue(md_reports)
+        finally:
+            core["report_exports"] = exports_prev
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,15 @@ class FakeFailScanner:
         return {"success": False, "error": "fail"}
 
 
+class FakeDnsenumScanner:
+    def __init__(self):
+        self.called = False
+
+    def scan(self, *args, **kwargs):
+        self.called = True
+        return {"success": True, "scan_data": {"raw_output": "dnsenum ok"}}
+
+
 class TestAuditOrchestrator(unittest.TestCase):
     def test_runs_scanners_and_writes_file(self, tmp_path=None):
         scanners = {
@@ -137,6 +146,56 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertIsNotNone(nmap_entry)
         self.assertEqual(nmap_entry.get("error"), "fail")
         cleanup_artifact(output)
+
+    def test_dnsenum_is_skipped_for_localhost_targets(self):
+        dnsenum_scanner = FakeDnsenumScanner()
+        scanners = {
+            "nmap": FakeScanner("nmap"),
+            "dnsenum": dnsenum_scanner,
+        }
+        class FakeLLM:
+            def chat(self, messages, temperature=0.2):
+                return '{"summary":"ok","findings":[]}'
+
+        orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
+        output = artifact_path("audit_localhost_dns_skip.json")
+        report = orchestrator.run("localhost", output, use_llm=False)
+        dnsenum_entry = next((r for r in report["results"] if r.get("tool") == "dnsenum"), None)
+        self.assertIsNotNone(dnsenum_entry)
+        self.assertTrue(bool(dnsenum_entry.get("skipped")))
+        self.assertEqual(dnsenum_entry.get("reason"), "Localhost/loopback target (DNS enumeration N/A)")
+        self.assertFalse(dnsenum_scanner.called)
+        cleanup_artifact(output)
+
+    def test_compliance_tagging_avoids_caa_and_soft_maps_vuln_findings(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        findings = [
+            {
+                "severity": "INFO",
+                "title": "CAA Record",
+                "tool": "nuclei",
+                "evidence": "localhost",
+            },
+            {
+                "severity": "INFO",
+                "title": "HTTP Missing Security Headers",
+                "tool": "nuclei",
+                "evidence": "http://localhost:8080",
+            },
+        ]
+        out = orch._apply_compliance_tags({}, findings, "pci")
+        self.assertEqual(len(out), 2)
+        caa = out[0]
+        headers = out[1]
+        self.assertFalse(isinstance(caa.get("compliance_mappings"), list) and len(caa.get("compliance_mappings", [])) > 0)
+        mappings = headers.get("compliance_mappings")
+        self.assertIsInstance(mappings, list)
+        self.assertTrue(mappings)
+        if isinstance(mappings, list) and mappings:
+            first = mappings[0]
+            self.assertEqual(first.get("status"), "potential_gap")
+            self.assertEqual(first.get("confidence"), "medium")
+            self.assertIn("PCI-DSS 4.0 Req 11.3", str(first.get("reference")))
 
 
 if __name__ == "__main__":

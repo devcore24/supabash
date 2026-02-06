@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-from supabash.report import generate_markdown, write_markdown
+from supabash.report import COMPLIANCE_COVERAGE_ROWS, generate_markdown, write_markdown
 from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
@@ -117,6 +117,46 @@ class TestReport(unittest.TestCase):
         self.assertIn("skipped: sslscan (No TLS candidate ports detected from discovery)", md)
         self.assertIn("Vulnerability Discovery & Exposure Checks", md)
         self.assertIn("failed: nuclei (connection reset by peer while requesting templates)", md)
+
+    def test_compliance_sections_render_for_all_profiles(self):
+        for profile_name in sorted(COMPLIANCE_COVERAGE_ROWS.keys()):
+            with self.subTest(profile=profile_name):
+                report = {
+                    "target": "localhost",
+                    "compliance_profile": profile_name,
+                    "compliance_framework": profile_name,
+                    "results": [
+                        {"tool": "nmap", "success": True, "command": "nmap localhost -oX - -sV"},
+                        {"tool": "nuclei", "success": True, "command": "nuclei -u http://localhost -jsonl"},
+                    ],
+                    "findings": [],
+                }
+                md = generate_markdown(report)
+                self.assertIn("## Scope & Assumptions", md)
+                self.assertIn("## Compliance Coverage Matrix", md)
+                self.assertIn("Status legend:", md)
+                self.assertIn("Control mapping note: mapped controls indicate potential relevance and require manual validation.", md)
+
+    def test_compliance_mapping_wording_is_softened(self):
+        report = {
+            "target": "localhost",
+            "compliance_profile": "compliance_pci",
+            "results": [],
+            "findings": [
+                {
+                    "severity": "INFO",
+                    "title": "HTTP Missing Security Headers",
+                    "tool": "nuclei",
+                    "evidence": "http://localhost:8080",
+                    "compliance_mappings": [
+                        {"reference": "PCI-DSS 4.0 Req 11.3 (Vulnerability Management)", "confidence": "medium"}
+                    ],
+                }
+            ],
+        }
+        md = generate_markdown(report)
+        self.assertIn("Potential Gap: PCI-DSS 4.0 Req 11.3 (Vulnerability Management) (mapping confidence: medium)", md)
+        self.assertNotIn("NON-COMPLIANT", md)
 
     def test_write_markdown(self):
         report = {"target": "t", "results": []}
