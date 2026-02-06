@@ -829,7 +829,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if action_key in agentic_success:
                             entry = self._skip_tool(tool, "Already completed in agentic phase")
                         elif not self._should_run_dnsenum(scan_host):
-                            entry = self._skip_tool(tool, "Not a domain target")
+                            entry = self._skip_tool(tool, self._dns_target_skip_reason(scan_host))
                         else:
                             entry = self._run_tool(
                                 tool,
@@ -845,7 +845,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if action_key in agentic_success:
                             entry = self._skip_tool(tool, "Already completed in agentic phase")
                         elif not self._should_run_dnsenum(scan_host):
-                            entry = self._skip_tool(tool, "Not a domain target")
+                            entry = self._skip_tool(tool, self._dns_target_skip_reason(scan_host))
                         else:
                             entry = self._run_tool(
                                 tool,

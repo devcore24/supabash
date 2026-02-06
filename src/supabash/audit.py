@@ -227,7 +227,25 @@ class AuditOrchestrator:
         host = (scan_host or "").strip()
         if not host or "/" in host or ":" in host:
             return False
+        host_l = host.lower()
+        if host_l in ("localhost", "localhost.localdomain", "localdomain"):
+            return False
+        if host_l.endswith(".localhost"):
+            return False
         return not self._is_ip_literal(host)
+
+    def _dns_target_skip_reason(self, scan_host: str) -> str:
+        host = (scan_host or "").strip()
+        if not host:
+            return "Not a domain target"
+        host_l = host.lower()
+        if host_l in ("localhost", "localhost.localdomain", "localdomain") or host_l.endswith(".localhost"):
+            return "Localhost/loopback target (DNS enumeration N/A)"
+        if self._is_ip_literal(host):
+            return "IP target (DNS enumeration N/A)"
+        if "/" in host or ":" in host:
+            return "Not a domain target"
+        return "Not a domain target"
 
     def _tool_config(self, tool: str) -> Dict[str, Any]:
         """
@@ -1324,38 +1342,118 @@ class AuditOrchestrator:
         if profile not in COMPLIANCE_PROFILES:
             return findings
 
-        def tag(control_key: str) -> Optional[str]:
+        def reference_for(control_key: str) -> Optional[str]:
             ref = COMPLIANCE_CONTROL_REFERENCES.get(control_key, {}).get(profile)
             if not ref:
                 return None
-            return f"NON-COMPLIANT: {ref}"
+            return str(ref)
+
+        def add_mapping(finding: Dict[str, Any], control_key: str, confidence: str) -> None:
+            ref = reference_for(control_key)
+            if not ref:
+                return
+            confidence_norm = str(confidence or "medium").strip().lower()
+            if confidence_norm not in ("low", "medium", "high"):
+                confidence_norm = "medium"
+            mapping = {
+                "status": "potential_gap",
+                "control_key": control_key,
+                "reference": ref,
+                "confidence": confidence_norm,
+            }
+            mappings = finding.get("compliance_mappings")
+            if not isinstance(mappings, list):
+                mappings = []
+                finding["compliance_mappings"] = mappings
+            if mapping not in mappings:
+                mappings.append(mapping)
+
+            # Backward-compatible text tags for older report renderers.
+            text_tag = f"Potential Gap: {ref} (mapping confidence: {confidence_norm})"
+            tags = finding.get("compliance_tags")
+            if not isinstance(tags, list):
+                tags = []
+                finding["compliance_tags"] = tags
+            if text_tag not in tags:
+                tags.append(text_tag)
+
+        def has_any(text: str, phrases: Sequence[str]) -> bool:
+            for phrase in phrases:
+                if phrase in text:
+                    return True
+            return False
 
         for finding in findings:
             if not isinstance(finding, dict):
                 continue
             tool = str(finding.get("tool") or "").lower()
             title = str(finding.get("title") or "").strip().lower()
-            tags: List[str] = []
+            severity = str(finding.get("severity") or "INFO").strip().upper()
 
-            if tool == "sslscan" and "weak tls protocol" in title:
-                ref = tag("crypto")
-                if ref:
-                    tags.append(ref)
-            if tool in ("nuclei", "sqlmap") or "sql injection" in title:
-                ref = tag("vuln_mgmt")
-                if ref:
-                    tags.append(ref)
-            if tool in ("hydra", "medusa") or "valid credentials" in title:
-                ref = tag("access_control")
-                if ref:
-                    tags.append(ref)
-            if tool == "supabase_audit" and "rls" in title:
-                ref = tag("data_protection")
-                if ref:
-                    tags.append(ref)
+            if tool == "sslscan":
+                if has_any(
+                    title,
+                    (
+                        "weak tls",
+                        "weak cipher",
+                        "tlsv1",
+                        "tls 1.0",
+                        "tls 1.1",
+                        "self-signed",
+                        "certificate",
+                        "insecure protocol",
+                        "expired",
+                    ),
+                ):
+                    add_mapping(finding, "crypto", "high")
+                elif severity in ("HIGH", "CRITICAL", "MEDIUM"):
+                    add_mapping(finding, "crypto", "medium")
 
-            if tags:
-                finding["compliance_tags"] = tags
+            if tool == "sqlmap" or "sql injection" in title:
+                add_mapping(finding, "vuln_mgmt", "high")
+
+            if tool in ("hydra", "medusa") or has_any(
+                title, ("valid credentials", "weak password", "default credentials", "bruteforce")
+            ):
+                add_mapping(finding, "access_control", "high")
+
+            if tool in ("nuclei", "nikto", "ffuf", "gobuster"):
+                # Avoid broad false mapping on generic informational records (for example CAA).
+                if "caa record" in title:
+                    pass
+                elif has_any(
+                    title,
+                    (
+                        "unauthenticated",
+                        "default credentials",
+                        "directory listing",
+                        "prometheus metrics",
+                        "open redirect",
+                        "xss",
+                        "sqli",
+                        "cve-",
+                        "admin panel",
+                        "exposed",
+                        "authentication bypass",
+                        "missing security headers",
+                        "allowed options method",
+                    ),
+                ):
+                    conf = "medium" if severity in ("INFO", "LOW") else "high"
+                    add_mapping(finding, "vuln_mgmt", conf)
+                elif severity in ("HIGH", "CRITICAL", "MEDIUM"):
+                    add_mapping(finding, "vuln_mgmt", "medium")
+
+            if tool == "trivy" and severity in ("HIGH", "CRITICAL", "MEDIUM"):
+                add_mapping(finding, "vuln_mgmt", "high")
+
+            if tool == "supabase_audit":
+                if has_any(title, ("service role key", "without authentication", "rest api accessible", "rpc", "rls")):
+                    add_mapping(finding, "access_control", "high")
+                if has_any(title, ("service role key", "anon key", "rls", "rpc", "rest api accessible")):
+                    conf = "high" if "service role key" in title else "medium"
+                    add_mapping(finding, "data_protection", conf)
+
         return findings
 
     def _nmap_args_for_mode(self, mode: str, compliance_profile: Optional[str] = None) -> str:
@@ -1730,7 +1828,7 @@ class AuditOrchestrator:
             if not self._tool_enabled("subfinder", default=False):
                 return self._skip_disabled("subfinder")
             if not self._should_run_dnsenum(domain_target):
-                return self._skip_tool("subfinder", "Not a domain target")
+                return self._skip_tool("subfinder", self._dns_target_skip_reason(domain_target))
             note("tool_start", "subfinder", "Running subfinder")
             entry = self._run_tool(
                 "subfinder",
@@ -1782,7 +1880,7 @@ class AuditOrchestrator:
             if not self._has_scanner("theharvester"):
                 return self._skip_tool("theharvester", "Scanner not available")
             if not self._should_run_dnsenum(domain_target):
-                return self._skip_tool("theharvester", "Not a domain target")
+                return self._skip_tool("theharvester", self._dns_target_skip_reason(domain_target))
 
             settings = resolve_theharvester_settings()
             note("tool_start", "theharvester", "Running theHarvester (OSINT)")
@@ -2384,7 +2482,7 @@ class AuditOrchestrator:
                     else:
                         agg["results"].append(self._skip_tool("dnsenum", "Scanner not available"))
                 else:
-                    agg["results"].append(self._skip_tool("dnsenum", "Not a domain target"))
+                    agg["results"].append(self._skip_tool("dnsenum", self._dns_target_skip_reason(scan_host)))
 
                 harvester_entry = run_theharvester_if_requested(scan_host)
                 if harvester_entry is not None:
@@ -2578,7 +2676,7 @@ class AuditOrchestrator:
                     else:
                         agg["results"].append(self._skip_tool("dnsenum", "Scanner not available"))
                 else:
-                    agg["results"].append(self._skip_tool("dnsenum", "Not a domain target"))
+                    agg["results"].append(self._skip_tool("dnsenum", self._dns_target_skip_reason(scan_host)))
 
                 # TLS scan (https ports)
                 tls_ports = [p for p in open_ports if p in (443, 8443)]
