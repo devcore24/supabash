@@ -137,13 +137,22 @@ COMPLIANCE_CONTROL_REFERENCES = {
         "compliance_bsi": "BSI IT-Grundschutz: Cryptographic Safeguards",
     },
     "vuln_mgmt": {
-        "compliance_pci": "PCI-DSS 4.0 Req 11.3 (Vulnerability Management)",
+        "compliance_pci": "PCI-DSS 4.0 Req 11 (Security Testing)",
         "compliance_soc2": "SOC 2 CC7.1 (Vulnerability Management)",
         "compliance_iso": "ISO/IEC 27001 A.12.6 (Technical Vulnerability Management)",
         "compliance_dora": "DORA ICT Risk Mgmt (Vulnerability Handling)",
         "compliance_nis2": "NIS2 Risk Mgmt (Vulnerability Handling)",
         "compliance_gdpr": "GDPR Art. 32 (Security of Processing)",
         "compliance_bsi": "BSI IT-Grundschutz: Vulnerability Management",
+    },
+    "secure_config": {
+        "compliance_pci": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+        "compliance_soc2": "SOC 2 CC8.1 (Configuration Management)",
+        "compliance_iso": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+        "compliance_dora": "DORA ICT Risk Mgmt (Secure Configuration)",
+        "compliance_nis2": "NIS2 Risk Mgmt (Secure Configuration)",
+        "compliance_gdpr": "GDPR Art. 32 (Security of Processing)",
+        "compliance_bsi": "BSI IT-Grundschutz: Secure Configuration",
     },
     "access_control": {
         "compliance_pci": "PCI-DSS 4.0 Req 8 (Access Control)",
@@ -1749,19 +1758,36 @@ class AuditOrchestrator:
                 elif has_any(
                     title,
                     (
+                        "missing security headers",
+                        "allowed options method",
+                        "directory listing",
+                        "default page",
+                    ),
+                ):
+                    conf = "medium" if severity in ("INFO", "LOW") else "high"
+                    add_mapping(finding, "secure_config", conf)
+                elif has_any(
+                    title,
+                    (
                         "unauthenticated",
                         "default credentials",
-                        "directory listing",
-                        "prometheus metrics",
+                        "admin panel",
+                        "authentication bypass",
+                    ),
+                ):
+                    conf = "medium" if severity in ("INFO", "LOW") else "high"
+                    add_mapping(finding, "access_control", conf)
+                elif has_any(title, ("prometheus metrics", "exposed metrics", "service role key", "anon key")):
+                    conf = "medium" if severity in ("INFO", "LOW") else "high"
+                    add_mapping(finding, "data_protection", conf)
+                elif has_any(
+                    title,
+                    (
                         "open redirect",
                         "xss",
                         "sqli",
                         "cve-",
-                        "admin panel",
                         "exposed",
-                        "authentication bypass",
-                        "missing security headers",
-                        "allowed options method",
                     ),
                 ):
                     conf = "medium" if severity in ("INFO", "LOW") else "high"

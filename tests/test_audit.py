@@ -195,7 +195,7 @@ class TestAuditOrchestrator(unittest.TestCase):
             first = mappings[0]
             self.assertEqual(first.get("status"), "potential_gap")
             self.assertEqual(first.get("confidence"), "medium")
-            self.assertIn("PCI-DSS 4.0 Req 11.3", str(first.get("reference")))
+            self.assertIn("PCI-DSS 4.0 Req 2", str(first.get("reference")))
 
 
 if __name__ == "__main__":
