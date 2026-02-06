@@ -244,7 +244,29 @@ AI audit combines the deterministic `audit` pipeline with a bounded, tool-callin
 supabash ai-audit 192.168.1.10 --yes
 supabash audit 192.168.1.10 --agentic --yes   # alias
 supabash ai-audit "http://192.168.1.10" --yes --llm-plan --max-actions 8
+
+# Agentic audit with PCI profile
 supabash ai-audit 192.168.1.10 --yes --compliance pci
+
+# Agentic audit with SOC2 profile
+supabash ai-audit 192.168.1.10 --yes --compliance soc2
+
+# Agentic audit with ISO 27001 profile
+supabash ai-audit 192.168.1.10 --yes --compliance iso
+
+# Agentic audit with DORA profile
+supabash ai-audit 192.168.1.10 --yes --compliance dora
+
+# Agentic audit with NIS2 profile
+supabash ai-audit 192.168.1.10 --yes --compliance nis2
+
+# Agentic audit with GDPR profile
+supabash ai-audit 192.168.1.10 --yes --compliance gdpr
+
+# Agentic audit with BSI profile
+supabash ai-audit 192.168.1.10 --yes --compliance bsi
+
+
 ```
 Notes:
 - AI audit uses provider tool-calling to plan additional evidence collection. If tool-calling is unsupported, Supabash logs a warning, skips the agentic phase, and still produces the baseline report.
