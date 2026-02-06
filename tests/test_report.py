@@ -67,6 +67,57 @@ class TestReport(unittest.TestCase):
         self.assertIn("### Runtime Metadata", md)
         self.assertIn("### Tool Versions", md)
 
+    def test_risk_normalization_details_include_rule_hints(self):
+        report = {
+            "target": "localhost",
+            "summary": {
+                "summary": "Exposure risk identified.",
+                "findings": [
+                    {
+                        "severity": "MEDIUM",
+                        "title": "Database and cache services exposed on network ports",
+                        "evidence": "PostgreSQL and Redis detected on open ports.",
+                    }
+                ],
+            },
+            "findings": [
+                {"severity": "INFO", "title": "Open port 5432/tcp", "tool": "nmap", "evidence": "postgresql PostgreSQL DB 9.6.0 or later"},
+                {"severity": "INFO", "title": "Open port 6379/tcp", "tool": "nmap", "evidence": "redis Redis key-value store 6.2.11"},
+            ],
+            "results": [],
+        }
+        md = generate_markdown(report)
+        self.assertIn("### Risk Normalization", md)
+        self.assertIn("#### Normalization Details", md)
+        self.assertIn("rule:data_store_exposure_aggregation", md)
+
+    def test_compliance_coverage_matrix_includes_skip_and_failure_reasons(self):
+        report = {
+            "target": "localhost",
+            "compliance_profile": "compliance_pci",
+            "compliance_framework": "PCI-DSS 4.0",
+            "results": [
+                {"tool": "nmap", "success": True, "command": "nmap localhost -oX - -sV --script ssl-enum-ciphers -p-"},
+                {
+                    "tool": "sslscan",
+                    "success": False,
+                    "skipped": True,
+                    "reason": "No TLS candidate ports detected from discovery",
+                },
+                {
+                    "tool": "nuclei",
+                    "success": False,
+                    "error": "connection reset by peer while requesting templates",
+                },
+            ],
+        }
+        md = generate_markdown(report)
+        self.assertIn("## Compliance Coverage Matrix", md)
+        self.assertIn("Transport Security Review", md)
+        self.assertIn("skipped: sslscan (No TLS candidate ports detected from discovery)", md)
+        self.assertIn("Vulnerability Discovery & Exposure Checks", md)
+        self.assertIn("failed: nuclei (connection reset by peer while requesting templates)", md)
+
     def test_write_markdown(self):
         report = {"target": "t", "results": []}
         path = artifact_path("test_md_report.md")

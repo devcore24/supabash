@@ -1,8 +1,9 @@
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Set
 import json
 from datetime import datetime, timezone
 from urllib.parse import urlparse
+import re
 
 COMPLIANCE_COVERAGE_ROWS: Dict[str, List[Dict[str, Any]]] = {
     "compliance_pci": [
@@ -292,8 +293,8 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         lines.append("- Out of scope: independent attestation/certification decisions and control operation effectiveness testing.")
 
     # Compliance coverage matrix (readiness boundaries and evidence sources)
-    def _tool_status_index(results: Any) -> Dict[str, Dict[str, int]]:
-        index: Dict[str, Dict[str, int]] = {}
+    def _tool_status_index(results: Any) -> Dict[str, Dict[str, Any]]:
+        index: Dict[str, Dict[str, Any]] = {}
         if not isinstance(results, list):
             return index
         for entry in results:
@@ -302,16 +303,67 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             tool = str(entry.get("tool") or "").strip().lower()
             if not tool:
                 continue
-            slot = index.setdefault(tool, {"success": 0, "failed": 0, "skipped": 0})
+            slot = index.setdefault(
+                tool,
+                {
+                    "success": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "failed_reasons": [],
+                    "skipped_reasons": [],
+                },
+            )
             if bool(entry.get("skipped")):
                 slot["skipped"] += 1
+                reason = str(entry.get("reason") or "").strip()
+                if reason:
+                    reasons = slot.get("skipped_reasons")
+                    if isinstance(reasons, list) and reason not in reasons:
+                        reasons.append(reason)
             elif bool(entry.get("success")):
                 slot["success"] += 1
             else:
                 slot["failed"] += 1
+                reason = str(entry.get("error") or entry.get("reason") or "").strip()
+                if reason:
+                    reasons = slot.get("failed_reasons")
+                    if isinstance(reasons, list) and reason not in reasons:
+                        reasons.append(reason)
         return index
 
-    def _coverage_status(tools: List[str], idx: Dict[str, Dict[str, int]]) -> Tuple[str, str, str]:
+    def _sanitize_note_text(value: Any, max_len: int = 72) -> str:
+        text = str(value or "").strip().replace("\n", " ").replace("\r", " ").replace("|", "/")
+        text = re.sub(r"\s+", " ", text)
+        if len(text) > max_len:
+            return text[: max_len - 3].rstrip() + "..."
+        return text
+
+    def _format_tool_reasons(
+        tools: List[str],
+        idx: Dict[str, Dict[str, Any]],
+        key: str,
+        label: str,
+        max_tools: int = 3,
+    ) -> Optional[str]:
+        if not tools:
+            return None
+        rendered: List[str] = []
+        for tool in tools[:max_tools]:
+            reasons = idx.get(tool, {}).get(key, [])
+            reason_text = ""
+            if isinstance(reasons, list) and reasons:
+                reason_text = _sanitize_note_text(reasons[0])
+            if reason_text:
+                rendered.append(f"{tool} ({reason_text})")
+            else:
+                rendered.append(tool)
+        if len(tools) > max_tools:
+            rendered.append("...")
+        if not rendered:
+            return None
+        return f"{label}: {', '.join(rendered)}"
+
+    def _coverage_status(tools: List[str], idx: Dict[str, Dict[str, Any]]) -> Tuple[str, str, str]:
         normalized_tools = [str(t).strip().lower() for t in tools if str(t).strip()]
         if not normalized_tools:
             return ("Not Assessed", "none", "No automated checks mapped")
@@ -330,10 +382,16 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             evidence = f"{evidence}, ..."
 
         notes_parts: List[str] = []
-        if failed_only:
-            notes_parts.append(f"failed: {', '.join(failed_only[:3])}")
-        if skipped_only:
-            notes_parts.append(f"skipped: {', '.join(skipped_only[:3])}")
+        failed_with_reason = _format_tool_reasons(failed_only, idx, "failed_reasons", "failed")
+        if failed_with_reason:
+            notes_parts.append(failed_with_reason)
+        skipped_with_reason = _format_tool_reasons(skipped_only, idx, "skipped_reasons", "skipped")
+        if skipped_with_reason:
+            notes_parts.append(skipped_with_reason)
+        if not successful and failed_only:
+            notes_parts.append("coverage blocked by execution errors")
+        if not successful and skipped_only and not failed_only:
+            notes_parts.append("coverage gated by scope/config")
         if not notes_parts and successful:
             notes_parts.append("based on successful tool runs")
         notes = "; ".join(notes_parts) if notes_parts else "no supporting runs"
@@ -541,6 +599,95 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             if reductions:
                 lines.append(f"- Reduced in summary risk synthesis: {', '.join(reductions)}")
             lines.append("- Basis: LLM summary may aggregate multiple low-signal findings into higher-level operational risk statements.")
+            # Deterministic transparency layer for promoted summary findings.
+            def _norm_text(value: Any) -> str:
+                return str(value or "").strip().lower()
+
+            def _norm_key(value: Any) -> str:
+                s = _norm_text(value)
+                s = re.sub(r"\s+", " ", s)
+                return s
+
+            def _parse_open_ports(findings: List[Dict[str, Any]]) -> List[int]:
+                ports: Set[int] = set()
+                for f in findings:
+                    if not isinstance(f, dict):
+                        continue
+                    title = _norm_text(f.get("title"))
+                    if not title.startswith("open port"):
+                        continue
+                    m = re.search(r"open port\s+(\d+)", title)
+                    if not m:
+                        continue
+                    try:
+                        ports.add(int(m.group(1)))
+                    except Exception:
+                        continue
+                return sorted(ports)
+
+            def _infer_rules(summary_item: Dict[str, Any], findings: List[Dict[str, Any]]) -> List[str]:
+                text = f"{_norm_text(summary_item.get('title'))} {_norm_text(summary_item.get('evidence'))}".strip()
+                if not text:
+                    return []
+
+                ports = _parse_open_ports(findings)
+                web_ports: List[int] = []
+                unknown_ports: List[int] = []
+                db_ports: Set[int] = set()
+                for f in findings:
+                    if not isinstance(f, dict):
+                        continue
+                    evidence = _norm_text(f.get("evidence"))
+                    title = _norm_text(f.get("title"))
+                    port_match = re.search(r"open port\s+(\d+)", title)
+                    port = None
+                    if port_match:
+                        try:
+                            port = int(port_match.group(1))
+                        except Exception:
+                            port = None
+                    if any(token in evidence for token in ("http", "https", "express", "nginx", "apache", "golang net/http", "http-proxy")) and port is not None:
+                        web_ports.append(port)
+                    if "unknown" in evidence and port is not None:
+                        unknown_ports.append(port)
+                    if any(token in evidence for token in ("postgres", "postgresql", "redis")) or (port in (5432, 6379)):
+                        if port is not None:
+                            db_ports.add(port)
+
+                rules: List[str] = []
+                if any(k in text for k in ("database", "postgres", "redis", "cache")) and db_ports:
+                    rules.append(f"rule:data_store_exposure_aggregation (ports: {', '.join(str(p) for p in sorted(db_ports))})")
+                if any(k in text for k in ("http", "web", "application services", "surface")) and len(set(web_ports)) >= 2:
+                    rules.append(f"rule:web_surface_aggregation (ports: {', '.join(str(p) for p in sorted(set(web_ports))[:8])})")
+                if any(k in text for k in ("unknown", "unidentified", "non-standard", "legacy")) and (unknown_ports or ports):
+                    details = ", ".join(str(p) for p in sorted(set(unknown_ports))[:8]) if unknown_ports else ", ".join(str(p) for p in ports[:8])
+                    rules.append(f"rule:unclassified_service_aggregation (ports: {details})")
+                if not rules and len(findings) >= 5:
+                    rules.append(f"rule:llm_risk_synthesis (aggregated from {len(findings)} tool findings)")
+                return rules
+
+            tool_title_keys = {_norm_key(f.get("title")) for f in agg_findings if isinstance(f, dict)}
+            promoted_detail_lines: List[str] = []
+            for sf in summary_findings:
+                if not isinstance(sf, dict):
+                    continue
+                sev = str(sf.get("severity", "INFO")).upper()
+                if sev == "INFO":
+                    continue
+                title_key = _norm_key(sf.get("title"))
+                title_text = str(sf.get("title") or "").strip()
+                # Show details only for likely promoted/aggregated summary-level statements.
+                if title_key and title_key in tool_title_keys:
+                    continue
+                rules = _infer_rules(sf, agg_findings)
+                if not rules:
+                    continue
+                promoted_detail_lines.append(f"- {sev} {title_text}")
+                promoted_detail_lines.append(f"  - Derived via: {'; '.join(rules)}")
+
+            if promoted_detail_lines:
+                lines.append("\n#### Normalization Details")
+                lines.extend(promoted_detail_lines)
         else:
             lines.append("- No severity normalization differences between summary and tool-level findings.")
 

@@ -346,16 +346,19 @@ class AIAuditOrchestrator(AuditOrchestrator):
             profile_values = ("fast", "standard", "aggressive") + tuple(compliance_profiles.keys())
             requested_compliance = normalized_compliance if normalized_compliance in compliance_profiles else None
             open_ports: List[int] = []
+            nmap_scan_data: Dict[str, Any] = {}
             try:
                 for entry in agg.get("results", []) or []:
                     if isinstance(entry, dict) and entry.get("tool") == "nmap" and entry.get("success"):
                         scan_data = entry.get("data", {}).get("scan_data", {}) if isinstance(entry.get("data"), dict) else {}
+                        if isinstance(scan_data, dict):
+                            nmap_scan_data = scan_data
                         open_ports = self._open_ports_from_nmap(scan_data if isinstance(scan_data, dict) else {})
                         break
             except Exception:
                 open_ports = []
 
-            tls_ports = [p for p in open_ports if p in (443, 8443)]
+            tls_ports = self._tls_candidate_ports_from_nmap(nmap_scan_data, web_targets=web_targets)
             smb_ports = [p for p in open_ports if p in (139, 445)]
 
             allowed_web_targets = [u for u in web_targets if isinstance(u, str) and u.strip()]
@@ -870,7 +873,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if action_key in agentic_success:
                             entry = self._skip_tool(tool, "Already completed in agentic phase")
                         elif port is None:
-                            entry = self._skip_tool(tool, "No TLS ports detected (443/8443)")
+                            entry = self._skip_tool(tool, "No TLS candidate ports detected from discovery")
                         else:
                             entry = self._run_tool(
                                 tool,

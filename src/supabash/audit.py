@@ -240,6 +240,57 @@ class AuditOrchestrator:
                     continue
         return sorted(set(ports))
 
+    def _tls_candidate_ports_from_nmap(
+        self,
+        nmap_data: Dict[str, Any],
+        web_targets: Optional[List[str]] = None,
+    ) -> List[int]:
+        """
+        Best-effort TLS candidate detection.
+
+        Includes:
+        - Open ports whose nmap service/tunnel hints at TLS/SSL/HTTPS.
+        - Common non-standard HTTPS/TLS ports when open.
+        - Ports from discovered/explicit https:// web targets.
+        """
+        candidates: set[int] = set()
+        common_tls_ports = {443, 8443, 9443, 10443, 4443, 6443}
+
+        for host in (nmap_data or {}).get("hosts", []) or []:
+            for p in host.get("ports", []) or []:
+                try:
+                    if str(p.get("state", "")).lower() != "open":
+                        continue
+                    port = int(p.get("port"))
+                except Exception:
+                    continue
+
+                service = str(p.get("service") or "").strip().lower()
+                tunnel = str(p.get("tunnel") or "").strip().lower()
+                hint = f"{service} {tunnel}".strip()
+                has_tls_hint = any(token in hint for token in ("https", "ssl", "tls"))
+
+                if has_tls_hint or port in common_tls_ports:
+                    candidates.add(port)
+
+        if isinstance(web_targets, list):
+            for target in web_targets:
+                if not isinstance(target, str):
+                    continue
+                value = target.strip()
+                if not value:
+                    continue
+                try:
+                    parsed = urlparse(value)
+                    if (parsed.scheme or "").lower() != "https":
+                        continue
+                    port = int(parsed.port or 443)
+                    candidates.add(port)
+                except Exception:
+                    continue
+
+        return sorted(candidates)
+
     def _is_ip_literal(self, host: str) -> bool:
         try:
             ipaddress.ip_address((host or "").strip())
@@ -2698,7 +2749,10 @@ class AuditOrchestrator:
                         agg["finished_at"] = time.time()
                         return agg
 
-                tls_ports = [p for p in open_ports if p in (443, 8443)]
+                tls_ports = self._tls_candidate_ports_from_nmap(
+                    nmap_entry.get("data", {}).get("scan_data", {}),
+                    web_targets=web_targets,
+                )
                 if tls_ports:
                     if self._has_scanner("sslscan"):
                         for p in tls_ports[:2]:
@@ -2718,7 +2772,7 @@ class AuditOrchestrator:
                     else:
                         agg["results"].append(self._skip_tool("sslscan", "Scanner not available"))
                 else:
-                    agg["results"].append(self._skip_tool("sslscan", "No TLS ports detected (443/8443)"))
+                    agg["results"].append(self._skip_tool("sslscan", "No TLS candidate ports detected from discovery"))
 
                 if any(p in (139, 445) for p in open_ports):
                     if self._has_scanner("enum4linux-ng"):
@@ -2852,8 +2906,11 @@ class AuditOrchestrator:
                 else:
                     agg["results"].append(self._skip_tool("dnsenum", self._dns_target_skip_reason(scan_host)))
 
-                # TLS scan (https ports)
-                tls_ports = [p for p in open_ports if p in (443, 8443)]
+                # TLS scan (TLS/HTTPS candidate ports, incl. non-standard)
+                tls_ports = self._tls_candidate_ports_from_nmap(
+                    nmap_entry.get("data", {}).get("scan_data", {}),
+                    web_targets=web_targets,
+                )
                 if tls_ports:
                     if self._has_scanner("sslscan"):
                         for p in tls_ports[:2]:
@@ -2873,7 +2930,7 @@ class AuditOrchestrator:
                     else:
                         agg["results"].append(self._skip_tool("sslscan", "Scanner not available"))
                 else:
-                    agg["results"].append(self._skip_tool("sslscan", "No TLS ports detected (443/8443)"))
+                    agg["results"].append(self._skip_tool("sslscan", "No TLS candidate ports detected from discovery"))
 
                 # SMB enumeration
                 if any(p in (139, 445) for p in open_ports):

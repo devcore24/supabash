@@ -93,6 +93,28 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertIn("http://localhost:6000", urls)
         self.assertNotIn("http://localhost:9100", urls)
 
+    def test_tls_candidate_ports_include_nonstandard_tls_ports(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        ports = orch._tls_candidate_ports_from_nmap(
+            {
+                "hosts": [
+                    {
+                        "ports": [
+                            {"port": 8080, "protocol": "tcp", "service": "http", "state": "open"},
+                            {"port": 9443, "protocol": "tcp", "service": "https-alt", "state": "open"},
+                            {"port": 10443, "protocol": "tcp", "service": "http", "state": "open"},
+                            {"port": 8443, "protocol": "tcp", "service": "https", "state": "closed"},
+                        ]
+                    }
+                ]
+            },
+            web_targets=["https://localhost:10443", "http://localhost:8080"],
+        )
+        self.assertIn(9443, ports)
+        self.assertIn(10443, ports)
+        self.assertNotIn(8080, ports)
+        self.assertNotIn(8443, ports)
+
     def test_handles_failure(self):
         scanners = {
             "nmap": FakeFailScanner("nmap"),
