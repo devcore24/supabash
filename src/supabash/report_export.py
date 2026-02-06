@@ -49,7 +49,66 @@ def markdown_to_html(markdown_text: str) -> str:
     # Enable heading IDs so in-document anchors (e.g. #summary) work in the exported HTML/PDF.
     # - toc: generates stable id="" attributes for headings
     # - attr_list: allows explicit heading IDs like "## Summary {#summary}" if we ever want them
-    return fn(markdown_text, extensions=["tables", "fenced_code", "toc", "attr_list"], output_format="html5")
+    body_html = fn(markdown_text, extensions=["tables", "fenced_code", "toc", "attr_list"], output_format="html5")
+    # Render with explicit table/code styling so HTML/PDF exports remain readable
+    # for long command rows in "Tools Run".
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.45;
+      margin: 20px;
+      color: #111;
+    }}
+    h1, h2, h3, h4 {{
+      margin-top: 1.1em;
+      margin-bottom: 0.5em;
+    }}
+    p, ul, ol {{
+      margin: 0.5em 0;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+      margin: 0.6em 0 1em 0;
+      font-size: 0.95em;
+    }}
+    th, td {{
+      border: 1px solid #cfcfcf;
+      padding: 6px 8px;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    th {{
+      background: #f5f5f5;
+      text-align: left;
+      font-weight: 600;
+    }}
+    code {{
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }}
+    pre {{
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border: 1px solid #ddd;
+      padding: 8px;
+      background: #fafafa;
+    }}
+  </style>
+</head>
+<body>
+{body_html}
+</body>
+</html>"""
 
 
 def export_from_markdown_file(
@@ -116,7 +175,8 @@ def export_from_markdown_file(
                     CSS(
                         string=(
                             "body { font-size: 11px; line-height: 1.35; } "
-                            "code, pre { font-size: 10px; }"
+                            "code, pre { font-size: 10px; } "
+                            "@page { margin: 14mm; }"
                         )
                     )
                 ]
