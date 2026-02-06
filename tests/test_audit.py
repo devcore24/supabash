@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import sys
 import os
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
@@ -44,6 +45,11 @@ class FakeDnsenumScanner:
     def scan(self, *args, **kwargs):
         self.called = True
         return {"success": True, "scan_data": {"raw_output": "dnsenum ok"}}
+
+
+class FakeHttpxVersionScanner:
+    def _resolve_httpx_binary(self):
+        return "/usr/local/bin/httpx"
 
 
 class TestAuditOrchestrator(unittest.TestCase):
@@ -196,6 +202,43 @@ class TestAuditOrchestrator(unittest.TestCase):
             self.assertEqual(first.get("status"), "potential_gap")
             self.assertEqual(first.get("confidence"), "medium")
             self.assertIn("PCI-DSS 4.0 Req 2", str(first.get("reference")))
+
+    def test_extract_tool_version_value_prefers_version_over_banner(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        sample = """
+    __    __  __       _  __
+   / /_  / /_/ /_____ | |/ /
+             /_/
+
+        projectdiscovery.io
+
+[INF] Current Version: v1.8.1
+"""
+        v = orch._extract_tool_version_value("httpx", sample)
+        self.assertEqual(v, "v1.8.1")
+
+    def test_extract_tool_version_value_handles_plain_version_line(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        self.assertEqual(orch._extract_tool_version_value("gobuster", "3.6\n"), "3.6")
+
+    def test_best_effort_tool_version_returns_none_for_usage_only_output(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+
+        class FakeCompleted:
+            def __init__(self, stdout="", stderr=""):
+                self.stdout = stdout
+                self.stderr = stderr
+
+        with patch("subprocess.run", return_value=FakeCompleted(stdout="Usage: httpx [OPTIONS] URL\n")):
+            v = orch._best_effort_tool_version("httpx")
+        self.assertIsNone(v)
+
+    def test_version_commands_for_httpx_prefer_resolved_scanner_binary(self):
+        orch = AuditOrchestrator(scanners={"httpx": FakeHttpxVersionScanner()}, llm_client=None)
+        cmds = orch._version_commands_for_tool("httpx")
+        self.assertTrue(cmds)
+        self.assertEqual(cmds[0], ["/usr/local/bin/httpx", "-version"])
+        self.assertEqual(cmds[1], ["/usr/local/bin/httpx", "--version"])
 
 
 if __name__ == "__main__":

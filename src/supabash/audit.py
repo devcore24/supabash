@@ -442,7 +442,8 @@ class AuditOrchestrator:
         return h.hexdigest()
 
     def _best_effort_tool_version(self, tool: str) -> Optional[str]:
-        commands = EVIDENCE_VERSION_COMMANDS.get(str(tool or "").strip().lower(), [])
+        tool_name = str(tool or "").strip().lower()
+        commands = self._version_commands_for_tool(tool_name)
         for cmd in commands:
             try:
                 out = subprocess.run(
@@ -455,15 +456,97 @@ class AuditOrchestrator:
                 text = self._strip_ansi((out.stdout or out.stderr or "").strip())
                 if not text:
                     continue
-                lines = [line.strip() for line in text.splitlines() if line.strip()]
-                if not lines:
-                    continue
-                first = lines[0]
-                if first:
-                    return first
+                extracted = self._extract_tool_version_value(str(tool or "").strip().lower(), text)
+                if extracted:
+                    return extracted
             except Exception:
                 continue
         return None
+
+    def _extract_tool_version_value(self, tool: str, text: str) -> Optional[str]:
+        lines = [line.strip() for line in str(text or "").splitlines() if str(line).strip()]
+        if not lines:
+            return None
+
+        token_re = re.compile(r"[vV]?\d+(?:\.\d+)+(?:[A-Za-z0-9._#-]*)")
+        plain_version_re = re.compile(r"^[vV]?\d+(?:\.\d+)+(?:[A-Za-z0-9._#-]*)$")
+        noise_prefixes = (
+            "usage:",
+            "options:",
+            "general options:",
+            "note:",
+            "projectdiscovery.io",
+            "wordpress security scanner",
+        )
+
+        best: Optional[Tuple[int, str]] = None
+        for raw in lines:
+            line = str(raw).strip()
+            if not line:
+                continue
+            low = line.lower()
+            if low.startswith(noise_prefixes):
+                continue
+            if set(line) <= {"_", "-", "/", "\\", "|", " "}:
+                continue
+
+            score = 0
+            value: Optional[str] = None
+
+            if "version" in low:
+                m = re.search(r"(?i)\b(?:current\s+)?version\b\s*:?\s*([vV]?\d+(?:\.\d+)+(?:[A-Za-z0-9._#-]*)?)", line)
+                if m and m.group(1):
+                    value = m.group(1).strip()
+                    score = 100
+                else:
+                    m2 = token_re.search(line)
+                    if m2:
+                        value = m2.group(0).strip()
+                        score = 90
+            elif plain_version_re.fullmatch(line):
+                value = line
+                score = 80
+            elif tool and tool in low:
+                m3 = token_re.search(line)
+                if m3:
+                    value = m3.group(0).strip()
+                    score = 70
+            else:
+                m4 = token_re.search(line)
+                if m4 and len(line) <= 48:
+                    value = m4.group(0).strip()
+                    score = 40
+
+            if value:
+                if best is None or score > best[0]:
+                    best = (score, value)
+
+        if best:
+            return best[1]
+        return None
+
+    def _version_commands_for_tool(self, tool: str) -> List[List[str]]:
+        base = list(EVIDENCE_VERSION_COMMANDS.get(str(tool or "").strip().lower(), []))
+        if tool != "httpx":
+            return base
+        resolved: Optional[str] = None
+        scanner = self.scanners.get("httpx") if isinstance(self.scanners, dict) else None
+        if scanner is not None and hasattr(scanner, "_resolve_httpx_binary"):
+            try:
+                candidate = scanner._resolve_httpx_binary()
+                if isinstance(candidate, str) and candidate.strip():
+                    resolved = candidate.strip()
+            except Exception:
+                resolved = None
+        if not resolved or resolved == "httpx":
+            return base
+        preferred = [[resolved, "-version"], [resolved, "--version"]]
+        existing = {tuple(x) for x in base if isinstance(x, list)}
+        for cmd in reversed(preferred):
+            t = tuple(cmd)
+            if t not in existing:
+                base.insert(0, cmd)
+        return base
 
     def _collect_nuclei_metadata(self) -> Dict[str, Any]:
         details: Dict[str, Any] = {}

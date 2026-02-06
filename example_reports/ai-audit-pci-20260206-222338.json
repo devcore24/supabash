@@ -163,17 +163,42 @@
           "http://localhost:9840"
         ],
         "alive": [
-          "http://localhost:33425",
           "http://localhost:19090",
-          "http://localhost:3947",
-          "http://localhost:8080",
-          "http://localhost:9840",
+          "http://localhost:33425",
           "http://localhost:42901",
+          "http://localhost:3947",
+          "http://localhost:9840",
+          "http://localhost:8080",
           "http://localhost:9090"
         ],
         "results": [
           {
-            "timestamp": "2026-02-06T09:14:15.879729223+01:00",
+            "timestamp": "2026-02-06T22:26:17.524572524+01:00",
+            "port": "19090",
+            "url": "http://localhost:19090",
+            "input": "http://localhost:19090",
+            "scheme": "http",
+            "content_type": "text/plain",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "1.141187ms",
+            "a": [
+              "127.0.0.1"
+            ],
+            "words": 4,
+            "lines": 1,
+            "status_code": 404,
+            "content_length": 19,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:26:17.52458207+01:00",
             "port": "33425",
             "url": "http://localhost:33425",
             "input": "http://localhost:33425",
@@ -183,7 +208,7 @@
             "host": "localhost",
             "host_ip": "127.0.0.1",
             "path": "/",
-            "time": "2.844401ms",
+            "time": "2.544634ms",
             "a": [
               "127.0.0.1"
             ],
@@ -202,35 +227,10 @@
             }
           },
           {
-            "timestamp": "2026-02-06T09:14:15.879748117+01:00",
-            "port": "19090",
-            "url": "http://localhost:19090",
-            "input": "http://localhost:19090",
-            "scheme": "http",
-            "content_type": "text/plain",
-            "method": "GET",
-            "host": "localhost",
-            "host_ip": "127.0.0.1",
-            "path": "/",
-            "time": "1.512641ms",
-            "a": [
-              "127.0.0.1"
-            ],
-            "words": 4,
-            "lines": 1,
-            "status_code": 404,
-            "content_length": 19,
-            "failed": false,
-            "knowledgebase": {
-              "PageType": "error",
-              "pHash": 0
-            }
-          },
-          {
-            "timestamp": "2026-02-06T09:14:15.880578032+01:00",
-            "port": "3947",
-            "url": "http://localhost:3947",
-            "input": "http://localhost:3947",
+            "timestamp": "2026-02-06T22:26:17.524892404+01:00",
+            "port": "42901",
+            "url": "http://localhost:42901",
+            "input": "http://localhost:42901",
             "title": "Error",
             "scheme": "http",
             "content_type": "text/html",
@@ -238,7 +238,7 @@
             "host": "localhost",
             "host_ip": "127.0.0.1",
             "path": "/",
-            "time": "2.046294ms",
+            "time": "2.705908ms",
             "a": [
               "127.0.0.1"
             ],
@@ -257,7 +257,67 @@
             }
           },
           {
-            "timestamp": "2026-02-06T09:14:15.880627893+01:00",
+            "timestamp": "2026-02-06T22:26:17.525622184+01:00",
+            "port": "3947",
+            "url": "http://localhost:3947",
+            "input": "http://localhost:3947",
+            "title": "Error",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "1.50107ms",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 6,
+            "lines": 10,
+            "status_code": 404,
+            "content_length": 139,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:26:17.525839074+01:00",
+            "port": "9840",
+            "url": "http://localhost:9840",
+            "input": "http://localhost:9840",
+            "title": "Error",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "1.60087ms",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 6,
+            "lines": 10,
+            "status_code": 404,
+            "content_length": 139,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:26:17.526162756+01:00",
             "port": "8080",
             "url": "http://localhost:8080",
             "input": "http://localhost:8080",
@@ -267,7 +327,7 @@
             "host": "localhost",
             "host_ip": "127.0.0.1",
             "path": "/",
-            "time": "2.276271ms",
+            "time": "1.406664ms",
             "a": [
               "127.0.0.1"
             ],
@@ -282,67 +342,7 @@
             }
           },
           {
-            "timestamp": "2026-02-06T09:14:15.880643623+01:00",
-            "port": "9840",
-            "url": "http://localhost:9840",
-            "input": "http://localhost:9840",
-            "title": "Error",
-            "scheme": "http",
-            "content_type": "text/html",
-            "method": "GET",
-            "host": "localhost",
-            "host_ip": "127.0.0.1",
-            "path": "/",
-            "time": "3.297814ms",
-            "a": [
-              "127.0.0.1"
-            ],
-            "tech": [
-              "Express",
-              "Node.js"
-            ],
-            "words": 6,
-            "lines": 10,
-            "status_code": 404,
-            "content_length": 139,
-            "failed": false,
-            "knowledgebase": {
-              "PageType": "error",
-              "pHash": 0
-            }
-          },
-          {
-            "timestamp": "2026-02-06T09:14:15.881299224+01:00",
-            "port": "42901",
-            "url": "http://localhost:42901",
-            "input": "http://localhost:42901",
-            "title": "Error",
-            "scheme": "http",
-            "content_type": "text/html",
-            "method": "GET",
-            "host": "localhost",
-            "host_ip": "127.0.0.1",
-            "path": "/",
-            "time": "4.426681ms",
-            "a": [
-              "127.0.0.1"
-            ],
-            "tech": [
-              "Express",
-              "Node.js"
-            ],
-            "words": 6,
-            "lines": 10,
-            "status_code": 404,
-            "content_length": 139,
-            "failed": false,
-            "knowledgebase": {
-              "PageType": "error",
-              "pHash": 0
-            }
-          },
-          {
-            "timestamp": "2026-02-06T09:14:15.963781775+01:00",
+            "timestamp": "2026-02-06T22:26:17.618785431+01:00",
             "port": "9090",
             "url": "http://localhost:9090",
             "input": "http://localhost:9090",
@@ -354,7 +354,7 @@
             "host_ip": "127.0.0.1",
             "path": "/",
             "final_url": "http://localhost:9090/classic/graph",
-            "time": "10.37212ms",
+            "time": "5.050013ms",
             "chain_status_codes": [
               302,
               200
@@ -383,9 +383,9 @@
             }
           }
         ],
-        "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-k2hfr855/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects"
+        "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-yqbpvt2m/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects"
       },
-      "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-k2hfr855/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
+      "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-yqbpvt2m/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
       "phase": "baseline"
     },
     {
@@ -395,7 +395,7 @@
         "success": true,
         "scan_data": [
           {
-            "target": "http://localhost:33425",
+            "target": "http://localhost:19090",
             "plugins": {
               "Country": {
                 "string": [
@@ -410,20 +410,20 @@
                   "127.0.0.1"
                 ]
               },
-              "X-Powered-By": {
+              "UncommonHeaders": {
                 "string": [
-                  "Express"
+                  "x-content-type-options"
                 ]
               }
             },
             "banner": null,
-            "status": 401
+            "status": 404
           }
         ],
-        "command": "whatweb http://localhost:33425 --log-json -"
+        "command": "whatweb http://localhost:19090 --log-json -"
       },
-      "command": "whatweb http://localhost:33425 --log-json -",
-      "target": "http://localhost:33425",
+      "command": "whatweb http://localhost:19090 --log-json -",
+      "target": "http://localhost:19090",
       "phase": "baseline"
     },
     {
@@ -431,7 +431,7 @@
       "success": false,
       "skipped": true,
       "reason": "WordPress not detected by whatweb",
-      "target": "http://localhost:33425",
+      "target": "http://localhost:19090",
       "phase": "baseline"
     },
     {
@@ -441,21 +441,12 @@
         "success": true,
         "findings": [
           {
-            "id": "tech-detect",
-            "name": "Wappalyzer Technology Detection",
-            "severity": "info",
-            "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
-            "description": ""
-          },
-          {
             "id": "http-missing-security-headers",
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -463,8 +454,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -472,8 +463,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -481,8 +472,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -490,8 +481,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -499,8 +490,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -508,8 +499,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -517,8 +508,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -526,8 +517,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -535,17 +526,8 @@
             "name": "HTTP Missing Security Headers",
             "severity": "info",
             "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
-            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-          },
-          {
-            "id": "http-missing-security-headers",
-            "name": "HTTP Missing Security Headers",
-            "severity": "info",
-            "type": "http",
-            "host": "http://localhost:33425",
-            "matched_at": "http://localhost:33425",
+            "host": "http://localhost:19090",
+            "matched_at": "http://localhost:19090",
             "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
           },
           {
@@ -558,42 +540,22 @@
             "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
           }
         ],
-        "command": "nuclei -u http://localhost:33425 -jsonl -rate-limit 100"
+        "command": "nuclei -u http://localhost:19090 -jsonl -rate-limit 100"
       },
-      "command": "nuclei -u http://localhost:33425 -jsonl -rate-limit 100",
-      "target": "http://localhost:33425",
+      "command": "nuclei -u http://localhost:19090 -jsonl -rate-limit 100",
+      "target": "http://localhost:19090",
       "phase": "baseline"
     },
     {
       "tool": "gobuster",
-      "success": false,
-      "data": {
-        "success": false,
-        "error": "Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:33425/1bf2854c-59b8-4cfe-9149-5249e42f7944 => 401 (Length: 12). To continue please exclude the status code or the length",
-        "canceled": false,
-        "raw_output": "",
-        "command": "gobuster dir -u http://localhost:33425 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
-      },
-      "command": "gobuster dir -u http://localhost:33425 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
-      "error": "Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:33425/1bf2854c-59b8-4cfe-9149-5249e42f7944 => 401 (Length: 12). To continue please exclude the status code or the length",
-      "target": "http://localhost:33425",
-      "phase": "baseline"
-    },
-    {
-      "tool": "ffuf",
       "success": true,
       "data": {
         "success": true,
         "findings": [],
-        "results": {
-          "results": []
-        },
-        "command": "ffuf -u http://localhost:33425/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac"
+        "command": "gobuster dir -u http://localhost:19090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
       },
-      "command": "ffuf -u http://localhost:33425/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac",
-      "fallback_for": "gobuster",
-      "reason": "Fallback after gobuster failure",
-      "target": "http://localhost:33425",
+      "command": "gobuster dir -u http://localhost:19090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "target": "http://localhost:19090",
       "phase": "baseline"
     },
     {
@@ -601,28 +563,21 @@
       "success": false,
       "skipped": true,
       "reason": "Disabled by config (tools.<name>.enabled=false)",
-      "target": "http://localhost:33425",
+      "target": "http://localhost:19090",
       "phase": "baseline"
     },
     {
       "tool": "dnsenum",
       "success": false,
-      "data": {
-        "success": false,
-        "error": "localhost NS record query failed: NXDOMAIN",
-        "canceled": false,
-        "raw_output": "dnsenum VERSION:1.2.6\n\u001b[1;34m\n-----   localhost   -----\n\u001b[0m\u001b[1;31m\n\nHost's addresses:\n__________________\n\n\u001b[0mlocalhost.                               1200     IN    A         127.0.0.1\n\u001b[1;31m\n\nName Servers:\n______________\n\n\u001b[0m",
-        "command": "dnsenum localhost"
-      },
-      "command": "dnsenum localhost",
-      "error": "localhost NS record query failed: NXDOMAIN",
+      "skipped": true,
+      "reason": "Localhost/loopback target (DNS enumeration N/A)",
       "phase": "baseline"
     },
     {
       "tool": "sslscan",
       "success": false,
       "skipped": true,
-      "reason": "No TLS ports detected (443/8443)",
+      "reason": "No TLS candidate ports detected from discovery",
       "phase": "baseline"
     },
     {
@@ -652,28 +607,28 @@
       "data": {
         "success": true,
         "scanned": [
-          "http://localhost:33425",
           "http://localhost:19090",
+          "http://localhost:33425",
+          "http://localhost:42901",
           "http://localhost:3947",
-          "http://localhost:8080",
           "http://localhost:9840"
         ],
         "page_hits": [
-          {
-            "url": "http://localhost:33425",
-            "status": 401
-          },
           {
             "url": "http://localhost:19090",
             "status": 404
           },
           {
-            "url": "http://localhost:3947",
+            "url": "http://localhost:33425",
+            "status": 401
+          },
+          {
+            "url": "http://localhost:42901",
             "status": 404
           },
           {
-            "url": "http://localhost:8080",
-            "status": 200
+            "url": "http://localhost:3947",
+            "status": 404
           },
           {
             "url": "http://localhost:9840",
@@ -692,7 +647,7 @@
     }
   ],
   "mode": "normal",
-  "started_at": 1770365496.266209,
+  "started_at": 1770413018.0097852,
   "tuning": {
     "nuclei_rate_limit": 100,
     "nuclei_templates": null,
@@ -726,7 +681,7 @@
     "scoutsuite_enabled": false,
     "scoutsuite_provider": "aws",
     "prowler_enabled": false,
-    "compliance_profile": "compliance_bsi"
+    "compliance_profile": "compliance_pci"
   },
   "safety": {
     "aggressive_caps": {
@@ -735,16 +690,16 @@
       "applied": []
     }
   },
-  "compliance_profile": "compliance_bsi",
-  "compliance_framework": "BSI IT-Grundschutz",
-  "compliance_focus": "Baseline security controls with evidence of secure configuration and vulnerability management.",
+  "compliance_profile": "compliance_pci",
+  "compliance_framework": "PCI-DSS 4.0",
+  "compliance_focus": "Cardholder data environment controls with emphasis on strong cryptography and vulnerability management.",
   "web_targets": [
-    "http://localhost:33425",
     "http://localhost:19090",
-    "http://localhost:3947",
-    "http://localhost:8080",
-    "http://localhost:9840",
+    "http://localhost:33425",
     "http://localhost:42901",
+    "http://localhost:3947",
+    "http://localhost:9840",
+    "http://localhost:8080",
     "http://localhost:9090"
   ],
   "llm": {
@@ -754,9 +709,9 @@
         "provider": "openai",
         "model": "gpt-5.1",
         "usage": {
-          "completion_tokens": 233,
-          "prompt_tokens": 2259,
-          "total_tokens": 2492,
+          "completion_tokens": 343,
+          "prompt_tokens": 2245,
+          "total_tokens": 2588,
           "completion_tokens_details": {
             "accepted_prediction_tokens": 0,
             "audio_tokens": 0,
@@ -773,20 +728,20 @@
           }
         },
         "tool_calling": true,
-        "cost_usd": 0.00515375,
+        "cost_usd": 0.0062362500000000005,
         "call_type": "plan",
         "stage": "ai_audit_tool_call",
         "input_truncated": false,
-        "input_chars": 6284,
+        "input_chars": 6228,
         "max_input_chars": 12000
       },
       {
         "provider": "openai",
         "model": "gpt-5.1",
         "usage": {
-          "completion_tokens": 592,
-          "prompt_tokens": 1804,
-          "total_tokens": 2396,
+          "completion_tokens": 293,
+          "prompt_tokens": 1628,
+          "total_tokens": 1921,
           "completion_tokens_details": {
             "accepted_prediction_tokens": 0,
             "audio_tokens": 0,
@@ -802,10 +757,10 @@
             "image_tokens": null
           }
         },
-        "cost_usd": 0.008175000000000002,
+        "cost_usd": 0.004965000000000001,
         "call_type": "summary",
         "input_truncated": false,
-        "input_chars": 4891,
+        "input_chars": 4348,
         "max_input_chars": 12000
       }
     ]
@@ -826,9 +781,6 @@
     34403,
     42901,
     52550
-  ],
-  "summary_notes": [
-    "ffuf fallback (after gobuster failure) ran and found 0 paths across 1 target(s): http://localhost:33425 (0)."
   ],
   "findings": [
     {
@@ -924,127 +876,187 @@
     {
       "severity": "INFO",
       "title": "Tech stack detected",
-      "evidence": "Country, IP, X-Powered-By",
+      "evidence": "Country, IP, UncommonHeaders",
       "tool": "whatweb"
     },
     {
       "severity": "INFO",
-      "title": "Wappalyzer Technology Detection",
-      "evidence": "http://localhost:33425",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
       "severity": "INFO",
       "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
+      "evidence": "http://localhost:19090",
       "tool": "nuclei",
       "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "PCI-DSS 4.0 Req 2 (Secure Configurations)",
+          "confidence": "medium"
+        }
+      ],
       "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
-      ]
-    },
-    {
-      "severity": "INFO",
-      "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
-      "tool": "nuclei",
-      "type": "http",
-      "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
-      ]
-    },
-    {
-      "severity": "INFO",
-      "title": "HTTP Missing Security Headers",
-      "evidence": "http://localhost:33425",
-      "tool": "nuclei",
-      "type": "http",
-      "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
+        "Potential Gap: PCI-DSS 4.0 Req 2 (Secure Configurations) (mapping confidence: medium)"
       ]
     },
     {
@@ -1052,13 +1064,10 @@
       "title": "CAA Record",
       "evidence": "localhost",
       "tool": "nuclei",
-      "type": "dns",
-      "compliance_tags": [
-        "NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management"
-      ]
+      "type": "dns"
     }
   ],
-  "finished_at": 1770365772.691231,
+  "finished_at": 1770413289.6939921,
   "schema_validation": {
     "valid": true,
     "errors": []
@@ -1067,7 +1076,7 @@
   "report_kind": "ai_audit",
   "ai_audit": {
     "phase": "baseline+agentic",
-    "baseline_finished_at": 1770365766.2699594,
+    "baseline_finished_at": 1770413280.0264199,
     "planner": {
       "type": "tool_calling",
       "plans": [
@@ -1076,38 +1085,38 @@
             {
               "tool": "httpx",
               "arguments": {
-                "profile": "compliance_bsi",
-                "target": "http://localhost:33425",
+                "profile": "compliance_pci",
+                "target": "http://localhost:19090",
                 "rate_limit": 50,
                 "threads": 10
               },
-              "profile": "compliance_bsi",
-              "reasoning": "Validate HTTP service availability, status codes, and basic TLS/HTTP configuration on the primary target to collect baseline evidence for BSI IT-Grundschutz secure configuration controls."
-            },
-            {
-              "tool": "whatweb",
-              "arguments": {
-                "profile": "compliance_bsi",
-                "target": "http://localhost:33425",
-                "rate_limit": 50,
-                "threads": 10
-              },
-              "profile": "compliance_bsi",
-              "reasoning": "Refine technology fingerprinting of the Node.js Express application to document software components and potential outdated technologies as required for BSI vulnerability management evidence."
+              "profile": "compliance_pci",
+              "reasoning": "Reconfirm HTTP service characteristics and response behavior on the scoped PCI-relevant web endpoint to support PCI-DSS 4.0 requirement 11.3.1 for vulnerability identification, using a compliance-aligned profile."
             },
             {
               "tool": "nuclei",
               "arguments": {
-                "profile": "compliance_bsi",
-                "target": "http://localhost:33425",
+                "profile": "compliance_pci",
+                "target": "http://localhost:19090",
                 "rate_limit": 25,
                 "threads": 10
               },
-              "profile": "compliance_bsi",
-              "reasoning": "Run a focused vulnerability and misconfiguration scan against the web service to corroborate and extend prior findings on missing security headers and other baseline weaknesses relevant to BSI IT-Grundschutz."
+              "profile": "compliance_pci",
+              "reasoning": "Extend vulnerability assessment on the target application with PCI-focused templates (e.g., misconfigurations, auth, and exposure checks) to gather evidence for PCI-DSS 4.0 requirements 6.3.3 and 11.3.1, beyond the already observed missing security headers."
+            },
+            {
+              "tool": "gobuster",
+              "arguments": {
+                "profile": "compliance_pci",
+                "target": "http://localhost:19090",
+                "wordlist": "/usr/share/wordlists/dirb/common.txt",
+                "threads": 10
+              },
+              "profile": "compliance_pci",
+              "reasoning": "Enumerate hidden directories and files on the PCI-scope web service to detect potentially exposed admin panels, backups, or configuration files that could affect cardholder data security, aligning with PCI-DSS 4.0 requirements 2.2.6 and 11.3.1."
             }
           ],
-          "notes": "",
+          "notes": "Maintain the compliance_pci profile consistently as requested, focusing on http://localhost:19090 as the current scoped target and building on prior baseline scans.",
           "stop": false
         }
       ],
@@ -1117,37 +1126,69 @@
     "max_actions": 10,
     "actions": [],
     "notes": "Planner proposed only baseline-completed web actions; stopping agentic loop.",
-    "compliance_profile": "compliance_bsi",
-    "compliance_framework": "BSI IT-Grundschutz",
-    "compliance_focus": "Baseline security controls with evidence of secure configuration and vulnerability management."
+    "compliance_profile": "compliance_pci",
+    "compliance_framework": "PCI-DSS 4.0",
+    "compliance_focus": "Cardholder data environment controls with emphasis on strong cryptography and vulnerability management."
   },
   "summary": {
-    "summary": "The localhost assessment identified multiple open application and database ports but no explicit vulnerabilities or misconfigurations were detected by the automated tools. The primary risk is increased attack surface from numerous exposed services rather than specific known CVEs.",
+    "summary": "The scan of localhost identified multiple open application and database ports but no confirmed vulnerabilities or misconfigurations; all findings are informational and relate to exposed services only.",
     "findings": [
       {
-        "severity": "MEDIUM",
-        "title": "Multiple application services exposed on non-standard HTTP ports",
-        "evidence": "Nmap detected HTTP services on ports 19090, 33425, 3947, 42901, 8080, 9090, and 9840 (Golang net/http and Node.js Express frameworks, plus an HTTP proxy).",
-        "recommendation": "Restrict access to these ports using host-based firewalls or network ACLs, expose only necessary services to untrusted networks, and ensure each web service is hardened (authentication, TLS where applicable, up-to-date frameworks, and minimal enabled endpoints)."
-      },
-      {
-        "severity": "MEDIUM",
-        "title": "Database and cache services exposed on network-accessible ports",
-        "evidence": "Nmap identified PostgreSQL on 5432/tcp (version 9.6.0 or later) and Redis 6.2.11 on 6379/tcp as open.",
-        "recommendation": "Bind PostgreSQL and Redis to localhost or internal interfaces only, enforce strong authentication and access controls, and restrict access via firewall rules. Verify that no default or weak credentials are in use and that encryption in transit is enabled where supported."
-      },
-      {
         "severity": "LOW",
-        "title": "Additional non-standard services increasing attack surface",
-        "evidence": "Open ports with non-HTTP services: 3000/tcp (ppp), 4000/tcp (remoteanything), 5050/tcp (mmcc), 9100/tcp (jetdirect), 34403/tcp and 52550/tcp (unknown services).",
-        "recommendation": "Review the necessity of each exposed service, disable or uninstall unused daemons, and document business justification for required ports. Where services must remain exposed, ensure they are updated, authenticated, and restricted to trusted source networks."
-      },
-      {
-        "severity": "LOW",
-        "title": "Lack of TLS on detected web services",
-        "evidence": "SSL/TLS scans were skipped because no TLS ports (443/8443) were detected; all identified web targets use plain HTTP (e.g., http://localhost:33425, http://localhost:19090, etc.).",
-        "recommendation": "For any service accessible beyond the local host or development environment, enable HTTPS with modern TLS configurations and valid certificates, and redirect HTTP to HTTPS to protect credentials and sensitive data in transit."
+        "title": "Multiple application and infrastructure services exposed on localhost",
+        "evidence": "Open TCP ports include: 19090 (HTTP Golang net/http), 3000 (ppp), 33425/3947/42901/9840 (HTTP Node.js Express), 4000 (remoteanything), 5050 (mmcc), 8080 (http-proxy), 9090 (HTTP Golang net/http), 9100 (jetdirect), 5432 (PostgreSQL 9.6.0+), 6379 (Redis 6.2.11), 34403 and 52550 (unknown).",
+        "recommendation": "Restrict network exposure of non-essential services using host-based firewalls or security groups; ensure that PostgreSQL, Redis, and HTTP services are bound only to trusted interfaces, require strong authentication, and are patched regularly. For unknown or unused services (e.g., ports 34403 and 52550), either disable them or document and secure them according to PCI-DSS requirements for system hardening and service minimization."
       }
     ]
+  },
+  "evidence_pack": {
+    "dir": "evidence/ai-audit-pci-20260206-222338",
+    "manifest": "evidence/ai-audit-pci-20260206-222338/manifest.json",
+    "artifact_count": 13,
+    "artifact_status_counts": {
+      "success": 6,
+      "failed": 0,
+      "skipped": 7
+    },
+    "generated_at_utc": null,
+    "manifest_version": 2,
+    "runtime": {
+      "python_version": "3.14.2",
+      "platform": "Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+      "executable": "/home/devcore24/projects/supabash/venv/bin/python3",
+      "working_directory": "/home/devcore24/projects/supabash",
+      "schema_version": "1.0",
+      "report_kind": "ai_audit",
+      "target": "localhost",
+      "scan_host": "localhost",
+      "compliance_profile": "compliance_pci",
+      "compliance_framework": "PCI-DSS 4.0",
+      "duration_seconds": 271.684,
+      "llm_providers": [
+        "openai"
+      ],
+      "llm_models": [
+        "gpt-5.1"
+      ],
+      "llm_usage": {
+        "total_tokens": 4509,
+        "cost_usd": 0.011201
+      },
+      "tool_versions": {
+        "nmap": "7.94SVN",
+        "httpx": "v1.8.1",
+        "whatweb": "0.5.5",
+        "wpscan": "3.8.28",
+        "nuclei": "v2.9.8",
+        "gobuster": "3.6",
+        "katana": "v1.3.0",
+        "dnsenum": "1.2.6",
+        "sslscan": "2.1.2",
+        "sqlmap": "1.8.4#stable"
+      },
+      "nuclei": {
+        "engine_version": "v2.9.8"
+      }
+    }
   }
 }

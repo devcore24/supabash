@@ -20,7 +20,6 @@
     table {
       width: 100%;
       border-collapse: collapse;
-      table-layout: fixed;
       margin: 0.6em 0 1em 0;
       font-size: 0.95em;
     }
@@ -35,6 +34,27 @@
       background: #f5f5f5;
       text-align: left;
       font-weight: 600;
+    }
+    .tools-run-table {
+      table-layout: fixed;
+    }
+    .tools-run-table th:nth-child(1),
+    .tools-run-table td:nth-child(1) {
+      width: 14%;
+    }
+    .tools-run-table th:nth-child(2),
+    .tools-run-table td:nth-child(2) {
+      width: 12%;
+    }
+    .tools-run-table th:nth-child(3),
+    .tools-run-table td:nth-child(3) {
+      width: 74%;
+    }
+    .tools-run-table td:nth-child(2) {
+      white-space: nowrap;
+    }
+    .tools-run-table td:nth-child(3) code {
+      display: block;
     }
     code {
       white-space: pre-wrap;
@@ -53,20 +73,23 @@
 </head>
 <body>
 <h1 id="supabash-audit-readiness-report">Supabash Audit (Readiness) Report</h1>
-<p><strong>Target:</strong> localhost
-<strong>Assessment Type:</strong> Supabash Audit (Readiness)
-<strong>Run Type:</strong> ai-audit
-<strong>Compliance Profile:</strong> BSI IT-Grundschutz
-<strong>Compliance Focus:</strong> Baseline security controls with evidence of secure configuration and vulnerability management.</p>
+<p><strong>Target:</strong> localhost<br>
+<strong>Assessment Type:</strong> Supabash Audit (Readiness)<br>
+<strong>Run Type:</strong> ai-audit<br>
+<strong>Compliance Profile:</strong> SOC 2 Type II<br>
+<strong>Compliance Focus:</strong> Security and availability controls with evidence of exposure management and vulnerability assessment.  </p>
 <h2 id="run-info">Run Info</h2>
 <ul>
-<li>started_at: 2026-02-06 08:11:36 UTC</li>
-<li>finished_at: 2026-02-06 08:16:12 UTC</li>
+<li>started_at: 2026-02-06 20:55:33 UTC</li>
+<li>finished_at: 2026-02-06 20:59:56 UTC</li>
 </ul>
 <h2 id="table-of-contents">Table of Contents</h2>
 <ul>
 <li><a href="#summary">Summary</a></li>
 <li><a href="#methodology">Methodology</a></li>
+<li><a href="#scope--assumptions">Scope &amp; Assumptions</a></li>
+<li><a href="#compliance-coverage-matrix">Compliance Coverage Matrix</a></li>
+<li><a href="#evidence-pack">Evidence Pack</a></li>
 <li><a href="#agentic-expansion">Agentic Expansion</a></li>
 <li><a href="#findings-overview">Findings Overview</a></li>
 <li><a href="#findings-detailed">Findings (Detailed)</a></li>
@@ -74,79 +97,109 @@
 <li><a href="#commands-executed">Commands Executed</a></li>
 </ul>
 <h2 id="summary">Summary</h2>
-<p>The localhost assessment identified multiple open application and database ports but no explicit vulnerabilities or misconfigurations were detected by the automated tools. The primary risk is increased attack surface from numerous exposed services rather than specific known CVEs.</p>
+<p>Automated scanning of localhost identified multiple open application and database ports but no exploitable vulnerabilities or misconfigurations based on the tools and scope used. All recorded items are informational exposure of services rather than confirmed security issues.</p>
 <h3 id="notes">Notes</h3>
 <ul>
 <li>ffuf fallback (after gobuster failure) ran and found 0 paths across 1 target(s): http://localhost:33425 (0).</li>
 </ul>
 <h3 id="llm-usage">LLM Usage</h3>
 <ul>
-<li>total_tokens=4888</li>
-<li>cost_usd=0.013329</li>
-</ul>
-<h3 id="findings">Findings</h3>
-<ul>
-<li><strong>MEDIUM</strong> Multiple application services exposed on non-standard HTTP ports</li>
-<li>Evidence: Nmap detected HTTP services on ports 19090, 33425, 3947, 42901, 8080, 9090, and 9840 (Golang net/http and Node.js Express frameworks, plus an HTTP proxy).</li>
-<li>Recommendation: Restrict access to these ports using host-based firewalls or network ACLs, expose only necessary services to untrusted networks, and ensure each web service is hardened (authentication, TLS where applicable, up-to-date frameworks, and minimal enabled endpoints).</li>
-<li><strong>MEDIUM</strong> Database and cache services exposed on network-accessible ports</li>
-<li>Evidence: Nmap identified PostgreSQL on 5432/tcp (version 9.6.0 or later) and Redis 6.2.11 on 6379/tcp as open.</li>
-<li>Recommendation: Bind PostgreSQL and Redis to localhost or internal interfaces only, enforce strong authentication and access controls, and restrict access via firewall rules. Verify that no default or weak credentials are in use and that encryption in transit is enabled where supported.</li>
-<li><strong>LOW</strong> Additional non-standard services increasing attack surface</li>
-<li>Evidence: Open ports with non-HTTP services: 3000/tcp (ppp), 4000/tcp (remoteanything), 5050/tcp (mmcc), 9100/tcp (jetdirect), 34403/tcp and 52550/tcp (unknown services).</li>
-<li>Recommendation: Review the necessity of each exposed service, disable or uninstall unused daemons, and document business justification for required ports. Where services must remain exposed, ensure they are updated, authenticated, and restricted to trusted source networks.</li>
-<li><strong>LOW</strong> Lack of TLS on detected web services</li>
-<li>Evidence: SSL/TLS scans were skipped because no TLS ports (443/8443) were detected; all identified web targets use plain HTTP (e.g., http://localhost:33425, http://localhost:19090, etc.).</li>
-<li>Recommendation: For any service accessible beyond the local host or development environment, enable HTTPS with modern TLS configurations and valid certificates, and redirect HTTP to HTTPS to protect credentials and sensitive data in transit.</li>
+<li>total_tokens=4337</li>
+<li>cost_usd=0.007906</li>
+<li>provider=openai</li>
+<li>model=gpt-5.1</li>
 </ul>
 <h2 id="methodology">Methodology</h2>
 <ul>
 <li>Baseline: deterministic evidence collection with scope controls and safe defaults.</li>
 <li>Agentic expansion: tool-calling planner proposes additional evidence collection within allowed scope.</li>
-<li>Compliance profile: compliance_bsi</li>
-<li>Compliance focus: Baseline security controls with evidence of secure configuration and vulnerability management.</li>
+<li>Compliance profile: SOC 2 Type II</li>
+<li>Compliance focus: Security and availability controls with evidence of exposure management and vulnerability assessment.</li>
+</ul>
+<h2 id="scope-assumptions">Scope &amp; Assumptions</h2>
+<ul>
+<li>In scope: localhost, http://localhost:33425, http://localhost:19090, http://localhost:3947, http://localhost:9840, http://localhost:8080, http://localhost:42901, http://localhost:9090</li>
+<li>Authentication context: unauthenticated network/web checks unless explicitly configured otherwise.</li>
+<li>Control mapping note: mapped controls indicate potential relevance and require manual validation.</li>
+<li>Localhost limitation: this run cannot validate external exposure paths or network segmentation boundaries.</li>
+<li>Out of scope: independent attestation/certification decisions and control operation effectiveness testing.</li>
+</ul>
+<h2 id="compliance-coverage-matrix">Compliance Coverage Matrix</h2>
+<table>
+<thead>
+<tr>
+<th>Control Area</th>
+<th>Status</th>
+<th>Evidence Source</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Security Surface Inventory</td>
+<td>Covered</td>
+<td>nmap, httpx, whatweb</td>
+<td>based on successful tool runs</td>
+</tr>
+<tr>
+<td>Vulnerability &amp; Misconfiguration Checks</td>
+<td>Partial</td>
+<td>nuclei, ffuf</td>
+<td>failed: gobuster (Error: the server returns a status code that matches the provided opt...); skipped: sqlmap (No parameterized URL provided (include '?' in target URL))</td>
+</tr>
+<tr>
+<td>Encryption/Transport Control Review</td>
+<td>Partial</td>
+<td>nmap</td>
+<td>skipped: sslscan (No TLS candidate ports detected from discovery)</td>
+</tr>
+<tr>
+<td>Access Control Exposure Review</td>
+<td>Partial</td>
+<td>supabase_audit</td>
+<td>based on successful tool runs</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Status legend: <code>Covered</code> = all mapped checks succeeded, <code>Partial</code> = some succeeded, <code>Not Assessed</code> = no successful mapped checks.</li>
+</ul>
+<h2 id="evidence-pack">Evidence Pack</h2>
+<ul>
+<li>directory: <code>evidence/ai-audit-soc2-20260206-215533</code></li>
+<li>manifest: <code>evidence/ai-audit-soc2-20260206-215533/manifest.json</code></li>
+<li>artifact_count: 14</li>
+</ul>
+<h3 id="runtime-metadata">Runtime Metadata</h3>
+<ul>
+<li>python_version: 3.14.2</li>
+<li>platform: Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39</li>
+<li>llm_providers: openai</li>
+<li>llm_models: gpt-5.1</li>
+</ul>
+<h3 id="tool-versions">Tool Versions</h3>
+<ul>
+<li><code>dnsenum</code>: 1.2.6</li>
+<li><code>ffuf</code>: 2.1.0-dev</li>
+<li><code>gobuster</code>: 3.6</li>
+<li><code>httpx</code>: v1.8.1</li>
+<li><code>katana</code>: v1.3.0</li>
+<li><code>nmap</code>: 7.94SVN</li>
+<li><code>nuclei</code>: v2.9.8</li>
+<li><code>sqlmap</code>: 1.8.4#stable</li>
+<li><code>sslscan</code>: 2.1.2</li>
+<li><code>whatweb</code>: 0.5.5</li>
+<li><code>wpscan</code>: 3.8.28</li>
 </ul>
 <h2 id="agentic-expansion">Agentic Expansion</h2>
 <ul>
 <li>phase: baseline+agentic</li>
-<li>baseline_finished_at: 2026-02-06 08:16:06 UTC</li>
+<li>baseline_finished_at: 2026-02-06 20:59:49 UTC</li>
 <li>max_actions: 10</li>
 <li>notes: Planner proposed only baseline-completed web actions; stopping agentic loop.</li>
 <li>planner: tool_calling</li>
 </ul>
 <h2 id="findings-overview">Findings Overview</h2>
-<h3 id="summary-llm">Summary (LLM)</h3>
-<table>
-<thead>
-<tr>
-<th>Severity</th>
-<th style="text-align: right;">Count</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>CRITICAL</td>
-<td style="text-align: right;">0</td>
-</tr>
-<tr>
-<td>HIGH</td>
-<td style="text-align: right;">0</td>
-</tr>
-<tr>
-<td>MEDIUM</td>
-<td style="text-align: right;">2</td>
-</tr>
-<tr>
-<td>LOW</td>
-<td style="text-align: right;">2</td>
-</tr>
-<tr>
-<td>INFO</td>
-<td style="text-align: right;">0</td>
-</tr>
-</tbody>
-</table>
-<h3 id="detailed-tools">Detailed (Tools)</h3>
 <table>
 <thead>
 <tr>
@@ -214,16 +267,14 @@
 <li>Evidence: Country, IP, X-Powered-By</li>
 <li><strong>INFO</strong> Wappalyzer Technology Detection (nuclei)</li>
 <li>Evidence: http://localhost:33425</li>
-<li>Compliance Impact: NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management</li>
 <li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
 <li>Evidence: http://localhost:33425</li>
-<li>Compliance Impact: NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
 <li><strong>INFO</strong> CAA Record (nuclei)</li>
 <li>Evidence: localhost</li>
-<li>Compliance Impact: NON-COMPLIANT: BSI IT-Grundschutz: Vulnerability Management</li>
 </ul>
 <h2 id="tools-run">Tools Run</h2>
-<table>
+<table class="tools-run-table">
 <thead>
 <tr>
 <th>Tool</th>
@@ -240,7 +291,7 @@
 <tr>
 <td>httpx</td>
 <td>success</td>
-<td><code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-k2hfr855/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></td>
+<td><code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-64h7f2x9/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></td>
 </tr>
 <tr>
 <td>whatweb</td>
@@ -250,11 +301,6 @@
 <tr>
 <td>wpscan</td>
 <td>skipped</td>
-<td></td>
-</tr>
-<tr>
-<td>- <strong>wpscan</strong>: ⏭️ skipped — WordPress not detected by whatweb</td>
-<td></td>
 <td></td>
 </tr>
 <tr>
@@ -268,11 +314,6 @@
 <td><code>gobuster dir -u http://localhost:33425 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></td>
 </tr>
 <tr>
-<td>- <strong>gobuster</strong>: ❌ failed — Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:33425/1bf2854c-59b8-4cfe-9149-5249e42f7944 =&gt; 401 (Length: 12). To continue please exclude the status code or the length</td>
-<td></td>
-<td></td>
-</tr>
-<tr>
 <td>ffuf</td>
 <td>success</td>
 <td><code>ffuf -u http://localhost:33425/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac</code></td>
@@ -283,18 +324,8 @@
 <td></td>
 </tr>
 <tr>
-<td>- <strong>katana</strong>: ⏭️ skipped — Disabled by config (tools.<name>.enabled=false)</td>
-<td></td>
-<td></td>
-</tr>
-<tr>
 <td>dnsenum</td>
-<td>failed</td>
-<td><code>dnsenum localhost</code></td>
-</tr>
-<tr>
-<td>- <strong>dnsenum</strong>: ❌ failed — localhost NS record query failed: NXDOMAIN</td>
-<td></td>
+<td>skipped</td>
 <td></td>
 </tr>
 <tr>
@@ -303,18 +334,8 @@
 <td></td>
 </tr>
 <tr>
-<td>- <strong>sslscan</strong>: ⏭️ skipped — No TLS ports detected (443/8443)</td>
-<td></td>
-<td></td>
-</tr>
-<tr>
 <td>enum4linux-ng</td>
 <td>skipped</td>
-<td></td>
-</tr>
-<tr>
-<td>- <strong>enum4linux-ng</strong>: ⏭️ skipped — No SMB ports detected (139/445)</td>
-<td></td>
 <td></td>
 </tr>
 <tr>
@@ -323,18 +344,8 @@
 <td></td>
 </tr>
 <tr>
-<td>- <strong>sqlmap</strong>: ⏭️ skipped — No parameterized URL provided (include '?' in target URL)</td>
-<td></td>
-<td></td>
-</tr>
-<tr>
 <td>searchsploit</td>
 <td>skipped</td>
-<td></td>
-</tr>
-<tr>
-<td>- <strong>searchsploit</strong>: ⏭️ skipped — Disabled by config (tools.<name>.enabled=false)</td>
-<td></td>
 <td></td>
 </tr>
 <tr>
@@ -344,15 +355,25 @@
 </tr>
 </tbody>
 </table>
+<h3 id="tool-notes">Tool Notes</h3>
+<ul>
+<li><strong>wpscan</strong>: SKIPPED - WordPress not detected by whatweb</li>
+<li><strong>gobuster</strong>: FAILED - Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:33425/1a0c17c9-f966-4f8a-8c3d-300f9ebdbb86 =&gt; 401 (Length: 12). To continue please exclude the status code or the length</li>
+<li><strong>katana</strong>: SKIPPED - Disabled by config (tools.<name>.enabled=false)</li>
+<li><strong>dnsenum</strong>: SKIPPED - Localhost/loopback target (DNS enumeration N/A)</li>
+<li><strong>sslscan</strong>: SKIPPED - No TLS candidate ports detected from discovery</li>
+<li><strong>enum4linux-ng</strong>: SKIPPED - No SMB ports detected (139/445)</li>
+<li><strong>sqlmap</strong>: SKIPPED - No parameterized URL provided (include '?' in target URL)</li>
+<li><strong>searchsploit</strong>: SKIPPED - Disabled by config (tools.<name>.enabled=false)</li>
+</ul>
 <h2 id="commands-executed">Commands Executed</h2>
 <ul>
 <li><strong>nmap</strong>: <code>nmap localhost -oX - -sV --script ssl-enum-ciphers -p-</code></li>
-<li><strong>httpx</strong>: <code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-k2hfr855/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></li>
+<li><strong>httpx</strong>: <code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-64h7f2x9/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></li>
 <li><strong>whatweb</strong>: <code>whatweb http://localhost:33425 --log-json -</code></li>
 <li><strong>nuclei</strong>: <code>nuclei -u http://localhost:33425 -jsonl -rate-limit 100</code></li>
 <li><strong>gobuster</strong>: <code>gobuster dir -u http://localhost:33425 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></li>
 <li><strong>ffuf</strong>: <code>ffuf -u http://localhost:33425/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac</code></li>
-<li><strong>dnsenum</strong>: <code>dnsenum localhost</code></li>
 <li><strong>supabase_audit</strong>: <code>supabase_audit</code></li>
 </ul>
 </body>

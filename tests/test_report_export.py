@@ -3,11 +3,22 @@ import types
 import unittest
 from pathlib import Path
 
-from supabash.report_export import export_from_markdown_file
+from supabash.report_export import export_from_markdown_file, markdown_to_html
 from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class TestReportExport(unittest.TestCase):
+    def test_markdown_to_html_marks_tools_run_table(self):
+        md = (
+            "## Tools Run\n\n"
+            "| Tool | Status | Command |\n"
+            "|---|---|---|\n"
+            "| nmap | success | `nmap localhost` |\n\n"
+            "## Commands Executed\n"
+        )
+        html = markdown_to_html(md)
+        self.assertIn('<table class="tools-run-table">', html)
+
     def test_export_is_noop_when_disabled(self):
         p = artifact_path("report_export_noop.md")
         p.write_text("# Hi", encoding="utf-8")
@@ -27,7 +38,7 @@ class TestReportExport(unittest.TestCase):
                 self.string = string
                 self.base_url = base_url
 
-            def write_pdf(self, target: str):
+            def write_pdf(self, target: str, stylesheets=None):
                 Path(target).write_bytes(b"%PDF-FAKE")
 
         fake_weasyprint = types.SimpleNamespace(HTML=FakeHTML)

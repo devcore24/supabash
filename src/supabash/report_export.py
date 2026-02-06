@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
+import re
 
 
 @dataclass
@@ -41,6 +42,21 @@ def _import_weasyprint():
     return importlib.import_module("weasyprint")
 
 
+def _mark_tools_run_table(html_fragment: str) -> str:
+    """
+    Add a specific CSS class to the table immediately after the
+    "Tools Run" heading so PDF/HTML exports can enforce better
+    column widths and command wrapping.
+    """
+    if not html_fragment:
+        return html_fragment
+    pattern = re.compile(
+        r'(<h2[^>]*id="tools-run"[^>]*>.*?</h2>\s*)<table>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return pattern.sub(r'\1<table class="tools-run-table">', html_fragment, count=1)
+
+
 def markdown_to_html(markdown_text: str) -> str:
     md = _import_markdown()
     fn = getattr(md, "markdown", None)
@@ -50,6 +66,7 @@ def markdown_to_html(markdown_text: str) -> str:
     # - toc: generates stable id="" attributes for headings
     # - attr_list: allows explicit heading IDs like "## Summary {#summary}" if we ever want them
     body_html = fn(markdown_text, extensions=["tables", "fenced_code", "toc", "attr_list"], output_format="html5")
+    body_html = _mark_tools_run_table(body_html)
     # Render with explicit table/code styling so HTML/PDF exports remain readable
     # for long command rows in "Tools Run".
     return f"""<!doctype html>
@@ -74,7 +91,6 @@ def markdown_to_html(markdown_text: str) -> str:
     table {{
       width: 100%;
       border-collapse: collapse;
-      table-layout: fixed;
       margin: 0.6em 0 1em 0;
       font-size: 0.95em;
     }}
@@ -89,6 +105,27 @@ def markdown_to_html(markdown_text: str) -> str:
       background: #f5f5f5;
       text-align: left;
       font-weight: 600;
+    }}
+    .tools-run-table {{
+      table-layout: fixed;
+    }}
+    .tools-run-table th:nth-child(1),
+    .tools-run-table td:nth-child(1) {{
+      width: 14%;
+    }}
+    .tools-run-table th:nth-child(2),
+    .tools-run-table td:nth-child(2) {{
+      width: 12%;
+    }}
+    .tools-run-table th:nth-child(3),
+    .tools-run-table td:nth-child(3) {{
+      width: 74%;
+    }}
+    .tools-run-table td:nth-child(2) {{
+      white-space: nowrap;
+    }}
+    .tools-run-table td:nth-child(3) code {{
+      display: block;
     }}
     code {{
       white-space: pre-wrap;
