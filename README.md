@@ -586,6 +586,7 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 ---
 
 ## 📊 Example Report Output
+Example: [reports](example_reports/)  
 
 When Supabash detects an issue, it provides evidence-based findings and remediation guidance:
 
