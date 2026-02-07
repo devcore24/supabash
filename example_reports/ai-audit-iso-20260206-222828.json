@@ -1,0 +1,1261 @@
+{
+  "schema_version": "1.0",
+  "target": "localhost",
+  "scan_host": "localhost",
+  "results": [
+    {
+      "tool": "nmap",
+      "success": true,
+      "data": {
+        "success": true,
+        "scan_data": {
+          "hosts": [
+            {
+              "ip": "127.0.0.1",
+              "hostnames": [
+                "localhost",
+                "localhost"
+              ],
+              "ports": [
+                {
+                  "port": 3000,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "ppp",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 3947,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Node.js Express framework",
+                  "version": ""
+                },
+                {
+                  "port": 4000,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "remoteanything",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 5050,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "mmcc",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 5432,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "postgresql",
+                  "product": "PostgreSQL DB",
+                  "version": "9.6.0 or later"
+                },
+                {
+                  "port": 6379,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "redis",
+                  "product": "Redis key-value store",
+                  "version": "6.2.11"
+                },
+                {
+                  "port": 8080,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http-proxy",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 9090,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Golang net/http server",
+                  "version": ""
+                },
+                {
+                  "port": 9100,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "jetdirect",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 9840,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Node.js Express framework",
+                  "version": ""
+                },
+                {
+                  "port": 19090,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Golang net/http server",
+                  "version": ""
+                },
+                {
+                  "port": 33425,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Node.js Express framework",
+                  "version": ""
+                },
+                {
+                  "port": 34403,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "unknown",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 42901,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Node.js Express framework",
+                  "version": ""
+                },
+                {
+                  "port": 52550,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "unknown",
+                  "product": "",
+                  "version": ""
+                }
+              ],
+              "os": []
+            }
+          ]
+        },
+        "command": "nmap localhost -oX - -sV --script ssl-enum-ciphers -p-",
+        "warnings": []
+      },
+      "command": "nmap localhost -oX - -sV --script ssl-enum-ciphers -p-",
+      "phase": "baseline"
+    },
+    {
+      "tool": "httpx",
+      "success": true,
+      "data": {
+        "success": true,
+        "probed": [
+          "http://localhost:19090",
+          "http://localhost:33425",
+          "http://localhost:3947",
+          "http://localhost:42901",
+          "http://localhost:8080",
+          "http://localhost:9090",
+          "http://localhost:9840"
+        ],
+        "alive": [
+          "http://localhost:33425",
+          "http://localhost:19090",
+          "http://localhost:3947",
+          "http://localhost:9840",
+          "http://localhost:8080",
+          "http://localhost:42901",
+          "http://localhost:9090"
+        ],
+        "results": [
+          {
+            "timestamp": "2026-02-06T22:31:08.729147201+01:00",
+            "port": "33425",
+            "url": "http://localhost:33425",
+            "input": "http://localhost:33425",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "1.021954ms",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 1,
+            "lines": 1,
+            "status_code": 401,
+            "content_length": 12,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:31:08.729473197+01:00",
+            "port": "19090",
+            "url": "http://localhost:19090",
+            "input": "http://localhost:19090",
+            "scheme": "http",
+            "content_type": "text/plain",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "667.739\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "words": 4,
+            "lines": 1,
+            "status_code": 404,
+            "content_length": 19,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:31:08.729813248+01:00",
+            "port": "3947",
+            "url": "http://localhost:3947",
+            "input": "http://localhost:3947",
+            "title": "Error",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "768.089\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 6,
+            "lines": 10,
+            "status_code": 404,
+            "content_length": 139,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:31:08.729842256+01:00",
+            "port": "9840",
+            "url": "http://localhost:9840",
+            "input": "http://localhost:9840",
+            "title": "Error",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "834.34\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 6,
+            "lines": 10,
+            "status_code": 404,
+            "content_length": 139,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:31:08.729945065+01:00",
+            "port": "8080",
+            "url": "http://localhost:8080",
+            "input": "http://localhost:8080",
+            "scheme": "http",
+            "content_type": "application/xml",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "898.335\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "words": 2,
+            "lines": 1,
+            "status_code": 200,
+            "content_length": 185,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "login",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:31:08.729966544+01:00",
+            "port": "42901",
+            "url": "http://localhost:42901",
+            "input": "http://localhost:42901",
+            "title": "Error",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "1.398951ms",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 6,
+            "lines": 10,
+            "status_code": 404,
+            "content_length": 139,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-06T22:31:08.81974992+01:00",
+            "port": "9090",
+            "url": "http://localhost:9090",
+            "input": "http://localhost:9090",
+            "title": "Prometheus Time Series Collection and Processing Server",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "final_url": "http://localhost:9090/classic/graph",
+            "time": "2.205787ms",
+            "chain_status_codes": [
+              302,
+              200
+            ],
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Bootstrap:4",
+              "D3",
+              "Glyphicons",
+              "Moment.js",
+              "Mustache",
+              "Popper",
+              "Rickshaw",
+              "jQuery"
+            ],
+            "words": 1158,
+            "lines": 100,
+            "status_code": 200,
+            "content_length": 5450,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "nonerror",
+              "pHash": 0
+            }
+          }
+        ],
+        "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-scf_i72v/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects"
+      },
+      "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-scf_i72v/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "success": true,
+      "data": {
+        "success": true,
+        "scan_data": [
+          {
+            "target": "http://localhost:33425",
+            "plugins": {
+              "Country": {
+                "string": [
+                  "RESERVED"
+                ],
+                "module": [
+                  "ZZ"
+                ]
+              },
+              "IP": {
+                "string": [
+                  "127.0.0.1"
+                ]
+              },
+              "X-Powered-By": {
+                "string": [
+                  "Express"
+                ]
+              }
+            },
+            "banner": null,
+            "status": 401
+          }
+        ],
+        "command": "whatweb http://localhost:33425 --log-json -"
+      },
+      "command": "whatweb http://localhost:33425 --log-json -",
+      "target": "http://localhost:33425",
+      "phase": "baseline"
+    },
+    {
+      "tool": "wpscan",
+      "success": false,
+      "skipped": true,
+      "reason": "WordPress not detected by whatweb",
+      "target": "http://localhost:33425",
+      "phase": "baseline"
+    },
+    {
+      "tool": "nuclei",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [
+          {
+            "id": "tech-detect",
+            "name": "Wappalyzer Technology Detection",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": ""
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:33425",
+            "matched_at": "http://localhost:33425",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "caa-fingerprint",
+            "name": "CAA Record",
+            "severity": "info",
+            "type": "dns",
+            "host": "localhost.",
+            "matched_at": "localhost",
+            "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
+          }
+        ],
+        "command": "nuclei -u http://localhost:33425 -jsonl -rate-limit 100"
+      },
+      "command": "nuclei -u http://localhost:33425 -jsonl -rate-limit 100",
+      "target": "http://localhost:33425",
+      "phase": "baseline"
+    },
+    {
+      "tool": "gobuster",
+      "success": false,
+      "data": {
+        "success": false,
+        "error": "Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:33425/29148848-c6cb-4c6e-bf5a-39dad65755b5 => 401 (Length: 12). To continue please exclude the status code or the length",
+        "canceled": false,
+        "raw_output": "",
+        "command": "gobuster dir -u http://localhost:33425 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
+      },
+      "command": "gobuster dir -u http://localhost:33425 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "error": "Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:33425/29148848-c6cb-4c6e-bf5a-39dad65755b5 => 401 (Length: 12). To continue please exclude the status code or the length",
+      "target": "http://localhost:33425",
+      "phase": "baseline"
+    },
+    {
+      "tool": "ffuf",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [],
+        "results": {
+          "results": []
+        },
+        "command": "ffuf -u http://localhost:33425/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac"
+      },
+      "command": "ffuf -u http://localhost:33425/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac",
+      "fallback_for": "gobuster",
+      "reason": "Fallback after gobuster failure",
+      "target": "http://localhost:33425",
+      "phase": "baseline"
+    },
+    {
+      "tool": "katana",
+      "success": false,
+      "skipped": true,
+      "reason": "Disabled by config (tools.<name>.enabled=false)",
+      "target": "http://localhost:33425",
+      "phase": "baseline"
+    },
+    {
+      "tool": "dnsenum",
+      "success": false,
+      "skipped": true,
+      "reason": "Localhost/loopback target (DNS enumeration N/A)",
+      "phase": "baseline"
+    },
+    {
+      "tool": "sslscan",
+      "success": false,
+      "skipped": true,
+      "reason": "No TLS candidate ports detected from discovery",
+      "phase": "baseline"
+    },
+    {
+      "tool": "enum4linux-ng",
+      "success": false,
+      "skipped": true,
+      "reason": "No SMB ports detected (139/445)",
+      "phase": "baseline"
+    },
+    {
+      "tool": "sqlmap",
+      "success": false,
+      "skipped": true,
+      "reason": "No parameterized URL provided (include '?' in target URL)",
+      "phase": "baseline"
+    },
+    {
+      "tool": "searchsploit",
+      "success": false,
+      "skipped": true,
+      "reason": "Disabled by config (tools.<name>.enabled=false)",
+      "phase": "baseline"
+    },
+    {
+      "tool": "supabase_audit",
+      "success": true,
+      "data": {
+        "success": true,
+        "scanned": [
+          "http://localhost:33425",
+          "http://localhost:19090",
+          "http://localhost:3947",
+          "http://localhost:9840",
+          "http://localhost:8080"
+        ],
+        "page_hits": [
+          {
+            "url": "http://localhost:33425",
+            "status": 401
+          },
+          {
+            "url": "http://localhost:19090",
+            "status": 404
+          },
+          {
+            "url": "http://localhost:3947",
+            "status": 404
+          },
+          {
+            "url": "http://localhost:9840",
+            "status": 404
+          },
+          {
+            "url": "http://localhost:8080",
+            "status": 200
+          }
+        ],
+        "supabase_urls": [],
+        "exposed_urls": [],
+        "keys": [],
+        "rpc_candidates": [],
+        "exposures": [],
+        "command": "supabase_audit"
+      },
+      "command": "supabase_audit",
+      "phase": "baseline"
+    }
+  ],
+  "mode": "normal",
+  "started_at": 1770413308.672913,
+  "tuning": {
+    "nuclei_rate_limit": 100,
+    "nuclei_templates": null,
+    "gobuster_threads": 10,
+    "gobuster_wordlist": null,
+    "nikto_enabled": false,
+    "hydra_enabled": false,
+    "hydra_services": "ssh,ftp",
+    "hydra_threads": 4,
+    "theharvester_enabled": false,
+    "theharvester_sources": null,
+    "theharvester_limit": null,
+    "theharvester_start": null,
+    "netdiscover_enabled": false,
+    "netdiscover_range": null,
+    "netdiscover_interface": null,
+    "netdiscover_passive": false,
+    "netdiscover_fast": true,
+    "aircrack_enabled": false,
+    "aircrack_interface": null,
+    "aircrack_channel": null,
+    "aircrack_args": null,
+    "aircrack_airmon": false,
+    "medusa_enabled": false,
+    "medusa_module": null,
+    "medusa_port": null,
+    "medusa_threads": 4,
+    "crackmapexec_enabled": false,
+    "cme_protocol": "smb",
+    "cme_module": null,
+    "scoutsuite_enabled": false,
+    "scoutsuite_provider": "aws",
+    "prowler_enabled": false,
+    "compliance_profile": "compliance_iso"
+  },
+  "safety": {
+    "aggressive_caps": {
+      "enabled": false,
+      "caps": {},
+      "applied": []
+    }
+  },
+  "compliance_profile": "compliance_iso",
+  "compliance_framework": "ISO/IEC 27001",
+  "compliance_focus": "Information security controls with structured evidence of vulnerability management and secure configuration.",
+  "web_targets": [
+    "http://localhost:33425",
+    "http://localhost:19090",
+    "http://localhost:3947",
+    "http://localhost:9840",
+    "http://localhost:8080",
+    "http://localhost:42901",
+    "http://localhost:9090"
+  ],
+  "llm": {
+    "enabled": true,
+    "calls": [
+      {
+        "provider": "openai",
+        "model": "gpt-5.1",
+        "usage": {
+          "completion_tokens": 307,
+          "prompt_tokens": 2250,
+          "total_tokens": 2557,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0,
+            "text_tokens": null,
+            "image_tokens": null
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0,
+            "text_tokens": null,
+            "image_tokens": null
+          }
+        },
+        "tool_calling": true,
+        "cost_usd": 0.005882500000000001,
+        "call_type": "plan",
+        "stage": "ai_audit_tool_call",
+        "input_truncated": false,
+        "input_chars": 6282,
+        "max_input_chars": 12000
+      },
+      {
+        "provider": "openai",
+        "model": "gpt-5.1",
+        "usage": {
+          "completion_tokens": 253,
+          "prompt_tokens": 1795,
+          "total_tokens": 2048,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0,
+            "text_tokens": null,
+            "image_tokens": null
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0,
+            "text_tokens": null,
+            "image_tokens": null
+          }
+        },
+        "cost_usd": 0.00477375,
+        "call_type": "summary",
+        "input_truncated": false,
+        "input_chars": 4874,
+        "max_input_chars": 12000
+      }
+    ]
+  },
+  "open_ports": [
+    3000,
+    3947,
+    4000,
+    5050,
+    5432,
+    6379,
+    8080,
+    9090,
+    9100,
+    9840,
+    19090,
+    33425,
+    34403,
+    42901,
+    52550
+  ],
+  "summary_notes": [
+    "ffuf fallback (after gobuster failure) ran and found 0 paths across 1 target(s): http://localhost:33425 (0)."
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Open port 3000/tcp",
+      "evidence": "ppp",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 3947/tcp",
+      "evidence": "http Node.js Express framework",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 4000/tcp",
+      "evidence": "remoteanything",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 5050/tcp",
+      "evidence": "mmcc",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 5432/tcp",
+      "evidence": "postgresql PostgreSQL DB 9.6.0 or later",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 6379/tcp",
+      "evidence": "redis Redis key-value store 6.2.11",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 8080/tcp",
+      "evidence": "http-proxy",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 9090/tcp",
+      "evidence": "http Golang net/http server",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 9100/tcp",
+      "evidence": "jetdirect",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 9840/tcp",
+      "evidence": "http Node.js Express framework",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 19090/tcp",
+      "evidence": "http Golang net/http server",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 33425/tcp",
+      "evidence": "http Node.js Express framework",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 34403/tcp",
+      "evidence": "unknown",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 42901/tcp",
+      "evidence": "http Node.js Express framework",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 52550/tcp",
+      "evidence": "unknown",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Tech stack detected",
+      "evidence": "Country, IP, X-Powered-By",
+      "tool": "whatweb"
+    },
+    {
+      "severity": "INFO",
+      "title": "Wappalyzer Technology Detection",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:33425",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "ISO/IEC 27001 A.8.9 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: ISO/IEC 27001 A.8.9 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "CAA Record",
+      "evidence": "localhost",
+      "tool": "nuclei",
+      "type": "dns"
+    }
+  ],
+  "finished_at": 1770413579.0294936,
+  "schema_validation": {
+    "valid": true,
+    "errors": []
+  },
+  "saved_to": null,
+  "report_kind": "ai_audit",
+  "ai_audit": {
+    "phase": "baseline+agentic",
+    "baseline_finished_at": 1770413571.8643482,
+    "planner": {
+      "type": "tool_calling",
+      "plans": [
+        {
+          "actions": [
+            {
+              "tool": "httpx",
+              "arguments": {
+                "profile": "compliance_iso",
+                "target": "http://localhost:33425",
+                "rate_limit": 50,
+                "threads": 10
+              },
+              "profile": "compliance_iso",
+              "reasoning": "Validate HTTP service availability, status codes, and basic TLS/HTTP properties on the in-scope web target to support ISO 27001 evidence of asset inventory and service exposure (A.5, A.8)."
+            },
+            {
+              "tool": "whatweb",
+              "arguments": {
+                "profile": "compliance_iso",
+                "target": "http://localhost:33425",
+                "rate_limit": 50,
+                "threads": 10
+              },
+              "profile": "compliance_iso",
+              "reasoning": "Refine technology fingerprinting of the specific target to document software stack and potential components requiring hardening, aligning with ISO 27001 secure configuration and vulnerability management controls (A.8.9, A.12.6)."
+            },
+            {
+              "tool": "nuclei",
+              "arguments": {
+                "profile": "compliance_iso",
+                "target": "http://localhost:33425",
+                "rate_limit": 25,
+                "threads": 10
+              },
+              "profile": "compliance_iso",
+              "reasoning": "Run targeted template-based checks against the web service to gather structured evidence of missing security headers and common misconfigurations, directly supporting ISO 27001 vulnerability management and technical hardening requirements (A.8.8, A.12.6)."
+            }
+          ],
+          "notes": "Continue ISO/IEC 27001-focused web assessment on the selected Node.js Express service, emphasizing non-destructive discovery and configuration weaknesses rather than exploitation.",
+          "stop": false
+        }
+      ],
+      "error": null,
+      "warning": null
+    },
+    "max_actions": 10,
+    "actions": [],
+    "notes": "Planner proposed only baseline-completed web actions; stopping agentic loop.",
+    "compliance_profile": "compliance_iso",
+    "compliance_framework": "ISO/IEC 27001",
+    "compliance_focus": "Information security controls with structured evidence of vulnerability management and secure configuration."
+  },
+  "summary": {
+    "summary": "The assessment of localhost identified multiple open application and database ports but no confirmed exploitable vulnerabilities or misconfigurations based on the automated tooling executed.",
+    "findings": [
+      {
+        "severity": "LOW",
+        "title": "Multiple application and service ports exposed on localhost",
+        "evidence": "Nmap detected open ports including 3000 (ppp), 4000 (remoteanything), 5050 (mmcc), 5432 (PostgreSQL 9.6.0+), 6379 (Redis 6.2.11), 8080 (http-proxy), 9090/19090 (Golang net/http), 33425/3947/42901/9840 (Node.js Express), 9100 (jetdirect), and others (34403, 52550).",
+        "recommendation": "Review which services must be reachable and restrict unnecessary ports using host-based firewall rules; ensure all exposed services are authenticated, patched, and bound to appropriate interfaces (e.g., localhost-only for development) in line with ISO/IEC 27001 access control and network security controls."
+      }
+    ]
+  },
+  "evidence_pack": {
+    "dir": "evidence/ai-audit-iso-20260206-222828",
+    "manifest": "evidence/ai-audit-iso-20260206-222828/manifest.json",
+    "artifact_count": 14,
+    "artifact_status_counts": {
+      "success": 6,
+      "failed": 1,
+      "skipped": 7
+    },
+    "generated_at_utc": null,
+    "manifest_version": 2,
+    "runtime": {
+      "python_version": "3.14.2",
+      "platform": "Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+      "executable": "/home/devcore24/projects/supabash/venv/bin/python3",
+      "working_directory": "/home/devcore24/projects/supabash",
+      "schema_version": "1.0",
+      "report_kind": "ai_audit",
+      "target": "localhost",
+      "scan_host": "localhost",
+      "compliance_profile": "compliance_iso",
+      "compliance_framework": "ISO/IEC 27001",
+      "duration_seconds": 270.357,
+      "llm_providers": [
+        "openai"
+      ],
+      "llm_models": [
+        "gpt-5.1"
+      ],
+      "llm_usage": {
+        "total_tokens": 4605,
+        "cost_usd": 0.010656
+      },
+      "tool_versions": {
+        "nmap": "7.94SVN",
+        "httpx": "v1.8.1",
+        "whatweb": "0.5.5",
+        "wpscan": "3.8.28",
+        "nuclei": "v2.9.8",
+        "gobuster": "3.6",
+        "ffuf": "2.1.0-dev",
+        "katana": "v1.3.0",
+        "dnsenum": "1.2.6",
+        "sslscan": "2.1.2",
+        "sqlmap": "1.8.4#stable"
+      },
+      "nuclei": {
+        "engine_version": "v2.9.8"
+      }
+    }
+  }
+}

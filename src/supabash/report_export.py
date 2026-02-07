@@ -98,13 +98,16 @@ def markdown_to_html(markdown_text: str) -> str:
       border: 1px solid #cfcfcf;
       padding: 6px 8px;
       vertical-align: top;
-      overflow-wrap: anywhere;
-      word-break: break-word;
+      overflow-wrap: break-word;
+      word-break: normal;
     }}
     th {{
       background: #f5f5f5;
       text-align: left;
       font-weight: 600;
+      white-space: nowrap;
+      overflow-wrap: normal;
+      word-break: normal;
     }}
     .tools-run-table {{
       table-layout: fixed;
