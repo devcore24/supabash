@@ -258,8 +258,17 @@ class TestReport(unittest.TestCase):
             "findings": [],
         }
         md = generate_markdown(report)
-        self.assertIn("| Vulnerability Discovery & Exposure Checks | Partial | none |", md)
+        self.assertIn("| Vulnerability Discovery & Exposure Checks | Not Assessed | none |", md)
+        self.assertIn("basis=inconclusive_signal", md)
         self.assertIn("successful runs produced no evidence payload/findings", md)
+        matrix = report.get("compliance_coverage_matrix")
+        self.assertIsInstance(matrix, list)
+        if isinstance(matrix, list):
+            row = next((r for r in matrix if isinstance(r, dict) and r.get("area") == "Vulnerability Discovery & Exposure Checks"), None)
+            self.assertIsNotNone(row)
+            if isinstance(row, dict):
+                self.assertEqual(row.get("status"), "Not Assessed")
+                self.assertEqual(row.get("coverage_basis"), "inconclusive_signal")
 
     def test_compliance_sections_render_for_all_profiles(self):
         for profile_name in sorted(COMPLIANCE_COVERAGE_ROWS.keys()):
@@ -344,6 +353,80 @@ class TestReport(unittest.TestCase):
                 {"tool": "nmap", "success": True, "command": "nmap localhost -oX - -sV"},
                 {"tool": "whatweb", "success": True, "command": "whatweb http://localhost:8080 --log-json -"},
             ],
+        }
+        md1 = generate_markdown(report)
+        md2 = generate_markdown(report)
+        self.assertEqual(md1, md2)
+
+    def test_recommended_next_actions_are_profile_aware(self):
+        base_summary = {
+            "summary": "Action ordering check.",
+            "findings": [
+                {
+                    "severity": "MEDIUM",
+                    "title": "Prometheus metrics endpoint exposed",
+                    "evidence": "http://localhost:9090/metrics",
+                },
+                {
+                    "severity": "MEDIUM",
+                    "title": "Redis reachable without authentication",
+                    "evidence": "port 6379",
+                },
+                {
+                    "severity": "MEDIUM",
+                    "title": "PostgreSQL exposed",
+                    "evidence": "open port 5432/tcp",
+                },
+                {
+                    "severity": "INFO",
+                    "title": "HTTP Missing Security Headers",
+                    "evidence": "http://localhost:8080",
+                },
+                {
+                    "severity": "INFO",
+                    "title": "No TLS on web endpoints",
+                    "evidence": "cleartext HTTP only",
+                },
+            ],
+        }
+        pci_md = generate_markdown(
+            {
+                "target": "localhost",
+                "compliance_profile": "compliance_pci",
+                "summary": base_summary,
+                "findings": [],
+                "results": [],
+            }
+        )
+        soc2_md = generate_markdown(
+            {
+                "target": "localhost",
+                "compliance_profile": "compliance_soc2",
+                "summary": base_summary,
+                "findings": [],
+                "results": [],
+            }
+        )
+        pci_tls = "Enforce transport security on externally reachable services and validate TLS configuration strength on non-standard service ports."
+        pci_monitor = "Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported."
+        self.assertLess(pci_md.find(pci_tls), pci_md.find(pci_monitor))
+        self.assertIn("Collect manual evidence for PCI readiness boundaries not automatable here", pci_md)
+        self.assertIn("Collect SOC 2 control-operation evidence not assessable by scanning", soc2_md)
+
+    def test_recommended_next_actions_remain_deterministic_with_profile(self):
+        report = {
+            "target": "localhost",
+            "compliance_profile": "compliance_iso",
+            "summary": {
+                "summary": "Deterministic action list.",
+                "findings": [
+                    {"severity": "MEDIUM", "title": "Open ports expose service surface", "evidence": "open port 8080/tcp"},
+                    {"severity": "INFO", "title": "HTTP Missing Security Headers", "evidence": "http://localhost:8080"},
+                    {"severity": "INFO", "title": "No TLS", "evidence": "cleartext HTTP"},
+                ],
+            },
+            "findings": [],
+            "results": [],
         }
         md1 = generate_markdown(report)
         md2 = generate_markdown(report)

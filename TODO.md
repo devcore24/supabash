@@ -42,15 +42,15 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 ## 🎯 Phase 10: Readiness Depth Sprint (Next)
 *Goal: improve control-depth signal without sacrificing deterministic output quality.*
 
-- [ ] **Expand compliance mapping breadth**
+- [x] **Expand compliance mapping breadth**
     - [x] Add deterministic control-family mappings for common service-exposure findings across all profiles.
     - [x] Keep mapping confidence explicit and avoid hard non-compliance wording.
-- [ ] **Add deterministic next-actions by profile**
-    - [ ] Extend `Recommended Next Actions` with profile-aware ordering (SOC2/PCI/ISO/…).
-    - [ ] Add unit tests for action generation stability.
-- [ ] **Coverage matrix quality improvements**
-    - [ ] Add optional `coverage_basis` field to make evidence-source decisions explicit in JSON.
-    - [ ] Ensure rows fall back to `Not Assessed` when signal is inconclusive.
+- [x] **Add deterministic next-actions by profile**
+    - [x] Extend `Recommended Next Actions` with profile-aware ordering (SOC2/PCI/ISO/…).
+    - [x] Add unit tests for action generation stability.
+- [x] **Coverage matrix quality improvements**
+    - [x] Add optional `coverage_basis` field to make evidence-source decisions explicit in JSON.
+    - [x] Ensure rows fall back to `Not Assessed` when signal is inconclusive.
 
 ---
 

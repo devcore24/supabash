@@ -48,6 +48,7 @@ from supabash.llm import LLMClient
 from supabash import prompts
 from supabash.llm_context import prepare_json_payload
 from supabash.report_order import stable_sort_results
+from supabash.report import build_compliance_coverage_matrix
 from supabash.report_schema import SCHEMA_VERSION, annotate_schema_validation
 from supabash.aggressive_caps import apply_aggressive_caps
 
@@ -3802,6 +3803,11 @@ class AuditOrchestrator:
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
+        if isinstance(normalized_compliance, str) and normalized_compliance.strip():
+            try:
+                agg["compliance_coverage_matrix"] = build_compliance_coverage_matrix(agg)
+            except Exception:
+                pass
         agg["finished_at"] = time.time()
         try:
             annotate_schema_validation(agg, kind="audit")

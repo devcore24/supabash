@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Set
+from typing import Any, Dict, List, Tuple, Set, Optional
 import json
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -94,6 +94,236 @@ NOT_ASSESSABLE_AREAS: Dict[str, List[str]] = {
         "Longitudinal control performance evidence required for formal assessments.",
     ],
 }
+
+
+def _has_payload(data: Any) -> bool:
+    if data is None:
+        return False
+    if isinstance(data, str):
+        return bool(data.strip())
+    if isinstance(data, (list, dict, tuple, set)):
+        return len(data) > 0
+    return True
+
+
+def _entry_has_effective_signal(tool: str, data: Any) -> bool:
+    t = str(tool or "").strip().lower()
+    if t == "supabase_audit" and isinstance(data, dict):
+        # Avoid overstating access-control coverage when supabase_audit ran
+        # successfully but found no meaningful exposure signal.
+        for key in ("exposures", "keys", "exposed_urls", "rpc_candidates", "supabase_urls"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return True
+            if isinstance(value, (list, dict, tuple, set)) and len(value) > 0:
+                return True
+        return False
+    if t == "readiness_probe" and isinstance(data, dict):
+        findings = data.get("findings")
+        if isinstance(findings, list) and findings:
+            return True
+        return False
+    return _has_payload(data)
+
+
+def _build_tool_status_index(results: Any) -> Dict[str, Dict[str, Any]]:
+    index: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(results, list):
+        return index
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
+        tool = str(entry.get("tool") or "").strip().lower()
+        if not tool:
+            continue
+        slot = index.setdefault(
+            tool,
+            {
+                "success": 0,
+                "failed": 0,
+                "skipped": 0,
+                "failed_reasons": [],
+                "skipped_reasons": [],
+            },
+        )
+        if bool(entry.get("skipped")):
+            slot["skipped"] += 1
+            reason = str(entry.get("reason") or "").strip()
+            if reason:
+                reasons = slot.get("skipped_reasons")
+                if isinstance(reasons, list) and reason not in reasons:
+                    reasons.append(reason)
+        elif bool(entry.get("success")):
+            slot["success"] += 1
+        else:
+            slot["failed"] += 1
+            reason = str(entry.get("error") or entry.get("reason") or "").strip()
+            if reason:
+                reasons = slot.get("failed_reasons")
+                if isinstance(reasons, list) and reason not in reasons:
+                    reasons.append(reason)
+    return index
+
+
+def _build_tool_signal_index(results: Any, findings: Any) -> Dict[str, Dict[str, Any]]:
+    signal: Dict[str, Dict[str, Any]] = {}
+    if isinstance(results, list):
+        for entry in results:
+            if not isinstance(entry, dict):
+                continue
+            tool = str(entry.get("tool") or "").strip().lower()
+            if not tool:
+                continue
+            slot = signal.setdefault(tool, {"has_payload": False, "finding_count": 0})
+            if bool(entry.get("success")) and not bool(entry.get("skipped")):
+                data = entry.get("data")
+                if _entry_has_effective_signal(tool, data):
+                    slot["has_payload"] = True
+    if isinstance(findings, list):
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            tool = str(finding.get("tool") or "").strip().lower()
+            if not tool:
+                continue
+            slot = signal.setdefault(tool, {"has_payload": False, "finding_count": 0})
+            slot["finding_count"] = int(slot.get("finding_count", 0)) + 1
+    return signal
+
+
+def _sanitize_note_text(value: Any, max_len: int = 72) -> str:
+    text = str(value or "").strip().replace("\n", " ").replace("\r", " ").replace("|", "/")
+    text = re.sub(r"\s+", " ", text)
+    if len(text) > max_len:
+        return text[: max_len - 3].rstrip() + "..."
+    return text
+
+
+def _format_tool_reasons(
+    tools: List[str],
+    idx: Dict[str, Dict[str, Any]],
+    key: str,
+    label: str,
+    max_tools: int = 3,
+) -> Optional[str]:
+    if not tools:
+        return None
+    rendered: List[str] = []
+    for tool in tools[:max_tools]:
+        reasons = idx.get(tool, {}).get(key, [])
+        reason_text = ""
+        if isinstance(reasons, list) and reasons:
+            reason_text = _sanitize_note_text(reasons[0])
+        if reason_text:
+            rendered.append(f"{tool} ({reason_text})")
+        else:
+            rendered.append(tool)
+    if len(tools) > max_tools:
+        rendered.append("...")
+    if not rendered:
+        return None
+    return f"{label}: {', '.join(rendered)}"
+
+
+def _coverage_status_details(
+    tools: List[str],
+    idx: Dict[str, Dict[str, Any]],
+    signal_idx: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    normalized_tools = [str(t).strip().lower() for t in tools if str(t).strip()]
+    if not normalized_tools:
+        return {
+            "status": "Not Assessed",
+            "evidence_source": "none",
+            "notes": "No automated checks mapped",
+            "coverage_basis": "no_mapped_checks",
+        }
+
+    successful = [t for t in normalized_tools if idx.get(t, {}).get("success", 0) > 0]
+    evidence_tools = [
+        t
+        for t in successful
+        if int(signal_idx.get(t, {}).get("finding_count", 0)) > 0
+        or bool(signal_idx.get(t, {}).get("has_payload"))
+    ]
+    failed_only = [t for t in normalized_tools if idx.get(t, {}).get("failed", 0) > 0 and idx.get(t, {}).get("success", 0) == 0]
+    skipped_only = [t for t in normalized_tools if idx.get(t, {}).get("skipped", 0) > 0 and idx.get(t, {}).get("success", 0) == 0]
+
+    coverage_basis = "corroborated_findings"
+    if not successful:
+        status = "Not Assessed"
+        if failed_only:
+            coverage_basis = "execution_error"
+        elif skipped_only:
+            coverage_basis = "scope_or_config_gated"
+        else:
+            coverage_basis = "no_successful_runs"
+    elif not evidence_tools:
+        # Successful mapped checks but no meaningful signal/finding payload.
+        # Treat as inconclusive rather than covered/partial.
+        status = "Not Assessed"
+        coverage_basis = "inconclusive_signal"
+    elif len(successful) == len(normalized_tools) and len(evidence_tools) == len(successful):
+        status = "Covered"
+    else:
+        status = "Partial"
+
+    evidence = ", ".join(evidence_tools[:4]) if evidence_tools else "none"
+    if len(evidence_tools) > 4:
+        evidence = f"{evidence}, ..."
+
+    notes_parts: List[str] = []
+    failed_with_reason = _format_tool_reasons(failed_only, idx, "failed_reasons", "failed")
+    if failed_with_reason:
+        notes_parts.append(failed_with_reason)
+    skipped_with_reason = _format_tool_reasons(skipped_only, idx, "skipped_reasons", "skipped")
+    if skipped_with_reason:
+        notes_parts.append(skipped_with_reason)
+    if not successful and failed_only:
+        notes_parts.append("coverage blocked by execution errors")
+    if not successful and skipped_only and not failed_only:
+        notes_parts.append("coverage gated by scope/config")
+    if successful and not evidence_tools:
+        notes_parts.append("successful runs produced no evidence payload/findings")
+    if not notes_parts and evidence_tools:
+        notes_parts.append("based on successful tool runs")
+    notes = "; ".join(notes_parts) if notes_parts else "no supporting runs"
+    return {
+        "status": status,
+        "evidence_source": evidence,
+        "notes": notes,
+        "coverage_basis": coverage_basis,
+    }
+
+
+def build_compliance_coverage_matrix(report: Dict[str, Any]) -> List[Dict[str, Any]]:
+    profile = str(report.get("compliance_profile") or "").strip()
+    if not profile:
+        return []
+    rows = COMPLIANCE_COVERAGE_ROWS.get(profile, [])
+    status_index = _build_tool_status_index(report.get("results", []))
+    signal_index = _build_tool_signal_index(report.get("results", []), report.get("findings", []))
+    matrix: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        area = str(row.get("area") or "").strip()
+        tools = row.get("tools")
+        tools_list = tools if isinstance(tools, list) else []
+        if not area:
+            continue
+        details = _coverage_status_details(tools_list, status_index, signal_index)
+        matrix.append(
+            {
+                "area": area,
+                "status": details["status"],
+                "evidence_source": details["evidence_source"],
+                "notes": details["notes"],
+                "coverage_basis": details["coverage_basis"],
+                "mapped_tools": [str(t).strip().lower() for t in tools_list if str(t).strip()],
+            }
+        )
+    return matrix
 
 def generate_markdown(report: Dict[str, Any]) -> str:
     lines = []
@@ -518,194 +748,32 @@ def generate_markdown(report: Dict[str, Any]) -> str:
 
         lines.append("- Out of scope: independent attestation/certification decisions and control operation effectiveness testing.")
 
-    # Compliance coverage matrix (readiness boundaries and evidence sources)
-    def _tool_status_index(results: Any) -> Dict[str, Dict[str, Any]]:
-        index: Dict[str, Dict[str, Any]] = {}
-        if not isinstance(results, list):
-            return index
-        for entry in results:
-            if not isinstance(entry, dict):
-                continue
-            tool = str(entry.get("tool") or "").strip().lower()
-            if not tool:
-                continue
-            slot = index.setdefault(
-                tool,
-                {
-                    "success": 0,
-                    "failed": 0,
-                    "skipped": 0,
-                    "failed_reasons": [],
-                    "skipped_reasons": [],
-                },
-            )
-            if bool(entry.get("skipped")):
-                slot["skipped"] += 1
-                reason = str(entry.get("reason") or "").strip()
-                if reason:
-                    reasons = slot.get("skipped_reasons")
-                    if isinstance(reasons, list) and reason not in reasons:
-                        reasons.append(reason)
-            elif bool(entry.get("success")):
-                slot["success"] += 1
-            else:
-                slot["failed"] += 1
-                reason = str(entry.get("error") or entry.get("reason") or "").strip()
-                if reason:
-                    reasons = slot.get("failed_reasons")
-                    if isinstance(reasons, list) and reason not in reasons:
-                        reasons.append(reason)
-        return index
-
-    def _has_payload(data: Any) -> bool:
-        if data is None:
-            return False
-        if isinstance(data, str):
-            return bool(data.strip())
-        if isinstance(data, (list, dict, tuple, set)):
-            return len(data) > 0
-        return True
-
-    def _entry_has_effective_signal(tool: str, data: Any) -> bool:
-        t = str(tool or "").strip().lower()
-        if t == "supabase_audit" and isinstance(data, dict):
-            # Avoid overstating access-control coverage when supabase_audit ran
-            # successfully but found no meaningful exposure signal.
-            for key in ("exposures", "keys", "exposed_urls", "rpc_candidates", "supabase_urls"):
-                value = data.get(key)
-                if isinstance(value, str) and value.strip():
-                    return True
-                if isinstance(value, (list, dict, tuple, set)) and len(value) > 0:
-                    return True
-            return False
-        if t == "readiness_probe" and isinstance(data, dict):
-            findings = data.get("findings")
-            if isinstance(findings, list) and findings:
-                return True
-            return False
-        return _has_payload(data)
-
-    def _tool_signal_index(results: Any, findings: Any) -> Dict[str, Dict[str, Any]]:
-        signal: Dict[str, Dict[str, Any]] = {}
-        if isinstance(results, list):
-            for entry in results:
-                if not isinstance(entry, dict):
-                    continue
-                tool = str(entry.get("tool") or "").strip().lower()
-                if not tool:
-                    continue
-                slot = signal.setdefault(tool, {"has_payload": False, "finding_count": 0})
-                if bool(entry.get("success")) and not bool(entry.get("skipped")):
-                    data = entry.get("data")
-                    if _entry_has_effective_signal(tool, data):
-                        slot["has_payload"] = True
-        if isinstance(findings, list):
-            for finding in findings:
-                if not isinstance(finding, dict):
-                    continue
-                tool = str(finding.get("tool") or "").strip().lower()
-                if not tool:
-                    continue
-                slot = signal.setdefault(tool, {"has_payload": False, "finding_count": 0})
-                slot["finding_count"] = int(slot.get("finding_count", 0)) + 1
-        return signal
-
-    def _sanitize_note_text(value: Any, max_len: int = 72) -> str:
-        text = str(value or "").strip().replace("\n", " ").replace("\r", " ").replace("|", "/")
-        text = re.sub(r"\s+", " ", text)
-        if len(text) > max_len:
-            return text[: max_len - 3].rstrip() + "..."
-        return text
-
-    def _format_tool_reasons(
-        tools: List[str],
-        idx: Dict[str, Dict[str, Any]],
-        key: str,
-        label: str,
-        max_tools: int = 3,
-    ) -> Optional[str]:
-        if not tools:
-            return None
-        rendered: List[str] = []
-        for tool in tools[:max_tools]:
-            reasons = idx.get(tool, {}).get(key, [])
-            reason_text = ""
-            if isinstance(reasons, list) and reasons:
-                reason_text = _sanitize_note_text(reasons[0])
-            if reason_text:
-                rendered.append(f"{tool} ({reason_text})")
-            else:
-                rendered.append(tool)
-        if len(tools) > max_tools:
-            rendered.append("...")
-        if not rendered:
-            return None
-        return f"{label}: {', '.join(rendered)}"
-
-    def _coverage_status(
-        tools: List[str],
-        idx: Dict[str, Dict[str, Any]],
-        signal_idx: Dict[str, Dict[str, Any]],
-    ) -> Tuple[str, str, str]:
-        normalized_tools = [str(t).strip().lower() for t in tools if str(t).strip()]
-        if not normalized_tools:
-            return ("Not Assessed", "none", "No automated checks mapped")
-        successful = [t for t in normalized_tools if idx.get(t, {}).get("success", 0) > 0]
-        evidence_tools = [
-            t
-            for t in successful
-            if int(signal_idx.get(t, {}).get("finding_count", 0)) > 0
-            or bool(signal_idx.get(t, {}).get("has_payload"))
-        ]
-        failed_only = [t for t in normalized_tools if idx.get(t, {}).get("failed", 0) > 0 and idx.get(t, {}).get("success", 0) == 0]
-        skipped_only = [t for t in normalized_tools if idx.get(t, {}).get("skipped", 0) > 0 and idx.get(t, {}).get("success", 0) == 0]
-        if not successful:
-            status = "Not Assessed"
-        elif len(successful) == len(normalized_tools):
-            status = "Covered"
-        else:
-            status = "Partial"
-
-        evidence = ", ".join(evidence_tools[:4]) if evidence_tools else "none"
-        if len(evidence_tools) > 4:
-            evidence = f"{evidence}, ..."
-
-        notes_parts: List[str] = []
-        failed_with_reason = _format_tool_reasons(failed_only, idx, "failed_reasons", "failed")
-        if failed_with_reason:
-            notes_parts.append(failed_with_reason)
-        skipped_with_reason = _format_tool_reasons(skipped_only, idx, "skipped_reasons", "skipped")
-        if skipped_with_reason:
-            notes_parts.append(skipped_with_reason)
-        if not successful and failed_only:
-            notes_parts.append("coverage blocked by execution errors")
-        if not successful and skipped_only and not failed_only:
-            notes_parts.append("coverage gated by scope/config")
-        if successful and not evidence_tools:
-            notes_parts.append("successful runs produced no evidence payload/findings")
-        if not notes_parts and evidence_tools:
-            notes_parts.append("based on successful tool runs")
-        notes = "; ".join(notes_parts) if notes_parts else "no supporting runs"
-        return (status, evidence, notes)
-
     if isinstance(compliance_profile, str) and compliance_profile.strip():
-        rows = COMPLIANCE_COVERAGE_ROWS.get(compliance_profile.strip(), [])
-        status_index = _tool_status_index(report.get("results", []))
-        signal_index = _tool_signal_index(report.get("results", []), raw_findings)
+        matrix_rows = report.get("compliance_coverage_matrix")
+        if not isinstance(matrix_rows, list):
+            matrix_rows = build_compliance_coverage_matrix(report)
+            report["compliance_coverage_matrix"] = matrix_rows
         lines.append("\n## Compliance Coverage Matrix")
         lines.append("| Control Area | Status | Evidence Source | Notes |")
         lines.append("|---|---|---|---|")
-        for row in rows:
+        for row in matrix_rows:
             if not isinstance(row, dict):
                 continue
             area = str(row.get("area") or "").strip()
-            tools = row.get("tools")
-            tools_list = tools if isinstance(tools, list) else []
             if not area:
                 continue
-            status, evidence, notes = _coverage_status(tools_list, status_index, signal_index)
+            status = str(row.get("status") or "Not Assessed").strip()
+            evidence = str(row.get("evidence_source") or "none").strip() or "none"
+            notes = str(row.get("notes") or "").strip()
+            basis = str(row.get("coverage_basis") or "").strip()
+            if basis:
+                notes = f"basis={basis}; {notes}" if notes else f"basis={basis}"
             lines.append(f"| {area} | {status} | {evidence} | {notes} |")
-        lines.append("\n- Status legend: `Covered` = all mapped checks succeeded, `Partial` = some succeeded, `Not Assessed` = no successful mapped checks.")
+        lines.append(
+            "\n- Status legend: `Covered` = mapped checks succeeded with corroborating evidence, "
+            "`Partial` = some mapped checks/evidence present, `Not Assessed` = no successful mapped checks "
+            "or signal was inconclusive."
+        )
 
         not_assessable = NOT_ASSESSABLE_AREAS.get(compliance_profile.strip(), [])
         if not_assessable:
@@ -1120,37 +1188,131 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                         return True
             return False
 
-        actions: List[str] = []
-        if has_signal("prometheus", "/metrics", "metrics endpoint", "status/config", "pprof", "debug endpoint"):
-            actions.append(
-                "Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported."
-            )
-        if has_signal("redis", "6379", "without authentication", "no auth"):
-            actions.append(
-                "Harden Redis: require authentication/ACLs, bind to localhost or private interfaces, and block untrusted network access at the firewall."
-            )
-        if has_signal("postgres", "5432"):
-            actions.append(
-                "Limit PostgreSQL exposure to required application hosts and enforce strong auth/TLS policies for database connectivity."
-            )
-        if has_signal("wildcard", "0.0.0.0", "open port", "service exposed", "non-standard http ports"):
-            actions.append(
-                "Reduce attack surface by closing unused listeners and rebinding critical services from wildcard interfaces to least-privilege network zones."
-            )
-        if has_signal("missing security headers", "allowed options method", "default page"):
-            actions.append(
-                "Apply baseline web hardening: security headers, method restrictions, and removal of unnecessary default/admin endpoints."
-            )
-        if has_signal("no tls", "cleartext", "tls", "ssl"):
-            actions.append(
-                "Enforce transport security on externally reachable services and validate TLS configuration strength on non-standard service ports."
-            )
-
         profile_key = str(profile or "").strip().lower()
-        if profile_key:
+        action_text = {
+            "monitoring_debug": (
+                "Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported."
+            ),
+            "redis_exposure": (
+                "Harden Redis: require authentication/ACLs, bind to localhost or private interfaces, and block untrusted network access at the firewall."
+            ),
+            "postgres_exposure": (
+                "Limit PostgreSQL exposure to required application hosts and enforce strong auth/TLS policies for database connectivity."
+            ),
+            "attack_surface": (
+                "Reduce attack surface by closing unused listeners and rebinding critical services from wildcard interfaces to least-privilege network zones."
+            ),
+            "web_hardening": (
+                "Apply baseline web hardening: security headers, method restrictions, and removal of unnecessary default/admin endpoints."
+            ),
+            "tls_hardening": (
+                "Enforce transport security on externally reachable services and validate TLS configuration strength on non-standard service ports."
+            ),
+        }
+        triggered: Set[str] = set()
+        if has_signal("prometheus", "/metrics", "metrics endpoint", "status/config", "pprof", "debug endpoint"):
+            triggered.add("monitoring_debug")
+        if has_signal("redis", "6379", "without authentication", "no auth"):
+            triggered.add("redis_exposure")
+        if has_signal("postgres", "5432"):
+            triggered.add("postgres_exposure")
+        if has_signal("wildcard", "0.0.0.0", "open port", "service exposed", "non-standard http ports"):
+            triggered.add("attack_surface")
+        if has_signal("missing security headers", "allowed options method", "default page"):
+            triggered.add("web_hardening")
+        if has_signal("no tls", "cleartext", "tls", "ssl"):
+            triggered.add("tls_hardening")
+
+        ordered_keys_by_profile: Dict[str, List[str]] = {
+            "compliance_pci": [
+                "tls_hardening",
+                "postgres_exposure",
+                "redis_exposure",
+                "monitoring_debug",
+                "web_hardening",
+                "attack_surface",
+            ],
+            "compliance_soc2": [
+                "monitoring_debug",
+                "attack_surface",
+                "web_hardening",
+                "tls_hardening",
+                "postgres_exposure",
+                "redis_exposure",
+            ],
+            "compliance_iso": [
+                "attack_surface",
+                "web_hardening",
+                "tls_hardening",
+                "monitoring_debug",
+                "postgres_exposure",
+                "redis_exposure",
+            ],
+            "compliance_dora": [
+                "monitoring_debug",
+                "attack_surface",
+                "tls_hardening",
+                "web_hardening",
+                "postgres_exposure",
+                "redis_exposure",
+            ],
+            "compliance_nis2": [
+                "attack_surface",
+                "monitoring_debug",
+                "web_hardening",
+                "tls_hardening",
+                "postgres_exposure",
+                "redis_exposure",
+            ],
+            "compliance_gdpr": [
+                "tls_hardening",
+                "monitoring_debug",
+                "web_hardening",
+                "attack_surface",
+                "postgres_exposure",
+                "redis_exposure",
+            ],
+            "compliance_bsi": [
+                "attack_surface",
+                "web_hardening",
+                "monitoring_debug",
+                "tls_hardening",
+                "postgres_exposure",
+                "redis_exposure",
+            ],
+        }
+        default_order = [
+            "monitoring_debug",
+            "redis_exposure",
+            "postgres_exposure",
+            "attack_surface",
+            "web_hardening",
+            "tls_hardening",
+        ]
+        ordered_keys = ordered_keys_by_profile.get(profile_key, default_order)
+
+        actions: List[str] = []
+        for k in ordered_keys:
+            if k in triggered:
+                actions.append(action_text[k])
+
+        if profile_key == "compliance_pci":
+            actions.append(
+                "Collect manual evidence for PCI readiness boundaries not automatable here (CDE scoping, CHD/SAD handling, key lifecycle, and formal control operation records)."
+            )
+        elif profile_key == "compliance_soc2":
+            actions.append(
+                "Collect SOC 2 control-operation evidence not assessable by scanning (JML/access reviews, change approvals, incident response drills, and policy governance records)."
+            )
+        elif profile_key:
             actions.append(
                 "Collect manual control-operation evidence for governance/process controls not assessable by automated scanning (for readiness review)."
             )
+        else:
+            actions.append(
+                "Collect manual operational evidence for controls not assessable by technical scanning (governance/process readiness)."
+            )
+
         actions.append(
             "After remediation, rerun the readiness assessment and compare deltas in findings severity, exposed services, and evidence artifacts."
         )

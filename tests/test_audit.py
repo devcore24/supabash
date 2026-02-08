@@ -205,6 +205,36 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertEqual(nmap_entry.get("error"), "fail")
         cleanup_artifact(output)
 
+    def test_compliance_coverage_matrix_is_added_to_report_json(self):
+        scanners = {
+            "nmap": FakeScanner("nmap"),
+            "nuclei": FakeScanner("nuclei"),
+            "whatweb": FakeScanner("whatweb"),
+            "gobuster": FakeScanner("gobuster"),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+        class FakeLLM:
+            def chat(self, messages, temperature=0.2):
+                return '{"summary":"ok","findings":[]}'
+
+        orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
+        output = artifact_path("audit_compliance_matrix.json")
+        report = orchestrator.run("localhost", output, use_llm=False, compliance_profile="soc2")
+        matrix = report.get("compliance_coverage_matrix")
+        self.assertIsInstance(matrix, list)
+        if isinstance(matrix, list) and matrix:
+            first = matrix[0]
+            self.assertIsInstance(first, dict)
+            if isinstance(first, dict):
+                self.assertIn("area", first)
+                self.assertIn("status", first)
+                self.assertIn("evidence_source", first)
+                self.assertIn("notes", first)
+                self.assertIn("coverage_basis", first)
+        data = json.loads(output.read_text())
+        self.assertIsInstance(data.get("compliance_coverage_matrix"), list)
+        cleanup_artifact(output)
+
     def test_dnsenum_is_skipped_for_localhost_targets(self):
         dnsenum_scanner = FakeDnsenumScanner()
         scanners = {
