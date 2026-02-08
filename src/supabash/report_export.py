@@ -56,6 +56,19 @@ def _mark_tools_run_table(html_fragment: str) -> str:
     )
     return pattern.sub(r'\1<table class="tools-run-table">', html_fragment, count=1)
 
+def _mark_compliance_matrix_table(html_fragment: str) -> str:
+    """
+    Add a specific CSS class to the compliance coverage matrix table so
+    PDF/HTML exports can keep header/value words from awkward splitting.
+    """
+    if not html_fragment:
+        return html_fragment
+    pattern = re.compile(
+        r'(<h2[^>]*id="compliance-coverage-matrix"[^>]*>.*?</h2>\s*)<table>',
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return pattern.sub(r'\1<table class="compliance-matrix-table">', html_fragment, count=1)
+
 
 def markdown_to_html(markdown_text: str) -> str:
     md = _import_markdown()
@@ -67,6 +80,7 @@ def markdown_to_html(markdown_text: str) -> str:
     # - attr_list: allows explicit heading IDs like "## Summary {#summary}" if we ever want them
     body_html = fn(markdown_text, extensions=["tables", "fenced_code", "toc", "attr_list"], output_format="html5")
     body_html = _mark_tools_run_table(body_html)
+    body_html = _mark_compliance_matrix_table(body_html)
     # Render with explicit table/code styling so HTML/PDF exports remain readable
     # for long command rows in "Tools Run".
     return f"""<!doctype html>
@@ -129,6 +143,26 @@ def markdown_to_html(markdown_text: str) -> str:
     }}
     .tools-run-table td:nth-child(3) code {{
       display: block;
+    }}
+    .compliance-matrix-table {{
+      table-layout: fixed;
+    }}
+    .compliance-matrix-table th:nth-child(1),
+    .compliance-matrix-table td:nth-child(1) {{
+      width: 34%;
+    }}
+    .compliance-matrix-table th:nth-child(2),
+    .compliance-matrix-table td:nth-child(2) {{
+      width: 12%;
+      white-space: nowrap;
+    }}
+    .compliance-matrix-table th:nth-child(3),
+    .compliance-matrix-table td:nth-child(3) {{
+      width: 20%;
+    }}
+    .compliance-matrix-table th:nth-child(4),
+    .compliance-matrix-table td:nth-child(4) {{
+      width: 34%;
     }}
     code {{
       white-space: pre-wrap;

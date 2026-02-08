@@ -19,6 +19,17 @@ class TestReportExport(unittest.TestCase):
         html = markdown_to_html(md)
         self.assertIn('<table class="tools-run-table">', html)
 
+    def test_markdown_to_html_marks_compliance_matrix_table(self):
+        md = (
+            "## Compliance Coverage Matrix\n\n"
+            "| Control Area | Status | Evidence Source | Notes |\n"
+            "|---|---|---|---|\n"
+            "| Security Surface Inventory | Covered | nmap | based on successful tool runs |\n\n"
+            "## Findings Overview\n"
+        )
+        html = markdown_to_html(md)
+        self.assertIn('<table class="compliance-matrix-table">', html)
+
     def test_export_is_noop_when_disabled(self):
         p = artifact_path("report_export_noop.md")
         p.write_text("# Hi", encoding="utf-8")
