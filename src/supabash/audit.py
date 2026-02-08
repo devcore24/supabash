@@ -671,7 +671,12 @@ class AuditOrchestrator:
             return
         try:
             report_root = output.parent
-            evidence_dir = report_root / "evidence" / output.stem
+            # Bundled layout default is reports/<slug>/<slug>.json.
+            # In that case keep evidence directly under reports/<slug>/evidence.
+            if report_root.name == output.stem:
+                evidence_dir = report_root / "evidence"
+            else:
+                evidence_dir = report_root / "evidence" / output.stem
             results_dir = evidence_dir / "results"
             results_dir.mkdir(parents=True, exist_ok=True)
 

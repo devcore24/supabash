@@ -35,8 +35,8 @@ class TestAIAuditCLI(unittest.TestCase):
                 with patch.object(main_module, "AIAuditOrchestrator", FakeAIAuditOrchestrator):
                     result = runner.invoke(main_module.app, ["ai-audit", "localhost", "--force", "--yes"])
                 self.assertEqual(result.exit_code, 0, result.stdout)
-                json_reports = list(Path("reports").glob("ai-audit-*.json"))
-                md_reports = list(Path("reports").glob("ai-audit-*.md"))
+                json_reports = list(Path("reports").glob("ai-audit-*/*.json"))
+                md_reports = list(Path("reports").glob("ai-audit-*/*.md"))
                 self.assertTrue(json_reports)
                 self.assertTrue(md_reports)
         finally:
@@ -52,7 +52,7 @@ class TestAIAuditCLI(unittest.TestCase):
                     result = runner.invoke(main_module.app, ["audit", "localhost", "--agentic", "--force", "--yes"])
                 self.assertEqual(result.exit_code, 0, result.stdout)
                 self.assertIn("initializing AI audit protocol", result.stdout)
-                json_reports = list(Path("reports").glob("ai-audit-*.json"))
+                json_reports = list(Path("reports").glob("ai-audit-*/*.json"))
                 self.assertTrue(json_reports)
         finally:
             core["report_exports"] = exports_prev
@@ -69,8 +69,8 @@ class TestAIAuditCLI(unittest.TestCase):
                         ["ai-audit", "localhost", "--compliance", "pci", "--force", "--yes"],
                     )
                 self.assertEqual(result.exit_code, 0, result.stdout)
-                json_reports = list(Path("reports").glob("ai-audit-pci-*.json"))
-                md_reports = list(Path("reports").glob("ai-audit-pci-*.md"))
+                json_reports = list(Path("reports").glob("ai-audit-pci-*/*.json"))
+                md_reports = list(Path("reports").glob("ai-audit-pci-*/*.md"))
                 self.assertTrue(json_reports)
                 self.assertTrue(md_reports)
         finally:

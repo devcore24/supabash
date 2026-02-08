@@ -1,0 +1,181 @@
+{
+  "version": 2,
+  "generated_at": 1770547075.8252196,
+  "generated_at_utc": null,
+  "report_file": "ai-audit-soc2-20260208-113311.json",
+  "report_kind": "ai_audit",
+  "schema_version": "1.0",
+  "artifact_count": 14,
+  "artifact_status_counts": {
+    "success": 6,
+    "failed": 1,
+    "skipped": 7
+  },
+  "runtime": {
+    "python_version": "3.14.2",
+    "platform": "Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "executable": "/home/devcore24/projects/supabash/venv/bin/python3.14",
+    "working_directory": "/home/devcore24/projects/supabash",
+    "schema_version": "1.0",
+    "report_kind": "ai_audit",
+    "target": "localhost",
+    "scan_host": "localhost",
+    "compliance_profile": "compliance_soc2",
+    "compliance_framework": "SOC 2 Type II",
+    "duration_seconds": 270.48,
+    "llm_providers": [
+      "openai"
+    ],
+    "llm_models": [
+      "gpt-5.1"
+    ],
+    "llm_usage": {
+      "total_tokens": 5002,
+      "cost_usd": 0.014635
+    },
+    "tool_versions": {
+      "nmap": "7.94SVN",
+      "httpx": "v1.8.1",
+      "whatweb": "0.5.5",
+      "wpscan": "3.8.28",
+      "nuclei": "v2.9.8",
+      "gobuster": "3.6",
+      "ffuf": "2.1.0-dev",
+      "katana": "v1.3.0",
+      "dnsenum": "1.2.6",
+      "sslscan": "2.1.2",
+      "sqlmap": "1.8.4#stable"
+    },
+    "nuclei": {
+      "engine_version": "v2.9.8"
+    }
+  },
+  "artifacts": [
+    {
+      "kind": "tool_result",
+      "tool": "nmap",
+      "status": "success",
+      "path": "evidence/results/000-nmap.json",
+      "sha256": "9f260c134201e2dc442a118ad09b372d05650ea20e0118bba032af2099251a5d",
+      "bytes": 3984,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "httpx",
+      "status": "success",
+      "path": "evidence/results/001-httpx.json",
+      "sha256": "92e937d45256ac174be29af420ae1e98634f1068066c91f85137305b796c519d",
+      "bytes": 6370,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "whatweb",
+      "status": "success",
+      "path": "evidence/results/002-whatweb.json",
+      "sha256": "c75ce31bc2b7a0693d483200da8e736d5a8424ebce9e93520c9dcf16dc7f70cb",
+      "bytes": 843,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "wpscan",
+      "status": "skipped",
+      "path": "evidence/results/003-wpscan.json",
+      "sha256": "d20197816958996560bfea41c2d08febec9e571893f6d53d26f961ef79b809c5",
+      "bytes": 231,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "nuclei",
+      "status": "success",
+      "path": "evidence/results/004-nuclei.json",
+      "sha256": "15bc2eaf517c3d0be54026cdaf0f1930d189a7fc5e830b0062bab4cce1e3cdf9",
+      "bytes": 5249,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "gobuster",
+      "status": "failed",
+      "path": "evidence/results/005-gobuster.json",
+      "sha256": "77699f1f40b10cfa9d7489ceb9747699c3097e2debc833ca8dfef86994758691",
+      "bytes": 1042,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "ffuf",
+      "status": "success",
+      "path": "evidence/results/006-ffuf.json",
+      "sha256": "957fd129b5e5658f5afcf578dc898e73cbd7e033262ba13f35ec7b626910fb13",
+      "bytes": 669,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "katana",
+      "status": "skipped",
+      "path": "evidence/results/007-katana.json",
+      "sha256": "e6fe3ddaad8ddbb292bf06515127ec8d2b13b76396b45d8dea4aeb4486c7254b",
+      "bytes": 245,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "dnsenum",
+      "status": "skipped",
+      "path": "evidence/results/008-dnsenum.json",
+      "sha256": "182472f10cfca5d527f47b46a1b7da26bf9ca35b582e088be6d5b7b291016de6",
+      "bytes": 226,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "sslscan",
+      "status": "skipped",
+      "path": "evidence/results/009-sslscan.json",
+      "sha256": "be78b642c276bfc0808127281127bf6851eb583a286d7ddb0fb8ca0ed8bdcf6f",
+      "bytes": 225,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "enum4linux-ng",
+      "status": "skipped",
+      "path": "evidence/results/010-enum4linux-ng.json",
+      "sha256": "8f82bbc5473be6006a97a0b4f6c31a892a351c04b94656c19b9de1c44a5b6f79",
+      "bytes": 216,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "sqlmap",
+      "status": "skipped",
+      "path": "evidence/results/011-sqlmap.json",
+      "sha256": "4a5c11bec83d806d2040aa6cbe4f356b04e17ebe8854485d73baefb759683ad3",
+      "bytes": 235,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "searchsploit",
+      "status": "skipped",
+      "path": "evidence/results/012-searchsploit.json",
+      "sha256": "d9467eab2125555a4ed80ff38adac7e993a9956a0fee29870da5ab2fc5e109ba",
+      "bytes": 231,
+      "created_at": 1770547075.8252196
+    },
+    {
+      "kind": "tool_result",
+      "tool": "supabase_audit",
+      "status": "success",
+      "path": "evidence/results/013-supabase_audit.json",
+      "sha256": "f435833e14bcb3c9e8a4e95b2869532452f69c16626cbf802fb029d84ef9f4ae",
+      "bytes": 970,
+      "created_at": 1770547075.8252196
+    }
+  ]
+}

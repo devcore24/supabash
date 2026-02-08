@@ -1,0 +1,11 @@
+{
+  "tool": "dnsenum",
+  "status": "skipped",
+  "target": null,
+  "command": null,
+  "phase": "baseline",
+  "reason": "Localhost/loopback target (DNS enumeration N/A)",
+  "error": null,
+  "fallback_for": null,
+  "data": null
+}

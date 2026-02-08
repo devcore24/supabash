@@ -390,9 +390,8 @@ def audit(
         "--output",
         "-o",
         help=(
-            "Output JSON path (default: reports/report-YYYYmmdd-HHMMSS.json; "
-            "when --agentic is set, uses reports/ai-audit-<profile>-YYYYmmdd-HHMMSS.json if "
-            "--compliance is provided, otherwise reports/ai-audit-YYYYmmdd-HHMMSS.json)"
+            "Output JSON path (default: reports/<slug>/<slug>.json; "
+            "where slug is report-YYYYmmdd-HHMMSS, or ai-audit(-<profile>)-YYYYmmdd-HHMMSS when --agentic is set)"
         ),
     ),
     container_image: str = typer.Option(None, "--container-image", "-c", help="Optional container image to scan with Trivy"),
@@ -744,8 +743,7 @@ def ai_audit(
         "--output",
         "-o",
         help=(
-            "Output JSON path (default: reports/ai-audit-<profile>-YYYYmmdd-HHMMSS.json "
-            "when --compliance is set, otherwise reports/ai-audit-YYYYmmdd-HHMMSS.json)"
+            "Output JSON path (default: reports/ai-audit(-<profile>)-YYYYmmdd-HHMMSS/ai-audit(-<profile>)-YYYYmmdd-HHMMSS.json)"
         ),
     ),
     container_image: str = typer.Option(None, "--container-image", "-c", help="Optional container image to scan with Trivy"),
@@ -1511,7 +1509,7 @@ def chat():
                     "[--nuclei-rate N] [--gobuster-threads N] [--gobuster-wordlist PATH] "
                     "[--parallel-web] [--max-workers N] "
                     "[--container-image IMG] [--nikto] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
-                    "[--output reports/report-YYYYmmdd-HHMMSS.json] [--markdown reports/report-YYYYmmdd-HHMMSS.md] [--allow-public] [--bg]"
+                    "[--output reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.json] [--markdown reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.md] [--allow-public] [--bg]"
                 )
                 continue
 

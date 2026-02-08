@@ -288,7 +288,7 @@ supabash chat
 # inside chat:
 /scan 192.168.1.10 --profile fast --scanner nmap  # add --allow-public only if authorized
 /scan 192.168.1.10 --profile fast --scanner nmap --bg
-/audit 192.168.1.10 --mode normal --remediate  # writes reports/report-YYYYmmdd-HHMMSS.json + .md
+/audit 192.168.1.10 --mode normal --remediate  # writes reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.{json,md}
 /audit 192.168.1.10 --mode normal --output reports/custom.json --remediate
 /audit 192.168.1.10 --mode normal --nikto --remediate --bg
 /audit "http://192.168.1.10" --mode normal --parallel-web --max-workers 3 --bg
@@ -351,7 +351,7 @@ supabash audit [OPTIONS] TARGET
 
 - Arguments: `TARGET` (required) — IP / hostname / URL / container ID
 - Options:
-  - `--output`, `-o` — output JSON path (default: `reports/report-YYYYmmdd-HHMMSS.json`; when `--agentic` is set, uses `reports/ai-audit-<profile>-YYYYmmdd-HHMMSS.json` if `--compliance` is provided, otherwise `reports/ai-audit-YYYYmmdd-HHMMSS.json`)
+  - `--output`, `-o` — output JSON path (default: `reports/<slug>/<slug>.json`; slug is `report-YYYYmmdd-HHMMSS`, or `ai-audit(-<profile>)-YYYYmmdd-HHMMSS` when `--agentic` is set)
   - `--markdown`, `-m` — output Markdown path (default: derived from `--output`)
   - `--status/--no-status` (default: `--status`) — print live progress
   - `--status-file` — write JSON status updates while running
@@ -430,7 +430,7 @@ supabash ai-audit [OPTIONS] TARGET
 
 - Arguments: `TARGET` (required) — IP / hostname / URL / container ID
 - Options: same as `audit`, plus:
-- default output is `reports/ai-audit-<profile>-YYYYmmdd-HHMMSS.json` when `--compliance` is set, otherwise `reports/ai-audit-YYYYmmdd-HHMMSS.json` (+ `.md`; html/pdf when enabled)
+- default output is `reports/ai-audit-<profile>-YYYYmmdd-HHMMSS/ai-audit-<profile>-YYYYmmdd-HHMMSS.json` when `--compliance` is set, otherwise `reports/ai-audit-YYYYmmdd-HHMMSS/ai-audit-YYYYmmdd-HHMMSS.json` (+ `.md`; html/pdf when enabled)
   - `--compliance` — compliance profile (`pci|soc2|iso|dora|nis2|gdpr|bsi`)
   - `--status/--no-status` (default: `--status`) — print live progress
   - `--status-file` — write JSON status updates while running
@@ -577,7 +577,7 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 - **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
 
 ### Reporting
-- **Formats:** Timestamped JSON + Markdown reports under `reports/` with command traces for auditability
+- **Formats:** Timestamped run folders under `reports/` containing JSON + Markdown reports (and optional HTML/PDF) with command traces for auditability
 - **Schema:** JSON reports include `schema_version` + `schema_validation` for validation and forward compatibility
 - **Styling:** Markdown reports include TOC + summary tables for readability
 - **Compliance context:** Reports capture compliance profile/focus and annotate relevant findings with control references

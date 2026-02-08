@@ -19,7 +19,7 @@ def build_report_paths(
     """
     Resolve report output paths (JSON + Markdown).
 
-    - If output is None: defaults to reports/report-YYYYmmdd-HHMMSS.json
+    - If output is None: defaults to reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.json
     - If output is a directory that exists: writes report-<ts>.json inside it
     - If output has no suffix: appends .json
     - If markdown is None: defaults to <output>.md
@@ -30,7 +30,8 @@ def build_report_paths(
     ts = now.strftime("%Y%m%d-%H%M%S")
 
     base = (default_basename or "report").strip() or "report"
-    out_path = Path(output) if output else Path(default_dir) / f"{base}-{ts}.json"
+    run_slug = f"{base}-{ts}"
+    out_path = Path(output) if output else Path(default_dir) / run_slug / f"{run_slug}.json"
     if out_path.exists() and out_path.is_dir():
         out_path = out_path / f"{base}-{ts}.json"
     elif out_path.suffix == "":

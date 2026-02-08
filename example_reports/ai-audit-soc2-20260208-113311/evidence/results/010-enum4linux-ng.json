@@ -1,0 +1,11 @@
+{
+  "tool": "enum4linux-ng",
+  "status": "skipped",
+  "target": null,
+  "command": null,
+  "phase": "baseline",
+  "reason": "No SMB ports detected (139/445)",
+  "error": null,
+  "fallback_for": null,
+  "data": null
+}

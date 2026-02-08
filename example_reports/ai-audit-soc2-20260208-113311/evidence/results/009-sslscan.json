@@ -1,0 +1,11 @@
+{
+  "tool": "sslscan",
+  "status": "skipped",
+  "target": null,
+  "command": null,
+  "phase": "baseline",
+  "reason": "No TLS candidate ports detected from discovery",
+  "error": null,
+  "fallback_for": null,
+  "data": null
+}

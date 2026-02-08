@@ -1,0 +1,149 @@
+{
+  "tool": "nmap",
+  "status": "success",
+  "target": null,
+  "command": "nmap localhost -oX - -sV --script ssl-enum-ciphers -p-",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "scan_data": {
+      "hosts": [
+        {
+          "ip": "127.0.0.1",
+          "hostnames": [
+            "localhost",
+            "localhost"
+          ],
+          "ports": [
+            {
+              "port": 3000,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "ppp",
+              "product": "",
+              "version": ""
+            },
+            {
+              "port": 4000,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "remoteanything",
+              "product": "",
+              "version": ""
+            },
+            {
+              "port": 4876,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Node.js Express framework",
+              "version": ""
+            },
+            {
+              "port": 5050,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "mmcc",
+              "product": "",
+              "version": ""
+            },
+            {
+              "port": 5432,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "postgresql",
+              "product": "PostgreSQL DB",
+              "version": "9.6.0 or later"
+            },
+            {
+              "port": 6379,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "redis",
+              "product": "Redis key-value store",
+              "version": "6.2.11"
+            },
+            {
+              "port": 8080,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http-proxy",
+              "product": "",
+              "version": ""
+            },
+            {
+              "port": 9090,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Golang net/http server",
+              "version": ""
+            },
+            {
+              "port": 9100,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "jetdirect",
+              "product": "",
+              "version": ""
+            },
+            {
+              "port": 9923,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Node.js Express framework",
+              "version": ""
+            },
+            {
+              "port": 19090,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Golang net/http server",
+              "version": ""
+            },
+            {
+              "port": 25835,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "unknown",
+              "product": "",
+              "version": ""
+            },
+            {
+              "port": 34155,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "unknown",
+              "product": "",
+              "version": ""
+            },
+            {
+              "port": 41175,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Node.js Express framework",
+              "version": ""
+            },
+            {
+              "port": 42567,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Node.js Express framework",
+              "version": ""
+            }
+          ],
+          "os": []
+        }
+      ]
+    },
+    "command": "nmap localhost -oX - -sV --script ssl-enum-ciphers -p-",
+    "warnings": []
+  }
+}

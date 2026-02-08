@@ -1,0 +1,11 @@
+{
+  "tool": "sqlmap",
+  "status": "skipped",
+  "target": null,
+  "command": null,
+  "phase": "baseline",
+  "reason": "No parameterized URL provided (include '?' in target URL)",
+  "error": null,
+  "fallback_for": null,
+  "data": null
+}

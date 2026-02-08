@@ -10,14 +10,14 @@ class TestReportPaths(unittest.TestCase):
     def test_default_paths(self):
         now = datetime(2025, 12, 13, 12, 34, 56)
         out_path, md_path = build_report_paths(None, None, now=now)
-        self.assertEqual(out_path.as_posix(), "reports/report-20251213-123456.json")
-        self.assertEqual(md_path.as_posix(), "reports/report-20251213-123456.md")
+        self.assertEqual(out_path.as_posix(), "reports/report-20251213-123456/report-20251213-123456.json")
+        self.assertEqual(md_path.as_posix(), "reports/report-20251213-123456/report-20251213-123456.md")
 
     def test_default_paths_custom_basename(self):
         now = datetime(2025, 12, 13, 12, 34, 56)
         out_path, md_path = build_report_paths(None, None, now=now, default_basename="ai-audit")
-        self.assertEqual(out_path.as_posix(), "reports/ai-audit-20251213-123456.json")
-        self.assertEqual(md_path.as_posix(), "reports/ai-audit-20251213-123456.md")
+        self.assertEqual(out_path.as_posix(), "reports/ai-audit-20251213-123456/ai-audit-20251213-123456.json")
+        self.assertEqual(md_path.as_posix(), "reports/ai-audit-20251213-123456/ai-audit-20251213-123456.md")
 
     def test_output_suffix_added(self):
         now = datetime(2025, 12, 13, 12, 34, 56)

@@ -1,0 +1,41 @@
+{
+  "tool": "whatweb",
+  "status": "success",
+  "target": "http://localhost:42567",
+  "command": "whatweb http://localhost:42567 --log-json -",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "scan_data": [
+      {
+        "target": "http://localhost:42567",
+        "plugins": {
+          "Country": {
+            "string": [
+              "RESERVED"
+            ],
+            "module": [
+              "ZZ"
+            ]
+          },
+          "IP": {
+            "string": [
+              "127.0.0.1"
+            ]
+          },
+          "X-Powered-By": {
+            "string": [
+              "Express"
+            ]
+          }
+        },
+        "banner": null,
+        "status": 401
+      }
+    ],
+    "command": "whatweb http://localhost:42567 --log-json -"
+  }
+}
