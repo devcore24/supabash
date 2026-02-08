@@ -1,0 +1,17 @@
+{
+  "tool": "gobuster",
+  "status": "failed",
+  "target": "http://localhost:8080",
+  "command": "gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+  "phase": "baseline",
+  "reason": null,
+  "error": "Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:8080/abc094d1-0411-4eef-a46f-546530464f4a => 501 (Length: 191). To continue please exclude the status code or the length",
+  "fallback_for": null,
+  "data": {
+    "success": false,
+    "error": "Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:8080/abc094d1-0411-4eef-a46f-546530464f4a => 501 (Length: 191). To continue please exclude the status code or the length",
+    "canceled": false,
+    "raw_output": "",
+    "command": "gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
+  }
+}

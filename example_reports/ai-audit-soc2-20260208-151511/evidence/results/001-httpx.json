@@ -2,7 +2,7 @@
   "tool": "httpx",
   "status": "success",
   "target": null,
-  "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-h9e0dez4/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
+  "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-r5_bq6o3/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
   "phase": "baseline",
   "reason": null,
   "error": null,
@@ -21,15 +21,15 @@
     "alive": [
       "http://localhost:42567",
       "http://localhost:19090",
-      "http://localhost:4876",
-      "http://localhost:8080",
       "http://localhost:41175",
       "http://localhost:9923",
+      "http://localhost:4876",
+      "http://localhost:8080",
       "http://localhost:9090"
     ],
     "results": [
       {
-        "timestamp": "2026-02-08T11:35:51.527414435+01:00",
+        "timestamp": "2026-02-08T15:17:51.984258221+01:00",
         "port": "42567",
         "url": "http://localhost:42567",
         "input": "http://localhost:42567",
@@ -39,7 +39,7 @@
         "host": "localhost",
         "host_ip": "127.0.0.1",
         "path": "/",
-        "time": "3.22877ms",
+        "time": "1.353483ms",
         "a": [
           "127.0.0.1"
         ],
@@ -58,7 +58,7 @@
         }
       },
       {
-        "timestamp": "2026-02-08T11:35:51.52755911+01:00",
+        "timestamp": "2026-02-08T15:17:51.984533909+01:00",
         "port": "19090",
         "url": "http://localhost:19090",
         "input": "http://localhost:19090",
@@ -68,7 +68,7 @@
         "host": "localhost",
         "host_ip": "127.0.0.1",
         "path": "/",
-        "time": "1.529171ms",
+        "time": "1.433318ms",
         "a": [
           "127.0.0.1"
         ],
@@ -83,62 +83,7 @@
         }
       },
       {
-        "timestamp": "2026-02-08T11:35:51.528283055+01:00",
-        "port": "4876",
-        "url": "http://localhost:4876",
-        "input": "http://localhost:4876",
-        "title": "Error",
-        "scheme": "http",
-        "content_type": "text/html",
-        "method": "GET",
-        "host": "localhost",
-        "host_ip": "127.0.0.1",
-        "path": "/",
-        "time": "3.613507ms",
-        "a": [
-          "127.0.0.1"
-        ],
-        "tech": [
-          "Express",
-          "Node.js"
-        ],
-        "words": 6,
-        "lines": 10,
-        "status_code": 404,
-        "content_length": 139,
-        "failed": false,
-        "knowledgebase": {
-          "PageType": "error",
-          "pHash": 0
-        }
-      },
-      {
-        "timestamp": "2026-02-08T11:35:51.528272487+01:00",
-        "port": "8080",
-        "url": "http://localhost:8080",
-        "input": "http://localhost:8080",
-        "scheme": "http",
-        "content_type": "application/xml",
-        "method": "GET",
-        "host": "localhost",
-        "host_ip": "127.0.0.1",
-        "path": "/",
-        "time": "2.408757ms",
-        "a": [
-          "127.0.0.1"
-        ],
-        "words": 2,
-        "lines": 1,
-        "status_code": 200,
-        "content_length": 185,
-        "failed": false,
-        "knowledgebase": {
-          "PageType": "login",
-          "pHash": 0
-        }
-      },
-      {
-        "timestamp": "2026-02-08T11:35:51.528488985+01:00",
+        "timestamp": "2026-02-08T15:17:51.985121691+01:00",
         "port": "41175",
         "url": "http://localhost:41175",
         "input": "http://localhost:41175",
@@ -149,7 +94,7 @@
         "host": "localhost",
         "host_ip": "127.0.0.1",
         "path": "/",
-        "time": "4.417628ms",
+        "time": "1.699044ms",
         "a": [
           "127.0.0.1"
         ],
@@ -168,7 +113,7 @@
         }
       },
       {
-        "timestamp": "2026-02-08T11:35:51.528545574+01:00",
+        "timestamp": "2026-02-08T15:17:51.985295877+01:00",
         "port": "9923",
         "url": "http://localhost:9923",
         "input": "http://localhost:9923",
@@ -179,7 +124,7 @@
         "host": "localhost",
         "host_ip": "127.0.0.1",
         "path": "/",
-        "time": "5.095018ms",
+        "time": "2.170208ms",
         "a": [
           "127.0.0.1"
         ],
@@ -198,7 +143,62 @@
         }
       },
       {
-        "timestamp": "2026-02-08T11:35:51.62620797+01:00",
+        "timestamp": "2026-02-08T15:17:51.985435839+01:00",
+        "port": "4876",
+        "url": "http://localhost:4876",
+        "input": "http://localhost:4876",
+        "title": "Error",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "1.846727ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Express",
+          "Node.js"
+        ],
+        "words": 6,
+        "lines": 10,
+        "status_code": 404,
+        "content_length": 139,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-02-08T15:17:51.986229249+01:00",
+        "port": "8080",
+        "url": "http://localhost:8080",
+        "input": "http://localhost:8080",
+        "scheme": "http",
+        "content_type": "application/xml",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "1.309036ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "words": 2,
+        "lines": 1,
+        "status_code": 200,
+        "content_length": 279,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "login",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-02-08T15:17:52.08908029+01:00",
         "port": "9090",
         "url": "http://localhost:9090",
         "input": "http://localhost:9090",
@@ -210,7 +210,7 @@
         "host_ip": "127.0.0.1",
         "path": "/",
         "final_url": "http://localhost:9090/classic/graph",
-        "time": "13.34095ms",
+        "time": "6.23381ms",
         "chain_status_codes": [
           302,
           200
@@ -239,6 +239,6 @@
         }
       }
     ],
-    "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-h9e0dez4/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects"
+    "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-r5_bq6o3/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects"
   }
 }

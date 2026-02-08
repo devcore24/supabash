@@ -1,0 +1,15 @@
+{
+  "tool": "gobuster",
+  "status": "success",
+  "target": "http://localhost:9090",
+  "command": "gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "findings": [],
+    "command": "gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "tool": "katana",
+  "status": "skipped",
+  "target": "http://localhost:9090",
+  "command": null,
+  "phase": "baseline",
+  "reason": "Disabled by config (tools.<name>.enabled=false)",
+  "error": null,
+  "fallback_for": null,
+  "data": null
+}

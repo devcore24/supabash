@@ -1,0 +1,280 @@
+{
+  "version": 2,
+  "generated_at": 1770560599.9360015,
+  "generated_at_utc": null,
+  "report_file": "ai-audit-soc2-20260208-151511.json",
+  "report_kind": "ai_audit",
+  "schema_version": "1.0",
+  "artifact_count": 25,
+  "artifact_status_counts": {
+    "success": 13,
+    "failed": 1,
+    "skipped": 11
+  },
+  "runtime": {
+    "python_version": "3.14.2",
+    "platform": "Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "executable": "/home/devcore24/projects/supabash/venv/bin/python3.14",
+    "working_directory": "/home/devcore24/projects/supabash",
+    "schema_version": "1.0",
+    "report_kind": "ai_audit",
+    "target": "localhost",
+    "scan_host": "localhost",
+    "compliance_profile": "compliance_soc2",
+    "compliance_framework": "SOC 2 Type II",
+    "duration_seconds": 470.176,
+    "llm_providers": [
+      "openai"
+    ],
+    "llm_models": [
+      "gpt-5.1"
+    ],
+    "llm_usage": {
+      "total_tokens": 6273,
+      "cost_usd": 0.016915
+    },
+    "tool_versions": {
+      "nmap": "7.94SVN",
+      "httpx": "v1.8.1",
+      "whatweb": "0.5.5",
+      "wpscan": "3.8.28",
+      "nuclei": "v2.9.8",
+      "gobuster": "3.6",
+      "ffuf": "2.1.0-dev",
+      "katana": "v1.3.0",
+      "dnsenum": "1.2.6",
+      "sslscan": "2.1.2",
+      "sqlmap": "1.8.4#stable"
+    },
+    "nuclei": {
+      "engine_version": "v2.9.8"
+    }
+  },
+  "artifacts": [
+    {
+      "kind": "tool_result",
+      "tool": "nmap",
+      "status": "success",
+      "path": "evidence/results/000-nmap.json",
+      "sha256": "9f260c134201e2dc442a118ad09b372d05650ea20e0118bba032af2099251a5d",
+      "bytes": 3984,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "httpx",
+      "status": "success",
+      "path": "evidence/results/001-httpx.json",
+      "sha256": "597e76f5d85f0ad708b3677372f07b96209cd9575c6877d5a7d74f6b3cc41773",
+      "bytes": 6371,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "whatweb",
+      "status": "success",
+      "path": "evidence/results/002-whatweb.json",
+      "sha256": "ac645f06656dee71abcf252a309f85487f771895221ea1ead38acbec1672ebec",
+      "bytes": 1101,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "whatweb",
+      "status": "success",
+      "path": "evidence/results/003-whatweb.json",
+      "sha256": "d970ee70c27588f0b1107e73897004a7dc747afa6e20b13c540c92dd135d0f8f",
+      "bytes": 736,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "whatweb",
+      "status": "success",
+      "path": "evidence/results/004-whatweb.json",
+      "sha256": "b955c3b58e335bb6dd3f6249df98dbd6aa912f413c583f75217164142f1c1615",
+      "bytes": 1587,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "wpscan",
+      "status": "skipped",
+      "path": "evidence/results/005-wpscan.json",
+      "sha256": "8431d9de437740afcbded49a73af2e8ab623867707e9d801f9a94ad5a053531f",
+      "bytes": 230,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "wpscan",
+      "status": "skipped",
+      "path": "evidence/results/006-wpscan.json",
+      "sha256": "181b22d70984b1961bdb1bece0c3d11e8f81abde2e9c221971c0c0c5fc972d43",
+      "bytes": 230,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "wpscan",
+      "status": "skipped",
+      "path": "evidence/results/007-wpscan.json",
+      "sha256": "953a6d8cad107e8ad493117b5bb960eb9c43bb7eb9c113f04ccb423a7d4e739a",
+      "bytes": 230,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "nuclei",
+      "status": "success",
+      "path": "evidence/results/008-nuclei.json",
+      "sha256": "cb10727cd84503180781ba372d11f90f6bab2926715b9ab1262b25478d2f0179",
+      "bytes": 4454,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "nuclei",
+      "status": "success",
+      "path": "evidence/results/009-nuclei.json",
+      "sha256": "d59798557a8802aef13768cbc6e70f60ea0d6c6808a0aa37135a3c141008de21",
+      "bytes": 5529,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "nuclei",
+      "status": "success",
+      "path": "evidence/results/010-nuclei.json",
+      "sha256": "c172fe1e229f3629f73556ab4f7b4ec147ca0b3de05d3bc07aef005c71351377",
+      "bytes": 8080,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "gobuster",
+      "status": "success",
+      "path": "evidence/results/011-gobuster.json",
+      "sha256": "d285e65e9422d6e7168ca18e7dd3f4703397f0deded5697e6fab4fcd98e188e7",
+      "bytes": 531,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "gobuster",
+      "status": "success",
+      "path": "evidence/results/012-gobuster.json",
+      "sha256": "ef858bf2d617331dec2ff6d5778851959384f525e81ff82e5784fb2d2cfcd8e8",
+      "bytes": 531,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "gobuster",
+      "status": "failed",
+      "path": "evidence/results/013-gobuster.json",
+      "sha256": "42f54ff04f834fdd37c8b90c2218c340a379558f86584ee1f79d50bc1a29a052",
+      "bytes": 1039,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "ffuf",
+      "status": "success",
+      "path": "evidence/results/014-ffuf.json",
+      "sha256": "98deeee07606f42bcab54d4b85b271c12b2a5ff559cb48134f61a0636db356ad",
+      "bytes": 666,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "katana",
+      "status": "skipped",
+      "path": "evidence/results/015-katana.json",
+      "sha256": "4393cef86701e90759a426d17874a681b2390f5f8589db88e2432fd4cdc0e8ce",
+      "bytes": 244,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "katana",
+      "status": "skipped",
+      "path": "evidence/results/016-katana.json",
+      "sha256": "c3c59587face4e40281f0559e3af22559946eca9a63600cde1aea7bfd8707fd3",
+      "bytes": 244,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "katana",
+      "status": "skipped",
+      "path": "evidence/results/017-katana.json",
+      "sha256": "2215f037ed5d47dc519928f14fcaa79ab251980cdbd2219ad831a3dc6c38dea6",
+      "bytes": 244,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "dnsenum",
+      "status": "skipped",
+      "path": "evidence/results/018-dnsenum.json",
+      "sha256": "182472f10cfca5d527f47b46a1b7da26bf9ca35b582e088be6d5b7b291016de6",
+      "bytes": 226,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "sslscan",
+      "status": "skipped",
+      "path": "evidence/results/019-sslscan.json",
+      "sha256": "be78b642c276bfc0808127281127bf6851eb583a286d7ddb0fb8ca0ed8bdcf6f",
+      "bytes": 225,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "enum4linux-ng",
+      "status": "skipped",
+      "path": "evidence/results/020-enum4linux-ng.json",
+      "sha256": "8f82bbc5473be6006a97a0b4f6c31a892a351c04b94656c19b9de1c44a5b6f79",
+      "bytes": 216,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "sqlmap",
+      "status": "skipped",
+      "path": "evidence/results/021-sqlmap.json",
+      "sha256": "4a5c11bec83d806d2040aa6cbe4f356b04e17ebe8854485d73baefb759683ad3",
+      "bytes": 235,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "searchsploit",
+      "status": "skipped",
+      "path": "evidence/results/022-searchsploit.json",
+      "sha256": "d9467eab2125555a4ed80ff38adac7e993a9956a0fee29870da5ab2fc5e109ba",
+      "bytes": 231,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "supabase_audit",
+      "status": "success",
+      "path": "evidence/results/023-supabase_audit.json",
+      "sha256": "b01ca34b31565d3bf9bf7dc4d163bdf13868da7f3245fc134602ad898ea7a357",
+      "bytes": 970,
+      "created_at": 1770560599.9360015
+    },
+    {
+      "kind": "tool_result",
+      "tool": "readiness_probe",
+      "status": "success",
+      "path": "evidence/results/024-readiness_probe.json",
+      "sha256": "5480f283414d56fabeba14609ee8a1a6bc2fb7b28c14469223cb712e6af0a9b1",
+      "bytes": 3267,
+      "created_at": 1770560599.9360015
+    }
+  ]
+}

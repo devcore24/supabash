@@ -1,8 +1,8 @@
 {
   "tool": "whatweb",
   "status": "success",
-  "target": "http://localhost:42567",
-  "command": "whatweb http://localhost:42567 --log-json -",
+  "target": "http://localhost:4876",
+  "command": "whatweb http://localhost:4876 --log-json -",
   "phase": "baseline",
   "reason": null,
   "error": null,
@@ -11,7 +11,7 @@
     "success": true,
     "scan_data": [
       {
-        "target": "http://localhost:42567",
+        "target": "http://localhost:4876",
         "plugins": {
           "Country": {
             "string": [
@@ -21,9 +21,20 @@
               "ZZ"
             ]
           },
+          "HTML5": {},
           "IP": {
             "string": [
               "127.0.0.1"
+            ]
+          },
+          "Title": {
+            "string": [
+              "Error"
+            ]
+          },
+          "UncommonHeaders": {
+            "string": [
+              "content-security-policy,x-content-type-options"
             ]
           },
           "X-Powered-By": {
@@ -33,9 +44,9 @@
           }
         },
         "banner": null,
-        "status": 401
+        "status": 404
       }
     ],
-    "command": "whatweb http://localhost:42567 --log-json -"
+    "command": "whatweb http://localhost:4876 --log-json -"
   }
 }

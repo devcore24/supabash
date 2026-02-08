@@ -1,8 +1,8 @@
 {
   "tool": "nuclei",
   "status": "success",
-  "target": "http://localhost:42567",
-  "command": "nuclei -u http://localhost:42567 -jsonl -rate-limit 100",
+  "target": "http://localhost:8080",
+  "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 100",
   "phase": "baseline",
   "reason": null,
   "error": null,
@@ -11,12 +11,120 @@
     "success": true,
     "findings": [
       {
-        "id": "tech-detect",
-        "name": "Wappalyzer Technology Detection",
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
         "severity": "info",
         "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "prometheus-metrics",
+        "name": "Prometheus Metrics - Detect",
+        "severity": "medium",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080/metrics",
+        "description": "Prometheus metrics page was detected."
+      },
+      {
+        "id": "options-method",
+        "name": "Allowed Options Method",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:8080",
+        "matched_at": "http://localhost:8080",
         "description": ""
       },
       {
@@ -27,107 +135,8 @@
         "host": "localhost.",
         "matched_at": "localhost",
         "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:42567",
-        "matched_at": "http://localhost:42567",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
       }
     ],
-    "command": "nuclei -u http://localhost:42567 -jsonl -rate-limit 100"
+    "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 100"
   }
 }

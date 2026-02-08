@@ -1,0 +1,36 @@
+{
+  "tool": "whatweb",
+  "status": "success",
+  "target": "http://localhost:8080",
+  "command": "whatweb http://localhost:8080 --log-json -",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "scan_data": [
+      {
+        "target": "http://localhost:8080",
+        "plugins": {
+          "Country": {
+            "string": [
+              "RESERVED"
+            ],
+            "module": [
+              "ZZ"
+            ]
+          },
+          "IP": {
+            "string": [
+              "127.0.0.1"
+            ]
+          }
+        },
+        "banner": null,
+        "status": 200
+      }
+    ],
+    "command": "whatweb http://localhost:8080 --log-json -"
+  }
+}

@@ -1,0 +1,205 @@
+{
+  "tool": "nuclei",
+  "status": "success",
+  "target": "http://localhost:9090",
+  "command": "nuclei -u http://localhost:9090 -jsonl -rate-limit 100",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "findings": [
+      {
+        "id": "fingerprinthub-web-fingerprints",
+        "name": "FingerprintHub Technology Fingerprint",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "FingerprintHub Technology Fingerprint tests run in nuclei."
+      },
+      {
+        "id": "tech-detect",
+        "name": "Wappalyzer Technology Detection",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": ""
+      },
+      {
+        "id": "tech-detect",
+        "name": "Wappalyzer Technology Detection",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": ""
+      },
+      {
+        "id": "tech-detect",
+        "name": "Wappalyzer Technology Detection",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": ""
+      },
+      {
+        "id": "caa-fingerprint",
+        "name": "CAA Record",
+        "severity": "info",
+        "type": "dns",
+        "host": "localhost.",
+        "matched_at": "localhost",
+        "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/classic/graph",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "options-method",
+        "name": "Allowed Options Method",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090",
+        "description": ""
+      },
+      {
+        "id": "prometheus-flags",
+        "name": "Prometheus flags API endpoint",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/api/v1/status/flags",
+        "description": "The flags endpoint provides a full path to the configuration file. If the file is stored in the home directory, it may leak a username."
+      },
+      {
+        "id": "go-pprof-debug",
+        "name": "Go pprof Debug Page",
+        "severity": "low",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/debug/pprof/heap?debug=1",
+        "description": "go pprof debug page was exposed."
+      },
+      {
+        "id": "prometheus-unauth",
+        "name": "Prometheus Monitoring System - Unauthenticated",
+        "severity": "high",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/api/v1/status/config",
+        "description": "Detects unauthenticated access to Prometheus Time Series Collection and Processing Server by checking for specific elements in the response from the `/graph` endpoint.\n"
+      },
+      {
+        "id": "prometheus-metrics",
+        "name": "Prometheus Metrics - Detect",
+        "severity": "medium",
+        "type": "http",
+        "host": "http://localhost:9090",
+        "matched_at": "http://localhost:9090/metrics",
+        "description": "Prometheus metrics page was detected."
+      }
+    ],
+    "command": "nuclei -u http://localhost:9090 -jsonl -rate-limit 100"
+  }
+}

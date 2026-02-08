@@ -12,9 +12,9 @@
     "scanned": [
       "http://localhost:42567",
       "http://localhost:19090",
-      "http://localhost:4876",
-      "http://localhost:8080",
-      "http://localhost:41175"
+      "http://localhost:41175",
+      "http://localhost:9923",
+      "http://localhost:4876"
     ],
     "page_hits": [
       {
@@ -26,15 +26,15 @@
         "status": 404
       },
       {
-        "url": "http://localhost:4876",
+        "url": "http://localhost:41175",
         "status": 404
       },
       {
-        "url": "http://localhost:8080",
-        "status": 200
+        "url": "http://localhost:9923",
+        "status": 404
       },
       {
-        "url": "http://localhost:41175",
+        "url": "http://localhost:4876",
         "status": 404
       }
     ],
