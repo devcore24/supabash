@@ -42,6 +42,135 @@ class TestReport(unittest.TestCase):
         self.assertIn("Commands Executed", md)
         self.assertIn("nmap example.com", md)
 
+    def test_summary_findings_are_correlated_and_evidence_merged(self):
+        report = {
+            "target": "localhost",
+            "summary": {
+                "summary": "Exposure found.",
+                "findings": [
+                    {
+                        "severity": "HIGH",
+                        "title": "Prometheus configuration API exposed without authentication",
+                        "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                        "recommendation": "Restrict access to /api/v1/*.",
+                    },
+                    {
+                        "severity": "HIGH",
+                        "title": "Prometheus configuration API exposed without authentication",
+                        "evidence": "readiness_probe confirmed config endpoint exposure.",
+                        "recommendation": "Restrict access to /api/v1/*.",
+                    },
+                ],
+            },
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus configuration API exposed without authentication",
+                    "tool": "nuclei",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus configuration API exposed without authentication",
+                    "tool": "readiness_probe",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                },
+            ],
+            "results": [],
+        }
+        md = generate_markdown(report)
+        # In the summary section, heading should appear once; evidence should be merged/corroborated.
+        summary_start = md.find("\n### Findings")
+        methodology_start = md.find("\n## Methodology")
+        self.assertGreaterEqual(summary_start, 0)
+        self.assertGreater(methodology_start, summary_start)
+        summary_block = md[summary_start:methodology_start]
+        self.assertEqual(summary_block.count("**HIGH** Prometheus configuration API exposed without authentication"), 1)
+        self.assertIn("  - Evidence:", summary_block)
+        self.assertIn("    - readiness_probe confirmed config endpoint exposure.", summary_block)
+        self.assertIn("    - nuclei: http://localhost:9090/api/v1/status/config (HTTP 200)", summary_block)
+
+    def test_summary_findings_include_evidence_artifact_references(self):
+        report = {
+            "target": "localhost",
+            "summary": {
+                "summary": "Exposure found.",
+                "findings": [
+                    {
+                        "severity": "HIGH",
+                        "title": "Prometheus configuration API exposed without authentication",
+                        "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                        "recommendation": "Restrict access to /api/v1/*.",
+                    }
+                ],
+            },
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus configuration API exposed without authentication",
+                    "tool": "nuclei",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                }
+            ],
+            "evidence_pack": {
+                "manifest": "evidence/ai-audit-soc2-20260208-000000/manifest.json",
+                "artifacts": [
+                    {
+                        "tool": "nuclei",
+                        "status": "success",
+                        "path": "evidence/ai-audit-soc2-20260208-000000/results/005-nuclei.json",
+                    }
+                ],
+            },
+            "results": [],
+        }
+        md = generate_markdown(report)
+        summary_start = md.find("\n### Findings")
+        methodology_start = md.find("\n## Methodology")
+        self.assertGreaterEqual(summary_start, 0)
+        self.assertGreater(methodology_start, summary_start)
+        summary_block = md[summary_start:methodology_start]
+        self.assertIn("Evidence Artifacts: `evidence/ai-audit-soc2-20260208-000000/results/005-nuclei.json`", summary_block)
+        self.assertIn("Manifest Reference: `evidence/ai-audit-soc2-20260208-000000/manifest.json`", summary_block)
+
+    def test_summary_findings_include_compliance_mapping_confidence(self):
+        report = {
+            "target": "localhost",
+            "summary": {
+                "summary": "Exposure found.",
+                "findings": [
+                    {
+                        "severity": "HIGH",
+                        "title": "Prometheus configuration API exposed without authentication",
+                        "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    }
+                ],
+            },
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus configuration API exposed without authentication",
+                    "tool": "nuclei",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    "compliance_mappings": [
+                        {
+                            "reference": "SOC 2 CC6.6 (Vulnerability and Threat Mitigation)",
+                            "confidence": "medium",
+                        }
+                    ],
+                }
+            ],
+            "results": [],
+        }
+        md = generate_markdown(report)
+        summary_start = md.find("\n### Findings")
+        methodology_start = md.find("\n## Methodology")
+        self.assertGreaterEqual(summary_start, 0)
+        self.assertGreater(methodology_start, summary_start)
+        summary_block = md[summary_start:methodology_start]
+        self.assertIn("Potential Gap: SOC 2 CC6.6 (Vulnerability and Threat Mitigation) (mapping confidence: medium)", summary_block)
+        self.assertIn("Mapping Basis: corroborated by nuclei findings", summary_block)
+
     def test_generate_markdown_includes_evidence_pack_section(self):
         report = {
             "target": "localhost",
@@ -118,6 +247,20 @@ class TestReport(unittest.TestCase):
         self.assertIn("Vulnerability Discovery & Exposure Checks", md)
         self.assertIn("failed: nuclei (connection reset by peer while requesting templates)", md)
 
+    def test_compliance_coverage_matrix_avoids_stale_evidence_sources(self):
+        report = {
+            "target": "localhost",
+            "compliance_profile": "compliance_pci",
+            "results": [
+                {"tool": "nuclei", "success": True, "data": {}},
+                {"tool": "gobuster", "success": True, "data": []},
+            ],
+            "findings": [],
+        }
+        md = generate_markdown(report)
+        self.assertIn("| Vulnerability Discovery & Exposure Checks | Partial | none |", md)
+        self.assertIn("successful runs produced no evidence payload/findings", md)
+
     def test_compliance_sections_render_for_all_profiles(self):
         for profile_name in sorted(COMPLIANCE_COVERAGE_ROWS.keys()):
             with self.subTest(profile=profile_name):
@@ -134,6 +277,7 @@ class TestReport(unittest.TestCase):
                 md = generate_markdown(report)
                 self.assertIn("## Scope & Assumptions", md)
                 self.assertIn("## Compliance Coverage Matrix", md)
+                self.assertIn("## Not Assessable Automatically", md)
                 self.assertIn("Status legend:", md)
                 self.assertIn("Control mapping note: mapped controls indicate potential relevance and require manual validation.", md)
 
@@ -157,6 +301,75 @@ class TestReport(unittest.TestCase):
         md = generate_markdown(report)
         self.assertIn("Potential Gap: PCI-DSS 4.0 Req 11.3 (Vulnerability Management) (mapping confidence: medium)", md)
         self.assertNotIn("NON-COMPLIANT", md)
+
+    def test_detailed_findings_include_correlated_signals_hints(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "findings": [
+                {
+                    "severity": "INFO",
+                    "title": "HTTP Missing Security Headers",
+                    "tool": "nuclei",
+                    "evidence": "http://localhost:8080",
+                },
+                {
+                    "severity": "INFO",
+                    "title": "HTTP Missing Security Headers",
+                    "tool": "readiness_probe",
+                    "evidence": "http://localhost:19090",
+                },
+            ],
+        }
+        md = generate_markdown(report)
+        self.assertIn("### Correlated Signals", md)
+        self.assertIn("HTTP Missing Security Headers: 2 correlated observations across 2 distinct evidence entries", md)
+
+    def test_report_markdown_generation_is_deterministic(self):
+        report = {
+            "target": "localhost",
+            "compliance_profile": "compliance_soc2",
+            "summary": {
+                "summary": "Deterministic synthesis.",
+                "findings": [
+                    {"severity": "MEDIUM", "title": "Multiple HTTP services exposed", "evidence": "ports 8080, 9090"},
+                    {"severity": "LOW", "title": "Unknown high ports", "evidence": "ports 40000+"},
+                ],
+            },
+            "findings": [
+                {"severity": "INFO", "title": "Open port 8080/tcp", "tool": "nmap", "evidence": "http-proxy"},
+                {"severity": "INFO", "title": "Open port 9090/tcp", "tool": "nmap", "evidence": "http Golang net/http server"},
+            ],
+            "results": [
+                {"tool": "nmap", "success": True, "command": "nmap localhost -oX - -sV"},
+                {"tool": "whatweb", "success": True, "command": "whatweb http://localhost:8080 --log-json -"},
+            ],
+        }
+        md1 = generate_markdown(report)
+        md2 = generate_markdown(report)
+        self.assertEqual(md1, md2)
+
+    def test_findings_overview_counts_are_stable(self):
+        report = {
+            "target": "localhost",
+            "summary": {
+                "summary": "Count check.",
+                "findings": [
+                    {"severity": "HIGH", "title": "A", "evidence": "a"},
+                    {"severity": "LOW", "title": "B", "evidence": "b"},
+                ],
+            },
+            "findings": [
+                {"severity": "INFO", "title": "Open port 80/tcp", "tool": "nmap", "evidence": "http"},
+                {"severity": "MEDIUM", "title": "Config endpoint exposed", "tool": "nuclei", "evidence": "/config"},
+            ],
+            "results": [],
+        }
+        md = generate_markdown(report)
+        self.assertIn("| HIGH | 1 |", md)
+        self.assertIn("| LOW | 1 |", md)
+        self.assertIn("| MEDIUM | 1 |", md)
+        self.assertIn("| INFO | 1 |", md)
 
     def test_write_markdown(self):
         report = {"target": "t", "results": []}

@@ -4,6 +4,37 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 
 ---
 
+## 🎯 Phase 9: Readiness Report Clarity Sprint (Current)
+*Goal: make Supabash readiness reports clearer and more auditor-usable than manual experimental reports while staying deterministic.*
+
+- [x] **Correlate and de-duplicate key findings in summary**
+    - [x] Merge equivalent findings from multiple tools into one canonical summary finding.
+    - [x] Preserve tool corroboration as merged evidence bullets (instead of repeating findings).
+    - [x] Add deterministic grouping rules and keep stable ordering.
+- [x] **Attach explicit evidence references to key findings**
+    - [x] Include direct artifact references (`evidence/...`) where available.
+    - [x] Include manifest linkage guidance for each key finding.
+- [x] **Improve compliance coverage matrix evidence attribution**
+    - [x] Ensure matrix rows cite tools that actually produced evidence in the run.
+    - [x] Avoid stale/default evidence sources in compliance rows.
+- [x] **Tighten SOC2 mapping quality**
+    - [x] Add mapping rationale + confidence for summary-level findings.
+    - [x] Continue using softened wording (`Potential Gap`, `Requires Validation`).
+- [x] **Add explicit “Not Assessable Automatically” section**
+    - [x] List SOC2 areas that network/web scans cannot validate automatically.
+    - [x] Keep this section deterministic and profile-aware.
+- [x] **Reduce detailed findings noise while preserving traceability**
+    - [x] Add correlated-view hints for repeated findings with same endpoint/control signal.
+    - [x] Keep full raw evidence in manifest artifacts.
+- [ ] **Maintain format parity (MD/HTML/PDF)**
+    - [ ] Ensure summary + matrix sections render identically across formats.
+    - [ ] Keep table readability and avoid wrapped header/word splitting regressions.
+- [x] **CI regression tests for report clarity**
+    - [x] Snapshot tests for summary correlation and matrix attribution.
+    - [x] Keep deterministic order and counts across repeated runs.
+
+---
+
 ## 🏗️ Phase 1: Foundation & Architecture
 *Goal: Set up the project structure, dependency management, and installation scripts.*
 

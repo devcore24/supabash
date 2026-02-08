@@ -50,6 +50,51 @@ COMPLIANCE_COVERAGE_ROWS: Dict[str, List[Dict[str, Any]]] = {
     ],
 }
 
+NOT_ASSESSABLE_AREAS: Dict[str, List[str]] = {
+    "compliance_pci": [
+        "CDE boundary validation and cardholder data flow confirmation (CHD/SAD handling).",
+        "Formal access recertification evidence and separation-of-duties approvals.",
+        "Key management procedures and cryptographic key lifecycle controls.",
+        "Third-party attestation activities (ASV, QSA validation, ROC/SAQ conclusions).",
+    ],
+    "compliance_soc2": [
+        "Policy design/effectiveness over the audit period (not point-in-time scan evidence).",
+        "Access review governance (JML workflow approvals and periodic recertifications).",
+        "Change management control operation evidence (tickets, approvals, segregation).",
+        "Incident response process effectiveness and tabletop/drill execution records.",
+    ],
+    "compliance_iso": [
+        "ISMS governance operation, management review, and internal audit evidence.",
+        "Risk treatment plan execution and exception acceptance workflow validation.",
+        "Supplier assurance process execution and contractual control monitoring.",
+        "Control operation effectiveness across the certification audit period.",
+    ],
+    "compliance_dora": [
+        "ICT risk governance decisions and board-level oversight evidence.",
+        "Third-party ICT service provider contractual and oversight process effectiveness.",
+        "Operational resilience testing program effectiveness beyond technical scan outputs.",
+        "Regulatory reporting process effectiveness and incident governance records.",
+    ],
+    "compliance_nis2": [
+        "Organizational governance and management accountability evidence.",
+        "Business continuity and crisis-management process effectiveness over time.",
+        "Supply-chain security governance execution and contractual assurance evidence.",
+        "Regulatory notification workflow effectiveness and audit trail completeness.",
+    ],
+    "compliance_gdpr": [
+        "Data inventory and lawful basis validation for processing activities.",
+        "Data subject rights workflow effectiveness and request handling governance.",
+        "Processor/third-party contract assurance and transfer mechanism governance.",
+        "DPIA process quality and privacy governance operation over time.",
+    ],
+    "compliance_bsi": [
+        "ISMS governance and documented process operation evidence.",
+        "Organizational role/accountability controls beyond technical exposure checks.",
+        "Supplier and external interface governance effectiveness.",
+        "Longitudinal control performance evidence required for formal assessments.",
+    ],
+}
+
 def generate_markdown(report: Dict[str, Any]) -> str:
     lines = []
     target = report.get("target", "unknown")
@@ -109,6 +154,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("Methodology", "#methodology"),
         ("Scope & Assumptions", "#scope--assumptions") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
         ("Compliance Coverage Matrix", "#compliance-coverage-matrix") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
+        ("Not Assessable Automatically", "#not-assessable-automatically") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
         ("Evidence Pack", "#evidence-pack") if isinstance(report.get("evidence_pack"), dict) else None,
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Findings Overview", "#findings-overview"),
@@ -138,6 +184,137 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         lines.append("\n## Error")
         for e in errors[:3]:
             lines.append(f"- {e}")
+
+    def _norm_key(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        text = re.sub(r"[^a-z0-9]+", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _merge_summary_findings(
+        summary_items: List[Dict[str, Any]],
+        tool_items: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        order: List[Tuple[str, str]] = []
+
+        for item in summary_items:
+            if not isinstance(item, dict):
+                continue
+            sev = str(item.get("severity") or "INFO").upper()
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            key = (sev, _norm_key(title))
+            if key not in grouped:
+                grouped[key] = {
+                    "severity": sev,
+                    "title": title,
+                    "evidence_items": [],
+                    "recommendation_items": [],
+                    "corroborating_tools": [],
+                    "compliance_mapping_items": [],
+                    "mapping_sources": [],
+                }
+                order.append(key)
+            evidence = str(item.get("evidence") or "").strip()
+            if evidence and evidence not in grouped[key]["evidence_items"]:
+                grouped[key]["evidence_items"].append(evidence)
+            rec = str(item.get("recommendation") or "").strip()
+            if rec and rec not in grouped[key]["recommendation_items"]:
+                grouped[key]["recommendation_items"].append(rec)
+
+        # Enrich summary items with corroborating evidence from tool findings.
+        for item in tool_items:
+            if not isinstance(item, dict):
+                continue
+            sev = str(item.get("severity") or "INFO").upper()
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            key = (sev, _norm_key(title))
+            if key not in grouped:
+                continue
+            evidence = str(item.get("evidence") or "").strip()
+            tool = str(item.get("tool") or "").strip()
+            if not evidence:
+                continue
+            support = f"{tool}: {evidence}" if tool else evidence
+            if support not in grouped[key]["evidence_items"]:
+                grouped[key]["evidence_items"].append(support)
+            if tool and tool not in grouped[key]["corroborating_tools"]:
+                grouped[key]["corroborating_tools"].append(tool)
+            if tool and tool not in grouped[key]["mapping_sources"]:
+                grouped[key]["mapping_sources"].append(tool)
+            compliance_mappings = item.get("compliance_mappings")
+            if isinstance(compliance_mappings, list):
+                for mapping in compliance_mappings:
+                    if not isinstance(mapping, dict):
+                        continue
+                    reference = str(mapping.get("reference") or "").strip()
+                    confidence = str(mapping.get("confidence") or "").strip().lower()
+                    if not reference:
+                        continue
+                    if confidence in ("low", "medium", "high"):
+                        text = f"{reference} (mapping confidence: {confidence})"
+                    else:
+                        text = reference
+                    if text not in grouped[key]["compliance_mapping_items"]:
+                        grouped[key]["compliance_mapping_items"].append(text)
+            compliance_tags = item.get("compliance_tags")
+            if isinstance(compliance_tags, list):
+                for tag in compliance_tags:
+                    text = str(tag).strip()
+                    if text and text not in grouped[key]["compliance_mapping_items"]:
+                        grouped[key]["compliance_mapping_items"].append(text)
+
+        merged: List[Dict[str, Any]] = []
+        for key in order:
+            item = grouped[key]
+            evidence_items = item.get("evidence_items") or []
+            rec_items = item.get("recommendation_items") or []
+            merged.append(
+                {
+                    "severity": item.get("severity", "INFO"),
+                    "title": item.get("title", ""),
+                    "evidence": evidence_items[0] if evidence_items else "",
+                    "evidence_items": evidence_items,
+                    "recommendation": rec_items[0] if rec_items else "",
+                    "recommendation_items": rec_items,
+                    "corroborating_tools": item.get("corroborating_tools", []),
+                    "compliance_mapping_items": item.get("compliance_mapping_items", []),
+                    "mapping_sources": item.get("mapping_sources", []),
+                }
+            )
+        return merged
+
+    summary_findings: List[Dict[str, Any]] = []
+    if isinstance(summary, dict):
+        sf = summary.get("findings", [])
+        if isinstance(sf, list):
+            summary_findings = _merge_summary_findings(
+                [x for x in sf if isinstance(x, dict)],
+                [x for x in raw_findings if isinstance(x, dict)],
+            )
+    evidence_artifact_index: Dict[str, List[str]] = {}
+    evidence_manifest_path = ""
+    evidence_pack_for_summary = report.get("evidence_pack")
+    if isinstance(evidence_pack_for_summary, dict):
+        manifest = evidence_pack_for_summary.get("manifest")
+        if isinstance(manifest, str) and manifest.strip():
+            evidence_manifest_path = manifest.strip()
+        artifacts = evidence_pack_for_summary.get("artifacts")
+        if isinstance(artifacts, list):
+            for artifact in artifacts:
+                if not isinstance(artifact, dict):
+                    continue
+                tool = str(artifact.get("tool") or "").strip().lower()
+                path = str(artifact.get("path") or "").strip()
+                status = str(artifact.get("status") or "").strip().lower()
+                if not tool or not path or status == "skipped":
+                    continue
+                slot = evidence_artifact_index.setdefault(tool, [])
+                if path not in slot:
+                    slot.append(path)
 
     # Summary
     if summary:
@@ -215,19 +392,59 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                         model = llm_meta.get("model")
                         if isinstance(model, str) and model.strip():
                             lines.append(f"- model={model.strip()}")
-            findings = summary.get("findings", [])
-            if findings:
+            if summary_findings:
                 lines.append("\n### Findings")
-                for f in findings:
+                for f in summary_findings:
                     sev = f.get("severity", "INFO").upper()
                     title = f.get("title", "")
-                    evidence = f.get("evidence", "")
-                    rec = f.get("recommendation", "")
+                    evidence_items = [str(x).strip() for x in (f.get("evidence_items") or []) if str(x).strip()]
+                    rec_items = [str(x).strip() for x in (f.get("recommendation_items") or []) if str(x).strip()]
                     lines.append(f"- **{sev}** {title}")
-                    if evidence:
-                        lines.append(f"  - Evidence: {evidence}")
-                    if rec:
-                        lines.append(f"  - Recommendation: {rec}")
+                    if evidence_items:
+                        if len(evidence_items) == 1:
+                            lines.append(f"  - Evidence: {evidence_items[0]}")
+                        else:
+                            lines.append("  - Evidence:")
+                            for ev in evidence_items[:5]:
+                                lines.append(f"    - {ev}")
+                    if rec_items:
+                        if len(rec_items) == 1:
+                            lines.append(f"  - Recommendation: {rec_items[0]}")
+                        else:
+                            lines.append("  - Recommendations:")
+                            for rec in rec_items[:3]:
+                                lines.append(f"    - {rec}")
+                    compliance_mapping_items = [
+                        str(x).strip()
+                        for x in (f.get("compliance_mapping_items") or [])
+                        if str(x).strip()
+                    ]
+                    if compliance_mapping_items:
+                        lines.append("  - Compliance Mapping:")
+                        for mapping in compliance_mapping_items[:3]:
+                            lines.append(f"    - Potential Gap: {mapping}")
+                        mapping_sources = [
+                            str(x).strip().lower()
+                            for x in (f.get("mapping_sources") or [])
+                            if str(x).strip()
+                        ]
+                        if mapping_sources:
+                            lines.append(f"  - Mapping Basis: corroborated by {', '.join(sorted(set(mapping_sources)))} findings")
+                    corroborating_tools = [
+                        str(t).strip().lower()
+                        for t in (f.get("corroborating_tools") or [])
+                        if str(t).strip()
+                    ]
+                    artifact_refs: List[str] = []
+                    for tool in corroborating_tools:
+                        for path in evidence_artifact_index.get(tool, [])[:2]:
+                            if path not in artifact_refs:
+                                artifact_refs.append(path)
+                    if artifact_refs:
+                        refs = ", ".join(f"`{p}`" for p in artifact_refs[:4])
+                        lines.append(f"  - Evidence Artifacts: {refs}")
+                        if evidence_manifest_path:
+                            lines.append(f"  - Manifest Reference: `{evidence_manifest_path}`")
         else:
             lines.append("\n## Summary")
             lines.append(str(summary))
@@ -331,6 +548,40 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                         reasons.append(reason)
         return index
 
+    def _has_payload(data: Any) -> bool:
+        if data is None:
+            return False
+        if isinstance(data, str):
+            return bool(data.strip())
+        if isinstance(data, (list, dict, tuple, set)):
+            return len(data) > 0
+        return True
+
+    def _tool_signal_index(results: Any, findings: Any) -> Dict[str, Dict[str, Any]]:
+        signal: Dict[str, Dict[str, Any]] = {}
+        if isinstance(results, list):
+            for entry in results:
+                if not isinstance(entry, dict):
+                    continue
+                tool = str(entry.get("tool") or "").strip().lower()
+                if not tool:
+                    continue
+                slot = signal.setdefault(tool, {"has_payload": False, "finding_count": 0})
+                if bool(entry.get("success")) and not bool(entry.get("skipped")):
+                    data = entry.get("data")
+                    if _has_payload(data):
+                        slot["has_payload"] = True
+        if isinstance(findings, list):
+            for finding in findings:
+                if not isinstance(finding, dict):
+                    continue
+                tool = str(finding.get("tool") or "").strip().lower()
+                if not tool:
+                    continue
+                slot = signal.setdefault(tool, {"has_payload": False, "finding_count": 0})
+                slot["finding_count"] = int(slot.get("finding_count", 0)) + 1
+        return signal
+
     def _sanitize_note_text(value: Any, max_len: int = 72) -> str:
         text = str(value or "").strip().replace("\n", " ").replace("\r", " ").replace("|", "/")
         text = re.sub(r"\s+", " ", text)
@@ -363,11 +614,21 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             return None
         return f"{label}: {', '.join(rendered)}"
 
-    def _coverage_status(tools: List[str], idx: Dict[str, Dict[str, Any]]) -> Tuple[str, str, str]:
+    def _coverage_status(
+        tools: List[str],
+        idx: Dict[str, Dict[str, Any]],
+        signal_idx: Dict[str, Dict[str, Any]],
+    ) -> Tuple[str, str, str]:
         normalized_tools = [str(t).strip().lower() for t in tools if str(t).strip()]
         if not normalized_tools:
             return ("Not Assessed", "none", "No automated checks mapped")
         successful = [t for t in normalized_tools if idx.get(t, {}).get("success", 0) > 0]
+        evidence_tools = [
+            t
+            for t in successful
+            if int(signal_idx.get(t, {}).get("finding_count", 0)) > 0
+            or bool(signal_idx.get(t, {}).get("has_payload"))
+        ]
         failed_only = [t for t in normalized_tools if idx.get(t, {}).get("failed", 0) > 0 and idx.get(t, {}).get("success", 0) == 0]
         skipped_only = [t for t in normalized_tools if idx.get(t, {}).get("skipped", 0) > 0 and idx.get(t, {}).get("success", 0) == 0]
         if not successful:
@@ -377,8 +638,8 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         else:
             status = "Partial"
 
-        evidence = ", ".join(successful[:4]) if successful else "none"
-        if len(successful) > 4:
+        evidence = ", ".join(evidence_tools[:4]) if evidence_tools else "none"
+        if len(evidence_tools) > 4:
             evidence = f"{evidence}, ..."
 
         notes_parts: List[str] = []
@@ -392,7 +653,9 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             notes_parts.append("coverage blocked by execution errors")
         if not successful and skipped_only and not failed_only:
             notes_parts.append("coverage gated by scope/config")
-        if not notes_parts and successful:
+        if successful and not evidence_tools:
+            notes_parts.append("successful runs produced no evidence payload/findings")
+        if not notes_parts and evidence_tools:
             notes_parts.append("based on successful tool runs")
         notes = "; ".join(notes_parts) if notes_parts else "no supporting runs"
         return (status, evidence, notes)
@@ -400,6 +663,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     if isinstance(compliance_profile, str) and compliance_profile.strip():
         rows = COMPLIANCE_COVERAGE_ROWS.get(compliance_profile.strip(), [])
         status_index = _tool_status_index(report.get("results", []))
+        signal_index = _tool_signal_index(report.get("results", []), raw_findings)
         lines.append("\n## Compliance Coverage Matrix")
         lines.append("| Control Area | Status | Evidence Source | Notes |")
         lines.append("|---|---|---|---|")
@@ -411,9 +675,16 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             tools_list = tools if isinstance(tools, list) else []
             if not area:
                 continue
-            status, evidence, notes = _coverage_status(tools_list, status_index)
+            status, evidence, notes = _coverage_status(tools_list, status_index, signal_index)
             lines.append(f"| {area} | {status} | {evidence} | {notes} |")
         lines.append("\n- Status legend: `Covered` = all mapped checks succeeded, `Partial` = some succeeded, `Not Assessed` = no successful mapped checks.")
+
+        not_assessable = NOT_ASSESSABLE_AREAS.get(compliance_profile.strip(), [])
+        if not_assessable:
+            lines.append("\n## Not Assessable Automatically")
+            lines.append("- The following areas require manual validation, process evidence, or third-party assessment:")
+            for item in not_assessable:
+                lines.append(f"- {item}")
 
     evidence_pack = report.get("evidence_pack")
     if isinstance(evidence_pack, dict):
@@ -560,12 +831,6 @@ def generate_markdown(report: Dict[str, Any]) -> str:
 
     agg_findings, info_deduped = dedupe_info_findings(agg_findings)
 
-    summary_findings = []
-    if isinstance(summary, dict):
-        sf = summary.get("findings", [])
-        if isinstance(sf, list):
-            summary_findings = sf
-
     llm_counts = sev_counts(summary_findings) if summary_findings else None
     tool_counts = sev_counts(agg_findings)
 
@@ -696,6 +961,61 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         lines.append("\n## Findings (Detailed)")
         if info_deduped > 0:
             lines.append(f"_Note: {info_deduped} repeated INFO findings were deduplicated for readability._")
+        def _correlated_signal_hints(findings: List[Dict[str, Any]]) -> List[str]:
+            grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
+            for finding in findings:
+                if not isinstance(finding, dict):
+                    continue
+                title = str(finding.get("title") or "").strip()
+                if not title:
+                    continue
+                sev = str(finding.get("severity") or "INFO").upper()
+                key = (sev, _norm_key(title))
+                slot = grouped.setdefault(
+                    key,
+                    {
+                        "severity": sev,
+                        "title": title,
+                        "count": 0,
+                        "tools": set(),
+                        "evidence": set(),
+                    },
+                )
+                slot["count"] = int(slot.get("count", 0)) + 1
+                tool = str(finding.get("tool") or "").strip().lower()
+                if tool:
+                    slot["tools"].add(tool)
+                evidence = str(finding.get("evidence") or "").strip()
+                if evidence:
+                    slot["evidence"].add(evidence)
+
+            def _sev_rank(sev: str) -> int:
+                order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+                return order.get(sev, 99)
+
+            hints: List[str] = []
+            ranked = sorted(
+                grouped.values(),
+                key=lambda g: (_sev_rank(str(g.get("severity") or "INFO")), str(g.get("title") or "").lower()),
+            )
+            for g in ranked:
+                count = int(g.get("count", 0))
+                evidence_count = len(g.get("evidence", set()))
+                if count < 2 or evidence_count < 2:
+                    continue
+                sev = str(g.get("severity") or "INFO").upper()
+                title = str(g.get("title") or "").strip()
+                tools = sorted(str(t) for t in (g.get("tools") or set()) if str(t))
+                tool_part = f"; tools={', '.join(tools)}" if tools else ""
+                hints.append(
+                    f"- **{sev}** {title}: {count} correlated observations across {evidence_count} distinct evidence entries{tool_part}."
+                )
+            return hints
+
+        correlated_hints = _correlated_signal_hints(agg_findings)
+        if correlated_hints:
+            lines.append("\n### Correlated Signals")
+            lines.extend(correlated_hints[:12])
         # Blank line before list to ensure markdown parsers render list items correctly in HTML/PDF.
         lines.append("")
         for f in agg_findings:

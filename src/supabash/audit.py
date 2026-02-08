@@ -746,6 +746,18 @@ class AuditOrchestrator:
                 "artifact_status_counts": status_counts,
                 "generated_at_utc": manifest.get("generated_at_utc"),
                 "manifest_version": manifest.get("version"),
+                # Keep a compact artifact index in the report so markdown generation
+                # can reference exact evidence files without re-reading manifest.json.
+                "artifacts": [
+                    {
+                        "tool": a.get("tool"),
+                        "status": a.get("status"),
+                        "path": a.get("path"),
+                        "sha256": a.get("sha256"),
+                    }
+                    for a in artifacts
+                    if isinstance(a, dict)
+                ],
                 "runtime": runtime,
             }
         except Exception as e:
