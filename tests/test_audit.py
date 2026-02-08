@@ -130,6 +130,58 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertNotIn(8080, ports)
         self.assertNotIn(8443, ports)
 
+    def test_prioritize_web_targets_for_deep_scan_prefers_risk_ports_and_caps(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        ranked = orch._prioritize_web_targets_for_deep_scan(
+            [
+                "http://localhost:3000",
+                "http://localhost:9090",
+                "http://localhost:8080",
+                "https://localhost:8443",
+                "http://localhost:19090",
+            ],
+            max_targets=3,
+        )
+        self.assertEqual(
+            ranked,
+            [
+                "https://localhost:8443",
+                "http://localhost:8080",
+                "http://localhost:9090",
+            ],
+        )
+
+    def test_collect_findings_includes_readiness_probe_results(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        agg = {
+            "results": [
+                {
+                    "tool": "readiness_probe",
+                    "success": True,
+                    "data": {
+                        "findings": [
+                            {
+                                "severity": "MEDIUM",
+                                "title": "Redis reachable without authentication",
+                                "evidence": "redis-cli PING returned PONG",
+                                "type": "redis_auth_exposure",
+                            },
+                            {
+                                "severity": "LOW",
+                                "title": "Debug endpoint accessible without authentication",
+                                "evidence": "http://localhost/debug/vars (HTTP 200)",
+                                "type": "debug_endpoint_exposure",
+                            },
+                        ]
+                    },
+                }
+            ]
+        }
+        findings = orch._collect_findings(agg)
+        self.assertEqual(len(findings), 2)
+        self.assertEqual(findings[0]["tool"], "readiness_probe")
+        self.assertEqual(findings[0]["severity"], "MEDIUM")
+
     def test_handles_failure(self):
         scanners = {
             "nmap": FakeFailScanner("nmap"),
@@ -202,6 +254,28 @@ class TestAuditOrchestrator(unittest.TestCase):
             self.assertEqual(first.get("status"), "potential_gap")
             self.assertEqual(first.get("confidence"), "medium")
             self.assertIn("PCI-DSS 4.0 Req 2", str(first.get("reference")))
+
+    def test_compliance_tagging_maps_readiness_probe_findings(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        findings = [
+            {
+                "severity": "MEDIUM",
+                "title": "Redis reachable without authentication",
+                "tool": "readiness_probe",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Prometheus config endpoint accessible without authentication",
+                "tool": "readiness_probe",
+            },
+        ]
+        out = orch._apply_compliance_tags({}, findings, "soc2")
+        self.assertEqual(len(out), 2)
+        first_maps = out[0].get("compliance_mappings") or []
+        second_maps = out[1].get("compliance_mappings") or []
+        self.assertTrue(any(m.get("control_key") == "access_control" for m in first_maps))
+        self.assertTrue(any(m.get("control_key") == "access_control" for m in second_maps))
+        self.assertTrue(any(m.get("status") == "potential_gap" for m in second_maps))
 
     def test_extract_tool_version_value_prefers_version_over_banner(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)

@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 import time
 from threading import Event
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1325,6 +1327,20 @@ class AuditOrchestrator:
                             "tool": "katana",
                         }
                     )
+            # Internal readiness probes (deterministic low-noise posture checks)
+            if tool == "readiness_probe":
+                for item in data.get("findings", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    findings.append(
+                        {
+                            "severity": str(item.get("severity") or "INFO").upper(),
+                            "title": str(item.get("title") or "Readiness probe finding"),
+                            "evidence": str(item.get("evidence") or ""),
+                            "tool": "readiness_probe",
+                            "type": item.get("type"),
+                        }
+                    )
             # WhatWeb tech stack
             if tool == "whatweb":
                 for entry in data.get("scan_data", []):
@@ -1893,6 +1909,16 @@ class AuditOrchestrator:
                     conf = "high" if "service role key" in title else "medium"
                     add_mapping(finding, "data_protection", conf)
 
+            if tool == "readiness_probe":
+                if has_any(title, ("metrics endpoint", "prometheus config endpoint", "debug endpoint")):
+                    conf = "medium" if severity in ("INFO", "LOW", "MEDIUM") else "high"
+                    add_mapping(finding, "access_control", conf)
+                    add_mapping(finding, "secure_config", "medium")
+                if has_any(title, ("redis reachable without authentication",)):
+                    add_mapping(finding, "access_control", "high")
+                if has_any(title, ("wildcard interfaces",)):
+                    add_mapping(finding, "secure_config", "medium")
+
         return findings
 
     def _nmap_args_for_mode(self, mode: str, compliance_profile: Optional[str] = None) -> str:
@@ -1953,6 +1979,222 @@ class AuditOrchestrator:
         # Prefer https first
         urls = sorted(set(urls), key=lambda u: (not u.startswith("https://"), u))
         return urls
+
+    def _prioritize_web_targets_for_deep_scan(
+        self,
+        web_targets: Sequence[str],
+        *,
+        max_targets: int = 3,
+    ) -> List[str]:
+        ordered: List[str] = []
+        seen = set()
+        for item in web_targets or []:
+            target = str(item or "").strip()
+            if not target or target in seen:
+                continue
+            seen.add(target)
+            ordered.append(target)
+
+        if max_targets <= 0:
+            return ordered
+
+        risk_ports = {
+            80,
+            443,
+            8080,
+            8443,
+            9000,
+            9090,
+            9100,
+            9443,
+            10443,
+            4443,
+            6443,
+        }
+
+        def sort_key(target: str) -> Tuple[int, int, int, int, str]:
+            try:
+                parsed = urlparse(target)
+                scheme = (parsed.scheme or "").lower()
+                port = int(parsed.port or (443 if scheme == "https" else 80))
+            except Exception:
+                scheme = "http"
+                port = 80
+
+            return (
+                0 if port in risk_ports else 1,
+                0 if scheme == "https" else 1,
+                0 if port in (80, 443) else 1,
+                port,
+                target,
+            )
+
+        ranked = sorted(ordered, key=sort_key)
+        return ranked[:max_targets]
+
+    def _http_probe_status(self, url: str, timeout_seconds: int = 3) -> Tuple[Optional[int], Optional[str], Optional[str]]:
+        request = Request(url, headers={"User-Agent": "supabash-readiness-probe/1.0"})
+        try:
+            with urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
+                status = int(response.getcode())
+                body = response.read(2048).decode("utf-8", errors="ignore")
+                return status, body, None
+        except HTTPError as e:
+            status = int(getattr(e, "code", 0) or 0) or None
+            body = ""
+            try:
+                body = (e.read() or b"").decode("utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            return status, body, None
+        except (URLError, TimeoutError, OSError) as e:
+            return None, None, str(e)
+        except Exception as e:
+            return None, None, str(e)
+
+    def _run_readiness_probe(
+        self,
+        scan_host: str,
+        web_targets: Sequence[str],
+        open_ports: Sequence[int],
+    ) -> Dict[str, Any]:
+        findings: List[Dict[str, Any]] = []
+        checks: List[Dict[str, Any]] = []
+        commands: List[str] = []
+
+        # 1) Listener scope check (localhost can still expose wildcard listeners).
+        ss_cmd = ["ss", "-lnt"]
+        commands.append(" ".join(ss_cmd))
+        try:
+            ss_out = subprocess.run(ss_cmd, capture_output=True, text=True, timeout=5, check=False)
+            ss_text = (ss_out.stdout or "").strip()
+            wildcard_ports: List[int] = []
+            if ss_out.returncode == 0 and ss_text:
+                for line in ss_text.splitlines()[1:]:
+                    cols = line.split()
+                    if len(cols) < 4:
+                        continue
+                    local_addr = cols[3].strip()
+                    if not (
+                        local_addr.startswith("0.0.0.0:")
+                        or local_addr.startswith("[::]:")
+                        or local_addr.startswith("*:")
+                    ):
+                        continue
+                    try:
+                        port = int(local_addr.rsplit(":", 1)[-1].strip("[]"))
+                        wildcard_ports.append(port)
+                    except Exception:
+                        continue
+            checks.append(
+                {
+                    "name": "listener_scope",
+                    "success": bool(ss_out.returncode == 0),
+                    "wildcard_ports": sorted(set(wildcard_ports)),
+                    "error": (ss_out.stderr or "").strip() or None,
+                }
+            )
+            if wildcard_ports:
+                risky = sorted(
+                    set(wildcard_ports).intersection({5432, 6379, 3306, 27017, 8080, 9090, 9100}).intersection(
+                        set(int(p) for p in (open_ports or []))
+                    )
+                )
+                if risky:
+                    findings.append(
+                        {
+                            "severity": "MEDIUM",
+                            "title": "Sensitive services listening on wildcard interfaces",
+                            "evidence": f"ss -lnt shows wildcard listeners on ports: {', '.join(str(p) for p in risky)}",
+                            "type": "listener_exposure",
+                        }
+                    )
+        except Exception as e:
+            checks.append({"name": "listener_scope", "success": False, "error": str(e)})
+
+        # 2) Unauthenticated endpoint probes on discovered web targets.
+        probe_targets = self._prioritize_web_targets_for_deep_scan(web_targets, max_targets=5)
+        probe_paths = (
+            ("/metrics", "Unauthenticated metrics endpoint accessible", "MEDIUM", "metrics_exposure"),
+            ("/api/v1/status/config", "Prometheus config endpoint accessible without authentication", "HIGH", "prometheus_config_exposure"),
+            ("/debug/vars", "Debug endpoint accessible without authentication", "LOW", "debug_endpoint_exposure"),
+        )
+        seen_urls = set()
+        for base in probe_targets:
+            base_url = str(base or "").rstrip("/")
+            if not base_url:
+                continue
+            for path, title, severity, finding_type in probe_paths:
+                probe_url = f"{base_url}{path}"
+                if probe_url in seen_urls:
+                    continue
+                seen_urls.add(probe_url)
+                status, _body, error = self._http_probe_status(probe_url, timeout_seconds=3)
+                checks.append(
+                    {
+                        "name": "http_probe",
+                        "url": probe_url,
+                        "status": status,
+                        "error": error,
+                    }
+                )
+                if status is not None and 200 <= status < 400:
+                    findings.append(
+                        {
+                            "severity": severity,
+                            "title": title,
+                            "evidence": f"{probe_url} (HTTP {status})",
+                            "type": finding_type,
+                        }
+                    )
+
+        # 3) Redis unauthenticated access posture check (best-effort).
+        if any(int(p) == 6379 for p in (open_ports or [])):
+            redis_cmd = ["redis-cli", "-h", scan_host, "-p", "6379", "PING"]
+            commands.append(" ".join(redis_cmd))
+            try:
+                redis_out = subprocess.run(redis_cmd, capture_output=True, text=True, timeout=5, check=False)
+                output = f"{redis_out.stdout or ''}\n{redis_out.stderr or ''}".strip().lower()
+                checks.append(
+                    {
+                        "name": "redis_auth_probe",
+                        "success": bool(redis_out.returncode == 0),
+                        "output": output[:300],
+                    }
+                )
+                if redis_out.returncode == 0 and "pong" in output:
+                    findings.append(
+                        {
+                            "severity": "MEDIUM",
+                            "title": "Redis reachable without authentication",
+                            "evidence": f"redis-cli PING returned PONG for {scan_host}:6379",
+                            "type": "redis_auth_exposure",
+                        }
+                    )
+            except FileNotFoundError:
+                checks.append(
+                    {
+                        "name": "redis_auth_probe",
+                        "success": False,
+                        "error": "redis-cli not installed",
+                    }
+                )
+            except Exception as e:
+                checks.append(
+                    {
+                        "name": "redis_auth_probe",
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
+
+        return {
+            "success": True,
+            "command": "internal readiness probes",
+            "findings": findings,
+            "checks": checks,
+            "commands": commands,
+        }
 
     def run(
         self,
@@ -2867,6 +3109,13 @@ class AuditOrchestrator:
         if not llm_enabled:
             agg["llm"] = {"enabled": False, "reason": "Disabled by config or --no-llm", "calls": []}
 
+        def deep_web_targets_for_run() -> List[str]:
+            if not web_targets:
+                return []
+            if lock_web_targets:
+                return [str(x).strip() for x in web_targets if str(x).strip()]
+            return self._prioritize_web_targets_for_deep_scan(web_targets, max_targets=3)
+
         if canceled():
             agg["canceled"] = True
             agg["finished_at"] = time.time()
@@ -2874,7 +3123,8 @@ class AuditOrchestrator:
 
         if parallel_web and web_targets:
             # Overlap nmap with web tools when URL is provided
-            web_target = web_targets[0]
+            prioritized_targets = deep_web_targets_for_run()
+            web_target = prioritized_targets[0] if prioritized_targets else web_targets[0]
             max_w = max(1, min(int(max_workers), 8))
             with ThreadPoolExecutor(max_workers=max_w) as ex:
                 note("tool_start", "nmap", f"Running nmap ({mode})")
@@ -2886,6 +3136,11 @@ class AuditOrchestrator:
                 note("tool_end", "nmap", "Finished nmap")
 
                 for entry in web_future.result():
+                    agg["results"].append(entry)
+
+            # Continue with additional prioritized web targets (if any).
+            for extra_target in [t for t in deep_web_targets_for_run() if t != web_target]:
+                for entry in run_web_tools(extra_target):
                     agg["results"].append(entry)
 
             if nmap_entry and nmap_entry.get("success"):
@@ -3207,12 +3462,15 @@ class AuditOrchestrator:
                     return agg
 
             if web_targets:
-                for entry in run_web_tools(web_targets[0]):
-                    agg["results"].append(entry)
+                deep_targets = deep_web_targets_for_run()
+                for target_url in deep_targets:
+                    for entry in run_web_tools(target_url):
+                        agg["results"].append(entry)
                 if run_nikto:
                     if self._has_scanner("nikto"):
                         try:
-                            u = urlparse(web_targets[0])
+                            nikto_target = deep_targets[0] if deep_targets else web_targets[0]
+                            u = urlparse(nikto_target)
                             host = u.hostname or scan_host
                             port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
                         except Exception:
@@ -3234,11 +3492,24 @@ class AuditOrchestrator:
                     else:
                         agg["results"].append(self._skip_tool("nikto", "Scanner not available"))
             else:
-                agg["results"].append(self._skip_tool("whatweb", "No web ports detected (80/443/8080/8443)"))
-                agg["results"].append(self._skip_tool("nuclei", "No web ports detected (80/443/8080/8443)"))
-                agg["results"].append(self._skip_tool("gobuster", "No web ports detected (80/443/8080/8443)"))
-                agg["results"].append(self._skip_tool("nikto", "No web ports detected (80/443/8080/8443)"))
-                agg["results"].append(self._skip_tool("wpscan", "No web ports detected (80/443/8080/8443)"))
+                agg["results"].append(self._skip_tool("whatweb", "No web targets detected from discovery"))
+                agg["results"].append(self._skip_tool("nuclei", "No web targets detected from discovery"))
+                agg["results"].append(self._skip_tool("gobuster", "No web targets detected from discovery"))
+                agg["results"].append(self._skip_tool("nikto", "No web targets detected from discovery"))
+                agg["results"].append(self._skip_tool("wpscan", "No web targets detected from discovery"))
+
+        if normalized_compliance and nmap_entry and nmap_entry.get("success"):
+            note("tool_start", "readiness_probe", "Running deterministic readiness probes")
+            readiness_entry = self._run_tool_if_enabled(
+                "readiness_probe",
+                lambda: self._run_readiness_probe(
+                    scan_host=scan_host,
+                    web_targets=deep_web_targets_for_run(),
+                    open_ports=agg.get("open_ports", []),
+                ),
+            )
+            agg["results"].append(readiness_entry)
+            note("tool_end", "readiness_probe", "Finished readiness probes")
 
         if normalized["sqlmap_url"]:
             if canceled():
