@@ -10,43 +10,43 @@ COMPLIANCE_COVERAGE_ROWS: Dict[str, List[Dict[str, Any]]] = {
         {"area": "CDE Asset & Service Inventory", "tools": ["nmap", "httpx", "whatweb"]},
         {"area": "Vulnerability Discovery & Exposure Checks", "tools": ["nuclei", "gobuster", "ffuf", "nikto", "sqlmap"]},
         {"area": "Transport Security Review", "tools": ["sslscan", "nmap"]},
-        {"area": "Access Control Exposure Review", "tools": ["hydra", "medusa", "crackmapexec", "supabase_audit"]},
+        {"area": "Access Control Exposure Review", "tools": ["readiness_probe", "nuclei", "hydra", "medusa", "crackmapexec", "supabase_audit"]},
     ],
     "compliance_soc2": [
         {"area": "Security Surface Inventory", "tools": ["nmap", "httpx", "whatweb"]},
         {"area": "Vulnerability & Misconfiguration Checks", "tools": ["nuclei", "gobuster", "ffuf", "nikto", "sqlmap"]},
         {"area": "Encryption/Transport Control Review", "tools": ["sslscan", "nmap"]},
-        {"area": "Access Control Exposure Review", "tools": ["hydra", "medusa", "crackmapexec", "supabase_audit"]},
+        {"area": "Access Control Exposure Review", "tools": ["readiness_probe", "nuclei", "hydra", "medusa", "crackmapexec", "supabase_audit"]},
     ],
     "compliance_iso": [
         {"area": "Asset Discovery & Service Mapping", "tools": ["nmap", "httpx", "whatweb"]},
         {"area": "Technical Vulnerability Management", "tools": ["nuclei", "gobuster", "ffuf", "nikto", "sqlmap"]},
         {"area": "Cryptographic Safeguard Review", "tools": ["sslscan", "nmap"]},
-        {"area": "Access Management Exposure Review", "tools": ["hydra", "medusa", "crackmapexec", "supabase_audit"]},
+        {"area": "Access Management Exposure Review", "tools": ["readiness_probe", "nuclei", "hydra", "medusa", "crackmapexec", "supabase_audit"]},
     ],
     "compliance_dora": [
         {"area": "ICT Exposure Inventory", "tools": ["nmap", "httpx", "whatweb"]},
         {"area": "Vulnerability Handling Evidence", "tools": ["nuclei", "gobuster", "ffuf", "nikto", "sqlmap"]},
         {"area": "Secure Communications Review", "tools": ["sslscan", "nmap"]},
-        {"area": "Operational Access Exposure Review", "tools": ["hydra", "medusa", "crackmapexec", "supabase_audit"]},
+        {"area": "Operational Access Exposure Review", "tools": ["readiness_probe", "nuclei", "hydra", "medusa", "crackmapexec", "supabase_audit"]},
     ],
     "compliance_nis2": [
         {"area": "Critical Service Exposure Inventory", "tools": ["nmap", "httpx", "whatweb"]},
         {"area": "Vulnerability Detection Evidence", "tools": ["nuclei", "gobuster", "ffuf", "nikto", "sqlmap"]},
         {"area": "Network Security & Encryption Review", "tools": ["sslscan", "nmap"]},
-        {"area": "Access Control Exposure Review", "tools": ["hydra", "medusa", "crackmapexec", "supabase_audit"]},
+        {"area": "Access Control Exposure Review", "tools": ["readiness_probe", "nuclei", "hydra", "medusa", "crackmapexec", "supabase_audit"]},
     ],
     "compliance_gdpr": [
         {"area": "Personal Data Exposure Surface Inventory", "tools": ["nmap", "httpx", "whatweb"]},
         {"area": "Security-of-Processing Technical Checks", "tools": ["nuclei", "gobuster", "ffuf", "nikto", "sqlmap"]},
         {"area": "Data-in-Transit Protection Review", "tools": ["sslscan", "nmap"]},
-        {"area": "Access Restriction Exposure Review", "tools": ["hydra", "medusa", "crackmapexec", "supabase_audit"]},
+        {"area": "Access Restriction Exposure Review", "tools": ["readiness_probe", "nuclei", "hydra", "medusa", "crackmapexec", "supabase_audit"]},
     ],
     "compliance_bsi": [
         {"area": "Baseline Service Inventory", "tools": ["nmap", "httpx", "whatweb"]},
         {"area": "Technical Vulnerability Checks", "tools": ["nuclei", "gobuster", "ffuf", "nikto", "sqlmap"]},
         {"area": "Transport Hardening Review", "tools": ["sslscan", "nmap"]},
-        {"area": "Authentication & Access Exposure Review", "tools": ["hydra", "medusa", "crackmapexec", "supabase_audit"]},
+        {"area": "Authentication & Access Exposure Review", "tools": ["readiness_probe", "nuclei", "hydra", "medusa", "crackmapexec", "supabase_audit"]},
     ],
 }
 
@@ -121,6 +121,9 @@ def _entry_has_effective_signal(tool: str, data: Any) -> bool:
     if t == "readiness_probe" and isinstance(data, dict):
         findings = data.get("findings")
         if isinstance(findings, list) and findings:
+            return True
+        checks = data.get("checks")
+        if isinstance(checks, list) and checks:
             return True
         return False
     return _has_payload(data)

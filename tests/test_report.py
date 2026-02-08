@@ -270,6 +270,53 @@ class TestReport(unittest.TestCase):
                 self.assertEqual(row.get("status"), "Not Assessed")
                 self.assertEqual(row.get("coverage_basis"), "inconclusive_signal")
 
+    def test_access_control_matrix_uses_readiness_probe_checks_signal(self):
+        report = {
+            "target": "localhost",
+            "compliance_profile": "compliance_soc2",
+            "results": [
+                {
+                    "tool": "readiness_probe",
+                    "success": True,
+                    "command": "internal readiness probes",
+                    "data": {
+                        "success": True,
+                        "findings": [],
+                        "checks": [
+                            {"name": "listener_scope", "success": True, "wildcard_ports": [5432, 6379]},
+                            {"name": "redis_auth_probe", "success": True, "output": "pong"},
+                        ],
+                    },
+                }
+            ],
+            "findings": [],
+        }
+        md = generate_markdown(report)
+        self.assertIn("| Access Control Exposure Review | Partial | readiness_probe |", md)
+        self.assertIn("basis=corroborated_findings", md)
+        matrix = report.get("compliance_coverage_matrix")
+        self.assertIsInstance(matrix, list)
+        if isinstance(matrix, list):
+            row = next((r for r in matrix if isinstance(r, dict) and r.get("area") == "Access Control Exposure Review"), None)
+            self.assertIsNotNone(row)
+            if isinstance(row, dict):
+                self.assertEqual(row.get("status"), "Partial")
+                self.assertEqual(row.get("evidence_source"), "readiness_probe")
+                self.assertEqual(row.get("coverage_basis"), "corroborated_findings")
+
+    def test_access_control_rows_include_readiness_probe_for_all_profiles(self):
+        for profile_name, rows in COMPLIANCE_COVERAGE_ROWS.items():
+            with self.subTest(profile=profile_name):
+                self.assertIsInstance(rows, list)
+                access_rows = [r for r in rows if isinstance(r, dict) and "Access" in str(r.get("area", ""))]
+                self.assertTrue(access_rows)
+                tools = access_rows[0].get("tools")
+                self.assertIsInstance(tools, list)
+                if isinstance(tools, list):
+                    normalized = [str(t).strip().lower() for t in tools]
+                    self.assertIn("readiness_probe", normalized)
+                    self.assertIn("nuclei", normalized)
+
     def test_compliance_sections_render_for_all_profiles(self):
         for profile_name in sorted(COMPLIANCE_COVERAGE_ROWS.keys()):
             with self.subTest(profile=profile_name):
