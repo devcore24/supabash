@@ -35,7 +35,7 @@ macOS: manual/experimental setup only, untested.
 *   **🤖 Autonomous Reasoning (Beta):** Tool-calling planning proposes bounded, evidence-driven follow-ups.
 *   **🛡️ Assessment Coverage:** Infrastructure, web apps, containers, and wireless (experimental) with scope controls.
 *   **📋 Compliance-Mapped:** Optional compliance profiles (PCI, SOC2, ISO 27001, DORA, NIS2, GDPR, BSI) tune tool settings and annotate findings with control references for readiness.
-*   **📝 Assessment Reporting + Evidence Packs:** Evidence, severity, and remediation guidance in JSON/Markdown/HTML/pdf outputs.
+*   **📝 Assessment Reporting + Evidence Packs:** Structured JSON/Markdown/HTML/PDF outputs with severity, evidence, compliance coverage matrix, and recommended next actions.
 *   **⚡ Performance:** Combines fast scanners (Rust/Go) with deep-dive frameworks (Python/Ruby).
 *   **🔌 Extensible Design:** Modular wrappers with a configurable tool registry (plugins planned).
 
@@ -272,7 +272,7 @@ Notes:
 - AI audit uses provider tool-calling to plan additional evidence collection. If tool-calling is unsupported, Supabash logs a warning, skips the agentic phase, and still produces the baseline report.
 - Agentic planning uses a `profile` field (`fast|standard|aggressive|compliance_*`) to guide assessment intensity and compliance posture.
 - Compliance profiles tune tool settings and annotate findings with control references when evidence supports a requirement.
-- Reports include compliance profile/focus in the methodology to document audit intent and scope.
+- Reports include compliance profile/focus in methodology, scope assumptions, a compliance coverage matrix, not-assessable areas, and deterministic recommended next actions.
 - AI audit writes JSON + Markdown by default; HTML/PDF exports are optional via `core.report_exports`.
 
 ### 3. Container Image Scan

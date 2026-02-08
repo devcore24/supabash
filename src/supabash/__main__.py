@@ -524,23 +524,6 @@ def audit(
         if provider not in ("aws", "azure", "gcp"):
             console.print("[red]--scoutsuite-provider must be one of: aws, azure, gcp[/red]")
             raise typer.Exit(code=1)
-    if medusa and (not medusa_usernames or not medusa_passwords):
-        console.print("[red]--medusa requires --medusa-usernames and --medusa-passwords[/red]")
-        raise typer.Exit(code=1)
-    if crackmapexec and not (cme_username or cme_password or cme_hashes or cme_args):
-        console.print("[red]--crackmapexec requires creds/hashes or --cme-args for anonymous runs[/red]")
-        raise typer.Exit(code=1)
-    if scoutsuite:
-        provider = (scoutsuite_provider or "").strip().lower()
-        if provider not in ("aws", "azure", "gcp"):
-            console.print("[red]--scoutsuite-provider must be one of: aws, azure, gcp[/red]")
-            raise typer.Exit(code=1)
-    if medusa and (not medusa_usernames or not medusa_passwords):
-        console.print("[red]--medusa requires --medusa-usernames and --medusa-passwords[/red]")
-        raise typer.Exit(code=1)
-    if crackmapexec and not (cme_username or cme_password or cme_hashes or cme_args):
-        console.print("[red]--crackmapexec requires creds/hashes or --cme-args for anonymous runs[/red]")
-        raise typer.Exit(code=1)
 
     default_base = "ai-audit" if agentic and not output else "report"
     if agentic and not output:

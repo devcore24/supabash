@@ -1834,12 +1834,88 @@ class AuditOrchestrator:
                     return True
             return False
 
+        def extract_open_port(title_text: str) -> Optional[int]:
+            m = re.search(r"\bopen port\s+(\d+)\/tcp\b", title_text)
+            if not m:
+                return None
+            try:
+                return int(m.group(1))
+            except Exception:
+                return None
+
+        db_cache_indicators = (
+            "postgresql",
+            "mysql",
+            "mariadb",
+            "mssql",
+            "mongodb",
+            "redis",
+            "elasticsearch",
+            "opensearch",
+            "cassandra",
+            "rabbitmq",
+            "kafka",
+            "memcached",
+        )
+        web_service_indicators = (
+            "http ",
+            "http-",
+            "https ",
+            "nginx",
+            "apache",
+            "node.js express",
+            "golang net/http",
+        )
+        sensitive_surface_indicators = (
+            "/admin",
+            "/debug",
+            "/metrics",
+            "/actuator",
+            "/swagger",
+            "/openapi",
+            "/.git",
+            "/.env",
+            "/config",
+            "/backup",
+            "/console",
+        )
+        cloud_control_indicators = (
+            "public",
+            "bucket",
+            "s3",
+            "iam",
+            "mfa",
+            "encryption",
+            "kms",
+            "cloudtrail",
+            "logging",
+            "monitoring",
+            "security group",
+            "network acl",
+            "rds",
+            "exposed",
+            "vulnerab",
+        )
+
         for finding in findings:
             if not isinstance(finding, dict):
                 continue
             tool = str(finding.get("tool") or "").lower()
             title = str(finding.get("title") or "").strip().lower()
             severity = str(finding.get("severity") or "INFO").strip().upper()
+            evidence = str(finding.get("evidence") or "").strip().lower()
+            combined = f"{title} {evidence}"
+
+            # Cross-tool generic signals.
+            if has_any(combined, ("without authentication", "authentication bypass", "default credentials")):
+                conf = "high" if severity in ("HIGH", "CRITICAL", "MEDIUM") else "medium"
+                add_mapping(finding, "access_control", conf)
+            if has_any(combined, ("exposed", "publicly accessible", "public endpoint")) and severity in (
+                "HIGH",
+                "CRITICAL",
+                "MEDIUM",
+            ):
+                add_mapping(finding, "vuln_mgmt", "medium")
 
             if tool == "sslscan":
                 if has_any(
@@ -1860,6 +1936,28 @@ class AuditOrchestrator:
                 elif severity in ("HIGH", "CRITICAL", "MEDIUM"):
                     add_mapping(finding, "crypto", "medium")
 
+            if tool == "nmap" and "open port" in title:
+                port = extract_open_port(title)
+                if has_any(combined, db_cache_indicators):
+                    conf = "high" if severity in ("HIGH", "CRITICAL") else "medium"
+                    add_mapping(finding, "access_control", conf)
+                    add_mapping(finding, "data_protection", "medium")
+                if has_any(combined, web_service_indicators):
+                    if port is not None and port not in (80, 443):
+                        conf = "medium" if severity in ("HIGH", "CRITICAL", "MEDIUM") else "low"
+                        add_mapping(finding, "secure_config", conf)
+                    elif severity in ("HIGH", "CRITICAL", "MEDIUM"):
+                        add_mapping(finding, "secure_config", "low")
+                if has_any(combined, ("unknown", "tcpwrapped", "remoteanything", "jetdirect")):
+                    conf = "medium" if severity in ("HIGH", "CRITICAL", "MEDIUM") else "low"
+                    add_mapping(finding, "secure_config", conf)
+
+            if tool == "whatweb":
+                if has_any(combined, ("x-powered-by", "uncommonheaders", "httpserver", "server")):
+                    add_mapping(finding, "secure_config", "low")
+                if has_any(combined, ("passwordfield", "login", "admin")):
+                    add_mapping(finding, "access_control", "low")
+
             if tool == "sqlmap" or "sql injection" in title:
                 add_mapping(finding, "vuln_mgmt", "high")
 
@@ -1868,23 +1966,27 @@ class AuditOrchestrator:
             ):
                 add_mapping(finding, "access_control", "high")
 
-            if tool in ("nuclei", "nikto", "ffuf", "gobuster"):
+            if tool in ("nuclei", "nikto", "ffuf", "gobuster", "katana"):
                 # Avoid broad false mapping on generic informational records (for example CAA).
                 if "caa record" in title:
                     pass
                 elif has_any(
-                    title,
+                    combined,
                     (
                         "missing security headers",
                         "allowed options method",
                         "directory listing",
                         "default page",
+                        "discovered path",
+                        "discovered endpoint",
                     ),
                 ):
                     conf = "medium" if severity in ("INFO", "LOW") else "high"
                     add_mapping(finding, "secure_config", conf)
+                    if has_any(combined, sensitive_surface_indicators):
+                        add_mapping(finding, "access_control", conf)
                 elif has_any(
-                    title,
+                    combined,
                     (
                         "unauthenticated",
                         "default credentials",
@@ -1894,11 +1996,11 @@ class AuditOrchestrator:
                 ):
                     conf = "medium" if severity in ("INFO", "LOW") else "high"
                     add_mapping(finding, "access_control", conf)
-                elif has_any(title, ("prometheus metrics", "exposed metrics", "service role key", "anon key")):
+                elif has_any(combined, ("prometheus metrics", "exposed metrics", "service role key", "anon key")):
                     conf = "medium" if severity in ("INFO", "LOW") else "high"
                     add_mapping(finding, "data_protection", conf)
                 elif has_any(
-                    title,
+                    combined,
                     (
                         "open redirect",
                         "xss",
@@ -1914,6 +2016,41 @@ class AuditOrchestrator:
 
             if tool == "trivy" and severity in ("HIGH", "CRITICAL", "MEDIUM"):
                 add_mapping(finding, "vuln_mgmt", "high")
+
+            if tool == "searchsploit":
+                if has_any(combined, ("exploit", "cve-", "remote code execution", "privilege escalation")):
+                    conf = "medium" if severity in ("INFO", "LOW") else "high"
+                    add_mapping(finding, "vuln_mgmt", conf)
+
+            if tool == "wpscan":
+                if has_any(combined, ("vulnerability", "cve-", "wordpress vulnerability")):
+                    conf = "high" if severity in ("HIGH", "CRITICAL", "MEDIUM") else "medium"
+                    add_mapping(finding, "vuln_mgmt", conf)
+                if has_any(combined, ("user enumerated", "interesting finding")):
+                    add_mapping(finding, "access_control", "low")
+
+            if tool == "crackmapexec":
+                if has_any(combined, ("valid credentials", "privilege escalation")):
+                    add_mapping(finding, "access_control", "high")
+                if has_any(combined, ("smb share discovered",)):
+                    add_mapping(finding, "access_control", "medium")
+
+            if tool in ("scoutsuite", "prowler"):
+                if has_any(combined, cloud_control_indicators):
+                    conf = "high" if severity in ("HIGH", "CRITICAL", "MEDIUM") else "medium"
+                    add_mapping(finding, "secure_config", conf)
+                    add_mapping(finding, "vuln_mgmt", conf)
+                if has_any(combined, ("public", "encryption", "bucket", "gdpr", "pii", "s3", "storage")):
+                    conf = "high" if severity in ("HIGH", "CRITICAL", "MEDIUM") else "medium"
+                    add_mapping(finding, "data_protection", conf)
+                if has_any(combined, ("iam", "mfa", "access key", "privilege")):
+                    conf = "high" if severity in ("HIGH", "CRITICAL", "MEDIUM") else "medium"
+                    add_mapping(finding, "access_control", conf)
+
+            if tool == "aircrack-ng":
+                if has_any(combined, ("wep network detected", "open wifi network detected")):
+                    add_mapping(finding, "access_control", "high" if "wep" in combined else "medium")
+                    add_mapping(finding, "crypto", "high" if "wep" in combined else "medium")
 
             if tool == "supabase_audit":
                 if has_any(title, ("service role key", "without authentication", "rest api accessible", "rpc", "rls")):

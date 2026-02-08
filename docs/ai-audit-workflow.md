@@ -22,6 +22,7 @@ The output is a **Supabash Audit (Readiness)** report intended for compliance re
    - Merges baseline + agentic results.
    - Recomputes findings, adds optional LLM summary/remediation.
    - Writes a single JSON report (plus optional Markdown/HTML/PDF if enabled).
+   - For compliance runs, includes scope assumptions, coverage matrix, not-assessable areas, and recommended next actions.
 
 ---
 

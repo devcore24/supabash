@@ -277,6 +277,53 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertTrue(any(m.get("control_key") == "access_control" for m in second_maps))
         self.assertTrue(any(m.get("status") == "potential_gap" for m in second_maps))
 
+    def test_compliance_tagging_maps_nmap_database_exposure(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        findings = [
+            {
+                "severity": "INFO",
+                "title": "Open port 5432/tcp",
+                "tool": "nmap",
+                "evidence": "postgresql PostgreSQL DB 9.6.0 or later",
+            }
+        ]
+        out = orch._apply_compliance_tags({}, findings, "soc2")
+        maps = out[0].get("compliance_mappings") or []
+        control_keys = {m.get("control_key") for m in maps if isinstance(m, dict)}
+        self.assertIn("access_control", control_keys)
+        self.assertIn("data_protection", control_keys)
+
+    def test_compliance_tagging_maps_whatweb_posture_signals(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        findings = [
+            {
+                "severity": "INFO",
+                "title": "Tech stack detected",
+                "tool": "whatweb",
+                "evidence": "Country, IP, X-Powered-By, UncommonHeaders",
+            }
+        ]
+        out = orch._apply_compliance_tags({}, findings, "iso")
+        maps = out[0].get("compliance_mappings") or []
+        self.assertTrue(any(m.get("control_key") == "secure_config" for m in maps if isinstance(m, dict)))
+
+    def test_compliance_tagging_maps_cloud_findings(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        findings = [
+            {
+                "severity": "HIGH",
+                "title": "S3 bucket publicly accessible without encryption",
+                "tool": "scoutsuite",
+                "evidence": "bucket=logs-prod, public=true, encryption=disabled",
+            }
+        ]
+        out = orch._apply_compliance_tags({}, findings, "gdpr")
+        maps = out[0].get("compliance_mappings") or []
+        control_keys = {m.get("control_key") for m in maps if isinstance(m, dict)}
+        self.assertIn("secure_config", control_keys)
+        self.assertIn("vuln_mgmt", control_keys)
+        self.assertIn("data_protection", control_keys)
+
     def test_extract_tool_version_value_prefers_version_over_banner(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
         sample = """

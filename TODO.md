@@ -17,21 +17,40 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 - [x] **Improve compliance coverage matrix evidence attribution**
     - [x] Ensure matrix rows cite tools that actually produced evidence in the run.
     - [x] Avoid stale/default evidence sources in compliance rows.
+    - [x] Prevent false-positive evidence attribution when a tool run is successful but has no meaningful exposure signal.
 - [x] **Tighten SOC2 mapping quality**
     - [x] Add mapping rationale + confidence for summary-level findings.
     - [x] Continue using softened wording (`Potential Gap`, `Requires Validation`).
+    - [x] Remove duplicate compliance label rendering (`Potential Gap: Potential Gap: ...`).
 - [x] **Add explicit “Not Assessable Automatically” section**
     - [x] List SOC2 areas that network/web scans cannot validate automatically.
     - [x] Keep this section deterministic and profile-aware.
+- [x] **Add action-oriented closure section**
+    - [x] Add deterministic `Recommended Next Actions` to improve audit-readability and remediation handoff.
 - [x] **Reduce detailed findings noise while preserving traceability**
     - [x] Add correlated-view hints for repeated findings with same endpoint/control signal.
     - [x] Keep full raw evidence in manifest artifacts.
-- [ ] **Maintain format parity (MD/HTML/PDF)**
-    - [ ] Ensure summary + matrix sections render identically across formats.
-    - [ ] Keep table readability and avoid wrapped header/word splitting regressions.
+- [x] **Maintain format parity (MD/HTML/PDF)**
+    - [x] Ensure summary + matrix sections render identically across formats.
+    - [x] Keep table readability and avoid wrapped header/word splitting regressions.
 - [x] **CI regression tests for report clarity**
     - [x] Snapshot tests for summary correlation and matrix attribution.
     - [x] Keep deterministic order and counts across repeated runs.
+
+---
+
+## 🎯 Phase 10: Readiness Depth Sprint (Next)
+*Goal: improve control-depth signal without sacrificing deterministic output quality.*
+
+- [ ] **Expand compliance mapping breadth**
+    - [x] Add deterministic control-family mappings for common service-exposure findings across all profiles.
+    - [x] Keep mapping confidence explicit and avoid hard non-compliance wording.
+- [ ] **Add deterministic next-actions by profile**
+    - [ ] Extend `Recommended Next Actions` with profile-aware ordering (SOC2/PCI/ISO/…).
+    - [ ] Add unit tests for action generation stability.
+- [ ] **Coverage matrix quality improvements**
+    - [ ] Add optional `coverage_basis` field to make evidence-source decisions explicit in JSON.
+    - [ ] Ensure rows fall back to `Not Assessed` when signal is inconclusive.
 
 ---
 
