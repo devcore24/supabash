@@ -147,6 +147,14 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         if finished:
             lines.append(f"- finished_at: {finished}")
 
+    def _normalize_mapping_text(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        text = re.sub(r"^\s*Potential\s+Gap:\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
     # TOC (anchors match GitHub-style headings)
     lines.append("\n## Table of Contents")
     toc = [
@@ -159,6 +167,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Findings Overview", "#findings-overview"),
         ("Findings (Detailed)", "#findings-detailed") if has_findings else None,
+        ("Recommended Next Actions", "#recommended-next-actions") if has_findings else None,
         ("Tools Run", "#tools-run"),
         ("Commands Executed", "#commands-executed"),
     ]
@@ -255,15 +264,15 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     if not reference:
                         continue
                     if confidence in ("low", "medium", "high"):
-                        text = f"{reference} (mapping confidence: {confidence})"
+                        text = _normalize_mapping_text(f"{reference} (mapping confidence: {confidence})")
                     else:
-                        text = reference
+                        text = _normalize_mapping_text(reference)
                     if text not in grouped[key]["compliance_mapping_items"]:
                         grouped[key]["compliance_mapping_items"].append(text)
             compliance_tags = item.get("compliance_tags")
             if isinstance(compliance_tags, list):
                 for tag in compliance_tags:
-                    text = str(tag).strip()
+                    text = _normalize_mapping_text(tag)
                     if text and text not in grouped[key]["compliance_mapping_items"]:
                         grouped[key]["compliance_mapping_items"].append(text)
 
@@ -422,7 +431,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     if compliance_mapping_items:
                         lines.append("  - Compliance Mapping:")
                         for mapping in compliance_mapping_items[:3]:
-                            lines.append(f"    - Potential Gap: {mapping}")
+                            lines.append(f"    - Potential Gap: {_normalize_mapping_text(mapping)}")
                         mapping_sources = [
                             str(x).strip().lower()
                             for x in (f.get("mapping_sources") or [])
@@ -557,6 +566,25 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             return len(data) > 0
         return True
 
+    def _entry_has_effective_signal(tool: str, data: Any) -> bool:
+        t = str(tool or "").strip().lower()
+        if t == "supabase_audit" and isinstance(data, dict):
+            # Avoid overstating access-control coverage when supabase_audit ran
+            # successfully but found no meaningful exposure signal.
+            for key in ("exposures", "keys", "exposed_urls", "rpc_candidates", "supabase_urls"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return True
+                if isinstance(value, (list, dict, tuple, set)) and len(value) > 0:
+                    return True
+            return False
+        if t == "readiness_probe" and isinstance(data, dict):
+            findings = data.get("findings")
+            if isinstance(findings, list) and findings:
+                return True
+            return False
+        return _has_payload(data)
+
     def _tool_signal_index(results: Any, findings: Any) -> Dict[str, Dict[str, Any]]:
         signal: Dict[str, Dict[str, Any]] = {}
         if isinstance(results, list):
@@ -569,7 +597,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                 slot = signal.setdefault(tool, {"has_payload": False, "finding_count": 0})
                 if bool(entry.get("success")) and not bool(entry.get("skipped")):
                     data = entry.get("data")
-                    if _has_payload(data):
+                    if _entry_has_effective_signal(tool, data):
                         slot["has_payload"] = True
         if isinstance(findings, list):
             for finding in findings:
@@ -1064,9 +1092,87 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     lines.append(f"  - Compliance Mapping: {'; '.join(mapping_parts)}")
             compliance_tags = f.get("compliance_tags")
             if isinstance(compliance_tags, list) and compliance_tags and not isinstance(compliance_mappings, list):
-                tags = [str(t).strip() for t in compliance_tags if str(t).strip()]
+                tags = [_normalize_mapping_text(t) for t in compliance_tags if _normalize_mapping_text(t)]
                 if tags:
-                    lines.append(f"  - Compliance Mapping: {'; '.join(tags)}")
+                    mapped = [f"Potential Gap: {t}" for t in tags]
+                    lines.append(f"  - Compliance Mapping: {'; '.join(mapped)}")
+
+    def _recommended_next_actions(
+        summary_items: List[Dict[str, Any]],
+        tool_items: List[Dict[str, Any]],
+        profile: Any,
+    ) -> List[str]:
+        source = summary_items if summary_items else tool_items
+        signals: Set[str] = set()
+        for item in source:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip().lower()
+            evidence = str(item.get("evidence") or "").strip().lower()
+            text = f"{title} {evidence}"
+            if text:
+                signals.add(text)
+
+        def has_signal(*phrases: str) -> bool:
+            for s in signals:
+                for p in phrases:
+                    if p in s:
+                        return True
+            return False
+
+        actions: List[str] = []
+        if has_signal("prometheus", "/metrics", "metrics endpoint", "status/config", "pprof", "debug endpoint"):
+            actions.append(
+                "Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported."
+            )
+        if has_signal("redis", "6379", "without authentication", "no auth"):
+            actions.append(
+                "Harden Redis: require authentication/ACLs, bind to localhost or private interfaces, and block untrusted network access at the firewall."
+            )
+        if has_signal("postgres", "5432"):
+            actions.append(
+                "Limit PostgreSQL exposure to required application hosts and enforce strong auth/TLS policies for database connectivity."
+            )
+        if has_signal("wildcard", "0.0.0.0", "open port", "service exposed", "non-standard http ports"):
+            actions.append(
+                "Reduce attack surface by closing unused listeners and rebinding critical services from wildcard interfaces to least-privilege network zones."
+            )
+        if has_signal("missing security headers", "allowed options method", "default page"):
+            actions.append(
+                "Apply baseline web hardening: security headers, method restrictions, and removal of unnecessary default/admin endpoints."
+            )
+        if has_signal("no tls", "cleartext", "tls", "ssl"):
+            actions.append(
+                "Enforce transport security on externally reachable services and validate TLS configuration strength on non-standard service ports."
+            )
+
+        profile_key = str(profile or "").strip().lower()
+        if profile_key:
+            actions.append(
+                "Collect manual control-operation evidence for governance/process controls not assessable by automated scanning (for readiness review)."
+            )
+        actions.append(
+            "After remediation, rerun the readiness assessment and compare deltas in findings severity, exposed services, and evidence artifacts."
+        )
+
+        deduped: List[str] = []
+        seen: Set[str] = set()
+        for action in actions:
+            text = str(action).strip()
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(text)
+        return deduped[:8]
+
+    recommended_actions = _recommended_next_actions(summary_findings, agg_findings, compliance_profile)
+    if recommended_actions:
+        lines.append("\n## Recommended Next Actions")
+        for idx, action in enumerate(recommended_actions, start=1):
+            lines.append(f"{idx}. {action}")
 
     # Tools run (table + short notes)
     results = report.get("results", []) or []
