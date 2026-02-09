@@ -44,10 +44,10 @@ class SupabaseAuditScanner:
         if not urls:
             return {"success": False, "error": "No targets provided", "command": "supabase_audit"}
 
-        max_pages = max(1, int(max_pages))
         resolved_timeout = resolve_timeout_seconds(timeout_seconds, default=10)
 
         found_supabase_urls: List[str] = []
+        supabase_candidate_bases: List[str] = []
         exposed_urls: List[Dict[str, str]] = []
         keys: List[Dict[str, str]] = []
         rpc_candidates: List[str] = []
@@ -56,8 +56,7 @@ class SupabaseAuditScanner:
         for target in urls:
             if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
                 return {"success": False, "canceled": True, "command": "supabase_audit"}
-            if len(page_hits) >= max_pages:
-                break
+
             direct_matches = list({u for u in self.SUPABASE_URL_RE.findall(target)})
             for u in direct_matches:
                 normalized = self._normalize_supabase_url(u)
@@ -71,10 +70,10 @@ class SupabaseAuditScanner:
                 continue
             if resp is None:
                 continue
+            page_hits.append({"url": target, "status": resp.status_code})
             text = resp.text or ""
             if not text.strip():
                 continue
-            page_hits.append({"url": target, "status": resp.status_code})
 
             urls_found = list({u for u in self.SUPABASE_URL_RE.findall(text)})
             if urls_found:
@@ -84,7 +83,12 @@ class SupabaseAuditScanner:
                         found_supabase_urls.append(normalized)
                     exposed_urls.append({"supabase_url": normalized, "source": target})
 
-            for key_type, key_value in self._extract_keys(text):
+            extracted_keys = self._extract_keys(text)
+            if extracted_keys:
+                base = self._normalize_supabase_url(target)
+                if base and base not in supabase_candidate_bases:
+                    supabase_candidate_bases.append(base)
+            for key_type, key_value in extracted_keys:
                 keys.append(
                     {
                         "type": key_type,
@@ -93,9 +97,19 @@ class SupabaseAuditScanner:
                     }
                 )
 
-            for rpc in self._extract_rpc_candidates(text):
+            extracted_rpcs = self._extract_rpc_candidates(text)
+            if extracted_rpcs:
+                base = self._normalize_supabase_url(target)
+                if base and base not in supabase_candidate_bases:
+                    supabase_candidate_bases.append(base)
+            for rpc in extracted_rpcs:
                 if rpc not in rpc_candidates:
                     rpc_candidates.append(rpc)
+
+            if "supabase" in text.lower():
+                base = self._normalize_supabase_url(target)
+                if base and base not in supabase_candidate_bases:
+                    supabase_candidate_bases.append(base)
 
         if supabase_urls_override:
             for u in supabase_urls_override:
@@ -106,8 +120,14 @@ class SupabaseAuditScanner:
                     found_supabase_urls.append(normalized)
                 exposed_urls.append({"supabase_url": normalized, "source": "override"})
 
+        probe_bases: List[str] = []
+        for base in found_supabase_urls + supabase_candidate_bases:
+            normalized = self._normalize_supabase_url(base)
+            if normalized and normalized not in probe_bases:
+                probe_bases.append(normalized)
+
         exposures = self._probe_supabase_endpoints(
-            found_supabase_urls,
+            probe_bases,
             rpc_candidates,
             timeout=resolved_timeout,
             cancel_event=cancel_event,

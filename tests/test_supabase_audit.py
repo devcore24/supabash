@@ -59,6 +59,19 @@ class TestSupabaseAudit(unittest.TestCase):
         self.assertIn("rpc_root_public", exposure_types)
         self.assertIn("rpc_public", exposure_types)
 
+    def test_scans_all_targets_even_when_content_parse_is_capped(self):
+        responses = {
+            ("GET", "https://one.example.com"): FakeResponse(text="hello", status_code=200),
+            ("GET", "https://two.example.com"): FakeResponse(text="world", status_code=200),
+        }
+        scanner = SupabaseAuditScanner(session=FakeSession(responses))
+        result = scanner.scan(["https://one.example.com", "https://two.example.com"], max_pages=1)
+        self.assertTrue(result["success"])
+        self.assertEqual(
+            result.get("scanned"),
+            ["https://one.example.com", "https://two.example.com"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
