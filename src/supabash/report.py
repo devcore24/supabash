@@ -328,6 +328,171 @@ def build_compliance_coverage_matrix(report: Dict[str, Any]) -> List[Dict[str, A
         )
     return matrix
 
+def build_recommended_next_actions(
+    summary_items: List[Dict[str, Any]],
+    tool_items: List[Dict[str, Any]],
+    profile: Any,
+) -> List[str]:
+    source = summary_items if summary_items else tool_items
+    signals: Set[str] = set()
+    for item in source:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip().lower()
+        evidence = str(item.get("evidence") or "").strip().lower()
+        text = f"{title} {evidence}"
+        if text:
+            signals.add(text)
+
+    def has_signal(*phrases: str) -> bool:
+        for s in signals:
+            for p in phrases:
+                if p in s:
+                    return True
+        return False
+
+    profile_key = str(profile or "").strip().lower()
+    action_text = {
+        "monitoring_debug": (
+            "Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported."
+        ),
+        "redis_exposure": (
+            "Harden Redis: require authentication/ACLs, bind to localhost or private interfaces, and block untrusted network access at the firewall."
+        ),
+        "postgres_exposure": (
+            "Limit PostgreSQL exposure to required application hosts and enforce strong auth/TLS policies for database connectivity."
+        ),
+        "attack_surface": (
+            "Reduce attack surface by closing unused listeners and rebinding critical services from wildcard interfaces to least-privilege network zones."
+        ),
+        "web_hardening": (
+            "Apply baseline web hardening: security headers, method restrictions, and removal of unnecessary default/admin endpoints."
+        ),
+        "tls_hardening": (
+            "Enforce transport security on externally reachable services and validate TLS configuration strength on non-standard service ports."
+        ),
+    }
+    triggered: Set[str] = set()
+    if has_signal("prometheus", "/metrics", "metrics endpoint", "status/config", "pprof", "debug endpoint"):
+        triggered.add("monitoring_debug")
+    if has_signal("redis", "6379", "without authentication", "no auth"):
+        triggered.add("redis_exposure")
+    if has_signal("postgres", "5432"):
+        triggered.add("postgres_exposure")
+    if has_signal("wildcard", "0.0.0.0", "open port", "service exposed", "non-standard http ports"):
+        triggered.add("attack_surface")
+    if has_signal("missing security headers", "allowed options method", "default page"):
+        triggered.add("web_hardening")
+    if has_signal("no tls", "cleartext", "tls", "ssl"):
+        triggered.add("tls_hardening")
+
+    ordered_keys_by_profile: Dict[str, List[str]] = {
+        "compliance_pci": [
+            "tls_hardening",
+            "postgres_exposure",
+            "redis_exposure",
+            "monitoring_debug",
+            "web_hardening",
+            "attack_surface",
+        ],
+        "compliance_soc2": [
+            "monitoring_debug",
+            "attack_surface",
+            "web_hardening",
+            "tls_hardening",
+            "postgres_exposure",
+            "redis_exposure",
+        ],
+        "compliance_iso": [
+            "attack_surface",
+            "web_hardening",
+            "tls_hardening",
+            "monitoring_debug",
+            "postgres_exposure",
+            "redis_exposure",
+        ],
+        "compliance_dora": [
+            "monitoring_debug",
+            "attack_surface",
+            "tls_hardening",
+            "web_hardening",
+            "postgres_exposure",
+            "redis_exposure",
+        ],
+        "compliance_nis2": [
+            "attack_surface",
+            "monitoring_debug",
+            "web_hardening",
+            "tls_hardening",
+            "postgres_exposure",
+            "redis_exposure",
+        ],
+        "compliance_gdpr": [
+            "tls_hardening",
+            "monitoring_debug",
+            "web_hardening",
+            "attack_surface",
+            "postgres_exposure",
+            "redis_exposure",
+        ],
+        "compliance_bsi": [
+            "attack_surface",
+            "web_hardening",
+            "monitoring_debug",
+            "tls_hardening",
+            "postgres_exposure",
+            "redis_exposure",
+        ],
+    }
+    default_order = [
+        "monitoring_debug",
+        "redis_exposure",
+        "postgres_exposure",
+        "attack_surface",
+        "web_hardening",
+        "tls_hardening",
+    ]
+    ordered_keys = ordered_keys_by_profile.get(profile_key, default_order)
+
+    actions: List[str] = []
+    for k in ordered_keys:
+        if k in triggered:
+            actions.append(action_text[k])
+
+    if profile_key == "compliance_pci":
+        actions.append(
+            "Collect manual evidence for PCI readiness boundaries not automatable here (CDE scoping, CHD/SAD handling, key lifecycle, and formal control operation records)."
+        )
+    elif profile_key == "compliance_soc2":
+        actions.append(
+            "Collect SOC 2 control-operation evidence not assessable by scanning (JML/access reviews, change approvals, incident response drills, and policy governance records)."
+        )
+    elif profile_key:
+        actions.append(
+            "Collect manual control-operation evidence for governance/process controls not assessable by automated scanning (for readiness review)."
+        )
+    else:
+        actions.append(
+            "Collect manual operational evidence for controls not assessable by technical scanning (governance/process readiness)."
+        )
+
+    actions.append(
+        "After remediation, rerun the readiness assessment and compare deltas in findings severity, exposed services, and evidence artifacts."
+    )
+
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for action in actions:
+        text = str(action).strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(text)
+    return deduped[:8]
+
 def generate_markdown(report: Dict[str, Any]) -> str:
     lines = []
     target = report.get("target", "unknown")
@@ -1168,172 +1333,8 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     mapped = [f"Potential Gap: {t}" for t in tags]
                     lines.append(f"  - Compliance Mapping: {'; '.join(mapped)}")
 
-    def _recommended_next_actions(
-        summary_items: List[Dict[str, Any]],
-        tool_items: List[Dict[str, Any]],
-        profile: Any,
-    ) -> List[str]:
-        source = summary_items if summary_items else tool_items
-        signals: Set[str] = set()
-        for item in source:
-            if not isinstance(item, dict):
-                continue
-            title = str(item.get("title") or "").strip().lower()
-            evidence = str(item.get("evidence") or "").strip().lower()
-            text = f"{title} {evidence}"
-            if text:
-                signals.add(text)
-
-        def has_signal(*phrases: str) -> bool:
-            for s in signals:
-                for p in phrases:
-                    if p in s:
-                        return True
-            return False
-
-        profile_key = str(profile or "").strip().lower()
-        action_text = {
-            "monitoring_debug": (
-                "Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported."
-            ),
-            "redis_exposure": (
-                "Harden Redis: require authentication/ACLs, bind to localhost or private interfaces, and block untrusted network access at the firewall."
-            ),
-            "postgres_exposure": (
-                "Limit PostgreSQL exposure to required application hosts and enforce strong auth/TLS policies for database connectivity."
-            ),
-            "attack_surface": (
-                "Reduce attack surface by closing unused listeners and rebinding critical services from wildcard interfaces to least-privilege network zones."
-            ),
-            "web_hardening": (
-                "Apply baseline web hardening: security headers, method restrictions, and removal of unnecessary default/admin endpoints."
-            ),
-            "tls_hardening": (
-                "Enforce transport security on externally reachable services and validate TLS configuration strength on non-standard service ports."
-            ),
-        }
-        triggered: Set[str] = set()
-        if has_signal("prometheus", "/metrics", "metrics endpoint", "status/config", "pprof", "debug endpoint"):
-            triggered.add("monitoring_debug")
-        if has_signal("redis", "6379", "without authentication", "no auth"):
-            triggered.add("redis_exposure")
-        if has_signal("postgres", "5432"):
-            triggered.add("postgres_exposure")
-        if has_signal("wildcard", "0.0.0.0", "open port", "service exposed", "non-standard http ports"):
-            triggered.add("attack_surface")
-        if has_signal("missing security headers", "allowed options method", "default page"):
-            triggered.add("web_hardening")
-        if has_signal("no tls", "cleartext", "tls", "ssl"):
-            triggered.add("tls_hardening")
-
-        ordered_keys_by_profile: Dict[str, List[str]] = {
-            "compliance_pci": [
-                "tls_hardening",
-                "postgres_exposure",
-                "redis_exposure",
-                "monitoring_debug",
-                "web_hardening",
-                "attack_surface",
-            ],
-            "compliance_soc2": [
-                "monitoring_debug",
-                "attack_surface",
-                "web_hardening",
-                "tls_hardening",
-                "postgres_exposure",
-                "redis_exposure",
-            ],
-            "compliance_iso": [
-                "attack_surface",
-                "web_hardening",
-                "tls_hardening",
-                "monitoring_debug",
-                "postgres_exposure",
-                "redis_exposure",
-            ],
-            "compliance_dora": [
-                "monitoring_debug",
-                "attack_surface",
-                "tls_hardening",
-                "web_hardening",
-                "postgres_exposure",
-                "redis_exposure",
-            ],
-            "compliance_nis2": [
-                "attack_surface",
-                "monitoring_debug",
-                "web_hardening",
-                "tls_hardening",
-                "postgres_exposure",
-                "redis_exposure",
-            ],
-            "compliance_gdpr": [
-                "tls_hardening",
-                "monitoring_debug",
-                "web_hardening",
-                "attack_surface",
-                "postgres_exposure",
-                "redis_exposure",
-            ],
-            "compliance_bsi": [
-                "attack_surface",
-                "web_hardening",
-                "monitoring_debug",
-                "tls_hardening",
-                "postgres_exposure",
-                "redis_exposure",
-            ],
-        }
-        default_order = [
-            "monitoring_debug",
-            "redis_exposure",
-            "postgres_exposure",
-            "attack_surface",
-            "web_hardening",
-            "tls_hardening",
-        ]
-        ordered_keys = ordered_keys_by_profile.get(profile_key, default_order)
-
-        actions: List[str] = []
-        for k in ordered_keys:
-            if k in triggered:
-                actions.append(action_text[k])
-
-        if profile_key == "compliance_pci":
-            actions.append(
-                "Collect manual evidence for PCI readiness boundaries not automatable here (CDE scoping, CHD/SAD handling, key lifecycle, and formal control operation records)."
-            )
-        elif profile_key == "compliance_soc2":
-            actions.append(
-                "Collect SOC 2 control-operation evidence not assessable by scanning (JML/access reviews, change approvals, incident response drills, and policy governance records)."
-            )
-        elif profile_key:
-            actions.append(
-                "Collect manual control-operation evidence for governance/process controls not assessable by automated scanning (for readiness review)."
-            )
-        else:
-            actions.append(
-                "Collect manual operational evidence for controls not assessable by technical scanning (governance/process readiness)."
-            )
-
-        actions.append(
-            "After remediation, rerun the readiness assessment and compare deltas in findings severity, exposed services, and evidence artifacts."
-        )
-
-        deduped: List[str] = []
-        seen: Set[str] = set()
-        for action in actions:
-            text = str(action).strip()
-            if not text:
-                continue
-            key = text.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            deduped.append(text)
-        return deduped[:8]
-
-    recommended_actions = _recommended_next_actions(summary_findings, agg_findings, compliance_profile)
+    recommended_actions = build_recommended_next_actions(summary_findings, agg_findings, compliance_profile)
+    report["recommended_next_actions"] = recommended_actions
     if recommended_actions:
         lines.append("\n## Recommended Next Actions")
         for idx, action in enumerate(recommended_actions, start=1):
@@ -1344,7 +1345,16 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     lines.append("\n## Tools Run")
     lines.append("| Tool | Status | Command |")
     lines.append("|---|---|---|")
-    tool_notes = []
+    tool_notes: List[str] = []
+    tool_note_counts: Dict[str, int] = {}
+    def _add_tool_note(note: str) -> None:
+        text = str(note or "").strip()
+        if not text:
+            return
+        if text not in tool_note_counts:
+            tool_notes.append(text)
+            tool_note_counts[text] = 0
+        tool_note_counts[text] += 1
     for entry in results:
         if not isinstance(entry, dict):
             continue
@@ -1363,12 +1373,15 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         cmd_cell = f"`{cmd.strip()}`" if isinstance(cmd, str) and cmd.strip() else ""
         lines.append(f"| {tool} | {status} | {cmd_cell} |")
         if skipped and entry.get("reason"):
-            tool_notes.append(f"- **{tool}**: SKIPPED - {entry['reason']}")
+            _add_tool_note(f"- **{tool}**: SKIPPED - {entry['reason']}")
         if not skipped and not entry.get("success") and entry.get("error"):
-            tool_notes.append(f"- **{tool}**: FAILED - {entry['error']}")
+            _add_tool_note(f"- **{tool}**: FAILED - {entry['error']}")
     if tool_notes:
         lines.append("\n### Tool Notes")
-        lines.extend(tool_notes)
+        for note in tool_notes:
+            count = int(tool_note_counts.get(note, 1))
+            suffix = f" (x{count})" if count > 1 else ""
+            lines.append(f"{note}{suffix}")
 
     # Auditability: exact commands executed (when available)
     commands = []

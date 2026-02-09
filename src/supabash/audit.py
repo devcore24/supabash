@@ -48,7 +48,7 @@ from supabash.llm import LLMClient
 from supabash import prompts
 from supabash.llm_context import prepare_json_payload
 from supabash.report_order import stable_sort_results
-from supabash.report import build_compliance_coverage_matrix
+from supabash.report import build_compliance_coverage_matrix, build_recommended_next_actions
 from supabash.report_schema import SCHEMA_VERSION, annotate_schema_validation
 from supabash.aggressive_caps import apply_aggressive_caps
 
@@ -3803,6 +3803,20 @@ class AuditOrchestrator:
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
+        try:
+            summary_findings = []
+            summary = agg.get("summary")
+            if isinstance(summary, dict):
+                sf = summary.get("findings")
+                if isinstance(sf, list):
+                    summary_findings = sf
+            agg["recommended_next_actions"] = build_recommended_next_actions(
+                summary_findings,
+                findings if isinstance(findings, list) else [],
+                normalized_compliance,
+            )
+        except Exception:
+            pass
         if isinstance(normalized_compliance, str) and normalized_compliance.strip():
             try:
                 agg["compliance_coverage_matrix"] = build_compliance_coverage_matrix(agg)

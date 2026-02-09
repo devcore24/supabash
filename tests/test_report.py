@@ -404,6 +404,28 @@ class TestReport(unittest.TestCase):
         md1 = generate_markdown(report)
         md2 = generate_markdown(report)
         self.assertEqual(md1, md2)
+        actions = report.get("recommended_next_actions")
+        self.assertIsInstance(actions, list)
+        if isinstance(actions, list):
+            self.assertTrue(actions)
+
+    def test_tool_notes_are_deduplicated_with_counts(self):
+        report = {
+            "target": "localhost",
+            "results": [
+                {"tool": "wpscan", "success": False, "skipped": True, "reason": "WordPress not detected by whatweb"},
+                {"tool": "wpscan", "success": False, "skipped": True, "reason": "WordPress not detected by whatweb"},
+                {"tool": "katana", "success": False, "skipped": True, "reason": "Disabled by config (tools.<name>.enabled=false)"},
+                {"tool": "katana", "success": False, "skipped": True, "reason": "Disabled by config (tools.<name>.enabled=false)"},
+                {"tool": "katana", "success": False, "skipped": True, "reason": "Disabled by config (tools.<name>.enabled=false)"},
+                {"tool": "dnsenum", "success": False, "error": "localhost NS record query failed: NXDOMAIN"},
+                {"tool": "dnsenum", "success": False, "error": "localhost NS record query failed: NXDOMAIN"},
+            ],
+        }
+        md = generate_markdown(report)
+        self.assertIn("- **wpscan**: SKIPPED - WordPress not detected by whatweb (x2)", md)
+        self.assertIn("- **katana**: SKIPPED - Disabled by config (tools.<name>.enabled=false) (x3)", md)
+        self.assertIn("- **dnsenum**: FAILED - localhost NS record query failed: NXDOMAIN (x2)", md)
 
     def test_recommended_next_actions_are_profile_aware(self):
         base_summary = {

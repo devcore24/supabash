@@ -233,6 +233,9 @@ class TestAuditOrchestrator(unittest.TestCase):
                 self.assertIn("coverage_basis", first)
         data = json.loads(output.read_text())
         self.assertIsInstance(data.get("compliance_coverage_matrix"), list)
+        self.assertIsInstance(data.get("recommended_next_actions"), list)
+        if isinstance(data.get("recommended_next_actions"), list):
+            self.assertTrue(data.get("recommended_next_actions"))
         cleanup_artifact(output)
 
     def test_dnsenum_is_skipped_for_localhost_targets(self):
