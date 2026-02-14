@@ -33,6 +33,31 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 
 ---
 
+## 🎯 Phase 12: Agentic Reliability & Traceability (Current)
+*Goal: harden real-world LLM/tool behavior while keeping reports reviewer-friendly and auditable.*
+
+- [x] **LLM provider/model compatibility fallback**
+    - [x] Auto-retry LLM completion/tool-calls without `temperature` when model/provider rejects that parameter.
+    - [x] Add tests for normal chat and tool-calling fallback behavior.
+- [x] **Replay + reasoning artifacts parity**
+    - [x] Add human-readable replay sidecar (`<slug>-replay.md`) in addition to JSON.
+    - [x] Add explicit LLM trace sidecars (`<slug>-llm-trace.json` and `<slug>-llm-trace.md`).
+    - [x] Link both traces in the main report.
+- [x] **Planner replan robustness**
+    - [x] Replan once with exclusions when only already-covered actions are proposed.
+    - [x] Expand exclusion set to include baseline + prior agentic covered web actions.
+    - [x] Surface replan decision details in report decision-trace highlights.
+- [x] **Summary/report consistency fixes**
+    - [x] Reconcile summary severity with detailed findings (prevent CRITICAL mismatch).
+    - [x] Ensure CRITICAL tool findings are represented in summary findings when missing.
+    - [x] Improve summary notes to include direct agentic `ffuf` activity (not fallback-only).
+- [ ] **Next hardening step (high ROI)**
+    - [ ] Generalize summary notes for all agentic tools (`tool`, `target`, `delta`) so operator gets consistent per-action change summaries beyond `ffuf`.
+    - [ ] Add report consistency test that asserts Summary/Detailed severity tables cannot diverge on CRITICAL presence.
+    - [ ] Add planner regression test for “second replan still covered” to ensure graceful stop without noisy repeat loops.
+
+---
+
 ## 🎯 Phase 9: Readiness Report Clarity Sprint (Current)
 *Goal: make Supabash readiness reports clearer and more auditor-usable than manual experimental reports while staying deterministic.*
 

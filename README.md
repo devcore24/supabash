@@ -16,11 +16,13 @@
 ![License](https://img.shields.io/badge/License-AGPLv3-blue)
 ![Status](https://img.shields.io/badge/Status-Beta-orange)
 
-> **⚠️ Development Status:** Supabash is in active development. The core CLI and baseline audit pipeline are usable, but agentic planning, cloud posture checks, and Supabase heuristics are still **beta** and coverage is not exhaustive. Expect breaking changes as we harden reliability, safety caps, and compliance mapping.  
-> **Status:** **Beta (stabilization + coverage in progress)**
+> **⚠️ Development Status:** Supabash is in active development. Core CLI and baseline audit workflows are production-usable, while some agentic planning paths, cloud posture checks, and Supabase heuristics remain **beta**. Coverage is improving and behavior may change as reliability and compliance mapping mature.  
+> **Status:** **Beta (stabilization + coverage expansion in progress)**
 
-**Supabash** is an agentic AI security assessment tool that generates readiness reports and evidence for audit prep. 
-Supabash supports **compliance readiness** (control mapping and evidence packs) to help teams prepare for third‑party assessments and certifications (SOC 2 / ISO 27001 / PCI DSS / DORA / NIS2 / GDPR / BSI). It produces **Supabash Audit (Readiness)** reports. Example: [reports](example_reports/)
+**Supabash** is an agentic AI security audit tool that generates evidence-backed **Supabash Audit** reports.  
+It can also be used to prepare for compliance assessments and certifications such as **SOC 2 / ISO 27001 / PCI DSS / DORA / NIS2 / GDPR / BSI**.
+
+Example: [reports](example_reports/)
 
 Requirements:
 Supabash requires Linux (Kali, Ubuntu, Debian) or WSL2.  
@@ -273,6 +275,11 @@ Notes:
 - Agentic planning uses a `profile` field (`fast|standard|aggressive|compliance_*`) to guide assessment intensity and compliance posture.
 - Compliance profiles tune tool settings and annotate findings with control references when evidence supports a requirement.
 - Reports include compliance profile/focus in methodology, scope assumptions, a compliance coverage matrix, not-assessable areas, and deterministic recommended next actions.
+- Each AI-audit run writes trace sidecars:
+  - `<slug>-replay.json` + `<slug>-replay.md` (step-by-step reproducibility trace)
+  - `<slug>-llm-trace.json` + `<slug>-llm-trace.md` (explicit planner/decision event stream)
+- Live terminal status includes planner decisions (candidate selection, replan, selected action, critique).
+- LLM trace captures explicit planner messages and decisions only; hidden model-internal reasoning is not exposed by API providers.
 - AI audit writes JSON + Markdown by default; HTML/PDF exports are optional via `core.report_exports`.
 
 ### 3. Container Image Scan
@@ -507,6 +514,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - LLM context/cost controls: set `llm.max_input_chars` to cap tool output sent to the LLM; LLM token usage + estimated USD cost are recorded in audit reports.
 - Chat memory controls: `chat.llm_history_turns`, `chat.summary_every_turns`, `chat.history_max_messages`. For local models, set `llm.max_input_tokens` if you want accurate context % reporting.
 - LLM caching (optional): enable with `llm.cache_enabled=true` (and optionally set `llm.cache_ttl_seconds`, `llm.cache_max_entries`, `llm.cache_dir`) to reuse identical LLM responses and reduce cost.
+- Model compatibility fallback: if a provider/model rejects `temperature`, Supabash automatically retries LLM calls without `temperature` (useful for stricter model APIs).
 - LLM payload + caching knobs (advanced):
   - `llm.max_input_chars` — hard cap (characters) on what gets sent to the LLM per request (higher = more context/cost).
   - `llm.max_input_tokens` — fallback token window size used only for showing chat “context %” when the model limit can’t be detected (common for local servers); `0` disables the fallback.
@@ -575,12 +583,14 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 - **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.
 - **LLM integration:** litellm-based client with config-driven provider/model selection (OpenAI, Anthropic, Gemini, Mistral, Ollama, LM Studio)
 - **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
+- **Planner robustness:** one-time automatic replan with exclusions when candidates are already baseline-covered.
 
 ### Reporting
 - **Formats:** Timestamped run folders under `reports/` containing JSON + Markdown reports (and optional HTML/PDF) with command traces for auditability
 - **Schema:** JSON reports include `schema_version` + `schema_validation` for validation and forward compatibility
 - **Styling:** Markdown reports include TOC + summary tables for readability
 - **Compliance context:** Reports capture compliance profile/focus and annotate relevant findings with control references
+- **Traceability:** AI-audit includes replay and LLM reasoning trace sidecars (`-replay.{json,md}`, `-llm-trace.{json,md}`) plus decision-trace highlights in the main report
 - **Export:** Optional HTML/PDF export via WeasyPrint
 
 ---
@@ -611,7 +621,7 @@ When Supabash detects an issue, it provides evidence-based findings and remediat
 
 ## ⚖️ Assurance Disclaimer (SOC/ISO/PCI)
 
-Supabash Audit (Readiness) is **not** an independent attestation. Supabash is **not** a CPA firm or certification body and does **not** perform independent attestation engagements. Outputs are **not** SOC 1/2/3 reports and are **not** ISO certifications. Supabash is intended for **readiness, internal review, and evidence collection** to support third‑party assessments.
+Supabash Audit is **not** an independent attestation. Supabash is **not** a CPA firm or certification body and does **not** perform independent attestation engagements. Outputs are **not** SOC 1/2/3 reports and are **not** ISO certifications. Supabash is intended for **readiness, internal review, and evidence collection** to support third‑party assessments.
 
 ## ⚠️ Legal Disclaimer
 

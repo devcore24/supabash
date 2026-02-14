@@ -500,10 +500,10 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     raw_findings = report.get("findings", [])
     has_summary = bool(summary)
     has_findings = isinstance(raw_findings, list) and len(raw_findings) > 0
-    lines.append(f"# Supabash Audit (Readiness) Report\n")
+    lines.append(f"# Supabash Audit Report\n")
     # Add markdown hard line breaks for header metadata so HTML/PDF render each item on its own line.
     lines.append(f"**Target:** {target}  ")
-    lines.append("**Assessment Type:** Supabash Audit (Readiness)  ")
+    lines.append("**Assessment Type:** Supabash Audit  ")
     report_kind = report.get("report_kind")
     if isinstance(report_kind, str) and report_kind.strip():
         lines.append(f"**Run Type:** {report_kind.strip().replace('_', '-')}  ")

@@ -1,13 +1,13 @@
-# Supabash Audit (Readiness) Workflow (Baseline + Agentic)
+# Supabash Audit Workflow (Baseline + Agentic)
 
-This document describes how `ai-audit` selects tools and how the final **Supabash Audit (Readiness)** report is produced. It reflects the current implementation in `src/supabash/ai_audit.py` and `src/supabash/audit.py`.
+This document describes how `ai-audit` selects tools and how the final **Supabash Audit** report is produced. It reflects the current implementation in `src/supabash/ai_audit.py` and `src/supabash/audit.py`.
 
 ---
 
 ## High-Level Flow
 
 **In short:** `ai-audit` = **`audit.py` baseline + optional agentic expansion**.  
-The output is a **Supabash Audit (Readiness)** report intended for compliance readiness and internal review.
+The output is a **Supabash Audit** report intended for compliance preparation and internal review.
 
 1) **Baseline audit (deterministic, no LLM)**
    - Runs the standard audit pipeline with LLM disabled.
