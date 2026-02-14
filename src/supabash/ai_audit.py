@@ -4,7 +4,7 @@ import json
 import time
 from pathlib import Path
 from threading import Event
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 from supabash.audit import AuditOrchestrator
@@ -1056,7 +1056,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "trivy_requires_container": bool(container_image),
                             "tls_ports_detected": tls_ports,
                             "smb_ports_detected": bool(smb_ports),
-                            "excluded_actions": excluded[:12],
+                            # Keep this reasonably large so replans can avoid the full
+                            # already-covered web surface, not just a tiny subset.
+                            "excluded_actions": excluded[:64],
                         },
                     }
 
@@ -1372,7 +1374,56 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return True
                     if target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
                         return True
-                    return (tool, target) in baseline_success
+                    return (tool, target) in baseline_success or (tool, target) in agentic_success
+
+                def _covered_action_exclusions(extra_actions: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+                    """
+                    Build a broad exclusion list so a replan avoids already-covered actions
+                    (baseline + earlier agentic executions), not just the immediate top candidate.
+                    """
+                    out: List[Dict[str, Any]] = []
+                    seen: Set[Tuple[str, str, str]] = set()
+                    default_profile = requested_compliance or "standard"
+
+                    def _add(tool: str, target: str, profile: str = default_profile) -> None:
+                        t = str(tool or "").strip().lower()
+                        u = str(target or "").strip()
+                        p = str(profile or default_profile).strip().lower() or default_profile
+                        if not t or not u:
+                            return
+                        if tool_specs.get(t, {}).get("target_kind") != "web":
+                            return
+                        key = (t, u, p)
+                        if key in seen:
+                            return
+                        seen.add(key)
+                        out.append(
+                            {
+                                "tool": t,
+                                "arguments": {"profile": p, "target": u},
+                                "profile": p,
+                                "priority": 50,
+                                "reasoning": "",
+                                "hypothesis": "",
+                                "expected_evidence": "",
+                            }
+                        )
+
+                    for item in sorted(baseline_success | agentic_success):
+                        if not isinstance(item, tuple) or len(item) < 2:
+                            continue
+                        _add(str(item[0]), str(item[1]))
+
+                    for action in extra_actions or []:
+                        if not isinstance(action, dict):
+                            continue
+                        args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                        _add(
+                            str(action.get("tool") or ""),
+                            str(args.get("target") or ""),
+                            str(action.get("profile") or default_profile),
+                        )
+                    return out
 
                 def _action_trace_view(action: Dict[str, Any]) -> Dict[str, Any]:
                     args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
@@ -1507,7 +1558,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                         if not replan_attempted:
                             replan_attempted = True
-                            excluded_actions_for_replan = sorted_candidates[:8]
+                            excluded_actions_for_replan = _covered_action_exclusions(sorted_candidates)
                             trace_item["replan"] = {
                                 "attempted": True,
                                 "reason": "all_candidates_already_covered",
@@ -1672,10 +1723,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
         agg["results"] = stable_sort_results(agg.get("results", []) or [])
 
         ffuf_fallback_hits: List[Tuple[str, int]] = []
+        ffuf_agentic_hits: List[Tuple[str, int]] = []
         for entry in agg.get("results", []) or []:
             if not isinstance(entry, dict):
                 continue
-            if entry.get("tool") != "ffuf" or entry.get("fallback_for") != "gobuster":
+            if entry.get("tool") != "ffuf":
                 continue
             if entry.get("phase") != "agentic":
                 continue
@@ -1684,7 +1736,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
             findings = entry.get("data", {}).get("findings")
             count = len(findings) if isinstance(findings, list) else 0
             target = str(entry.get("target") or "").strip() or "unknown-target"
-            ffuf_fallback_hits.append((target, count))
+            if entry.get("fallback_for") == "gobuster":
+                ffuf_fallback_hits.append((target, count))
+            else:
+                ffuf_agentic_hits.append((target, count))
         if ffuf_fallback_hits:
             total = sum(n for _, n in ffuf_fallback_hits)
             targets = ", ".join(f"{t} ({n})" for t, n in ffuf_fallback_hits[:3])
@@ -1693,6 +1748,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
             note = (
                 "ffuf fallback (after gobuster failure) ran and found "
                 f"{total} paths across {len(ffuf_fallback_hits)} target(s): {targets}."
+            )
+            agg.setdefault("summary_notes", []).append(note)
+        if ffuf_agentic_hits:
+            total = sum(n for _, n in ffuf_agentic_hits)
+            targets = ", ".join(f"{t} ({n})" for t, n in ffuf_agentic_hits[:3])
+            if len(ffuf_agentic_hits) > 3:
+                targets = f"{targets}, ..."
+            note = (
+                "agentic ffuf action(s) ran and found "
+                f"{total} paths across {len(ffuf_agentic_hits)} target(s): {targets}."
             )
             agg.setdefault("summary_notes", []).append(note)
 

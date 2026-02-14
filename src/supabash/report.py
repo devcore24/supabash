@@ -704,6 +704,77 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                 [x for x in sf if isinstance(x, dict)],
                 [x for x in raw_findings if isinstance(x, dict)],
             )
+    if summary_findings and isinstance(raw_findings, list):
+        sev_rank = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+        inv_rank = {v: k for k, v in sev_rank.items()}
+
+        def _norm_sev(value: Any) -> str:
+            s = str(value or "INFO").strip().upper()
+            return s if s in sev_rank else "INFO"
+
+        def _title_norm(value: Any) -> str:
+            text = str(value or "").strip().lower()
+            # Strip trailing tool marker, e.g. "(nuclei)".
+            text = re.sub(r"\s+\([^()]+\)\s*$", "", text)
+            text = re.sub(r"[^a-z0-9]+", " ", text)
+            text = re.sub(r"\s+", " ", text).strip()
+            return text
+
+        raw_max_by_title: Dict[str, int] = {}
+        for f in raw_findings:
+            if not isinstance(f, dict):
+                continue
+            title_key = _title_norm(f.get("title"))
+            if not title_key:
+                continue
+            rank = sev_rank[_norm_sev(f.get("severity"))]
+            raw_max_by_title[title_key] = max(raw_max_by_title.get(title_key, 0), rank)
+
+        summary_keys: Set[str] = set()
+        for sf_item in summary_findings:
+            if not isinstance(sf_item, dict):
+                continue
+            title_key = _title_norm(sf_item.get("title"))
+            if title_key:
+                summary_keys.add(title_key)
+            current_rank = sev_rank[_norm_sev(sf_item.get("severity"))]
+            best_rank = raw_max_by_title.get(title_key, current_rank)
+            if best_rank <= current_rank and title_key:
+                for raw_key, raw_rank in raw_max_by_title.items():
+                    if not raw_key:
+                        continue
+                    if title_key in raw_key or raw_key in title_key:
+                        if raw_rank > best_rank:
+                            best_rank = raw_rank
+            if best_rank > current_rank:
+                sf_item["severity"] = inv_rank.get(best_rank, "INFO")
+
+        # Ensure any CRITICAL tool findings are reflected in summary findings.
+        for f in raw_findings:
+            if not isinstance(f, dict):
+                continue
+            if _norm_sev(f.get("severity")) != "CRITICAL":
+                continue
+            title = str(f.get("title") or "").strip()
+            title_key = _title_norm(title)
+            if not title_key or title_key in summary_keys:
+                continue
+            summary_findings.append(
+                {
+                    "severity": "CRITICAL",
+                    "title": re.sub(r"\s+\([^()]+\)\s*$", "", title).strip() or title,
+                    "evidence": str(f.get("evidence") or "").strip(),
+                    "evidence_items": [str(f.get("evidence") or "").strip()] if str(f.get("evidence") or "").strip() else [],
+                    "recommendation": str(f.get("recommendation") or "").strip(),
+                    "recommendation_items": [str(f.get("recommendation") or "").strip()]
+                    if str(f.get("recommendation") or "").strip()
+                    else [],
+                    "corroborating_tools": [str(f.get("tool") or "").strip()] if str(f.get("tool") or "").strip() else [],
+                    "compliance_mapping_items": [],
+                    "mapping_sources": [],
+                }
+            )
+            summary_keys.add(title_key)
     evidence_artifact_index: Dict[str, List[str]] = {}
     evidence_manifest_path = ""
     evidence_pack_for_summary = report.get("evidence_pack")
@@ -1201,6 +1272,8 @@ def generate_markdown(report: Dict[str, Any]) -> str:
 
     llm_counts = sev_counts(summary_findings) if summary_findings else None
     tool_counts = sev_counts(agg_findings)
+    if llm_counts:
+        llm_counts["CRITICAL"] = max(llm_counts.get("CRITICAL", 0), tool_counts.get("CRITICAL", 0))
 
     lines.append("\n## Findings Overview")
     if summary_findings:

@@ -302,6 +302,34 @@ class TestReport(unittest.TestCase):
         self.assertIn("#### Normalization Details", md)
         self.assertIn("rule:data_store_exposure_aggregation", md)
 
+    def test_summary_severity_reconciles_with_critical_tool_finding(self):
+        report = {
+            "target": "localhost",
+            "summary": {
+                "summary": "Supabase key exposure observed.",
+                "findings": [
+                    {
+                        "severity": "HIGH",
+                        "title": "Supabase service role key exposed",
+                        "evidence": "Key observed in HTTP response body.",
+                    }
+                ],
+            },
+            "findings": [
+                {
+                    "severity": "CRITICAL",
+                    "title": "Supabase service role key exposed (supabase_audit)",
+                    "tool": "supabase_audit",
+                    "evidence": "key=eyJ... detected in source=http://localhost:4001",
+                    "recommendation": "Rotate service role key immediately.",
+                }
+            ],
+            "results": [],
+        }
+        md = generate_markdown(report)
+        self.assertIn("- **CRITICAL** Supabase service role key exposed", md)
+        self.assertIn("| CRITICAL | 1 |", md)
+
     def test_compliance_coverage_matrix_includes_skip_and_failure_reasons(self):
         report = {
             "target": "localhost",
