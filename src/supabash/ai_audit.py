@@ -1119,9 +1119,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             base_threads = int(gobuster_threads or 10)
                             rate_limit = args.get("rate_limit", base_rate)
                             threads = args.get("threads", base_threads)
-                            rate_limit = clamp_int(rate_limit, base_rate, 0, 100)
+                            # Keep planner-suggested rates bounded, but if a baseline/configured
+                            # nuclei rate exists, allow that value to flow through unchanged.
+                            max_rate = max(100, int(base_rate or 0))
+                            rate_limit = clamp_int(rate_limit, base_rate, 0, max_rate)
                             threads = clamp_int(threads, base_threads, 1, 50)
                             rate_limit, threads = apply_profile(profile, rate_limit, threads)
+                            if tool == "nuclei" and int(base_rate or 0) > 0:
+                                # Respect explicit CLI/config tuning from baseline for agentic nuclei.
+                                rate_limit = int(base_rate)
                             proposed_wordlist = args.get("wordlist") if isinstance(args.get("wordlist"), str) else None
                             safe_wordlist = resolve_wordlist(proposed_wordlist) or resolve_wordlist(gobuster_wordlist)
 

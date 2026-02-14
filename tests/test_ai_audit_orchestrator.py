@@ -85,7 +85,11 @@ class FakeWhatwebScanner:
 
 class FakeNucleiScanner:
     def scan(self, target, **kwargs):
-        return {"success": True, "command": f"nuclei -u {target} -jsonl", "findings": []}
+        command = f"nuclei -u {target} -jsonl"
+        rate_limit = kwargs.get("rate_limit")
+        if rate_limit:
+            command = f"{command} -rate-limit {int(rate_limit)}"
+        return {"success": True, "command": command, "findings": []}
 
 
 class FakeGobusterScanner:
@@ -483,6 +487,31 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertGreaterEqual(llm.summary_calls, 1)
         notes = report.get("summary_notes", [])
         self.assertTrue(any("agentic ffuf action(s) ran and found" in str(n) for n in notes))
+
+    def test_agentic_nuclei_honors_configured_rate_limit(self):
+        orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=FakeLLMNormalization())
+        output = artifact_path("ai_audit_nuclei_rate_from_config.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            nuclei_rate_limit=10000,
+        )
+
+        agentic_nuclei = [
+            entry
+            for entry in (report.get("results") or [])
+            if isinstance(entry, dict)
+            and entry.get("tool") == "nuclei"
+            and entry.get("phase") == "agentic"
+            and entry.get("target") == "http://localhost:19090"
+        ]
+        self.assertTrue(agentic_nuclei)
+        command = str(agentic_nuclei[0].get("command") or "")
+        self.assertIn("-rate-limit 10000", command)
 
 
 if __name__ == "__main__":

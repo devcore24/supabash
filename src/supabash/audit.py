@@ -3007,7 +3007,7 @@ class AuditOrchestrator:
             note("tool_end", "prowler", "Finished Prowler")
             return entry
 
-        def run_web_tools(web_target: str) -> List[Dict[str, Any]]:
+        def run_web_tools(web_target: str, include_content_discovery: bool = True) -> List[Dict[str, Any]]:
             def tag(entry: Dict[str, Any]) -> Dict[str, Any]:
                 if isinstance(entry, dict):
                     entry.setdefault("target", web_target)
@@ -3030,7 +3030,7 @@ class AuditOrchestrator:
                 if canceled() or (isinstance(whatweb_entry.get("data"), dict) and whatweb_entry["data"].get("canceled")):
                     return results
 
-                if self._has_scanner("wpscan"):
+                if include_content_discovery and self._has_scanner("wpscan"):
                     if self._whatweb_detects_wordpress(whatweb_entry):
                         wpscan_args = self._wpscan_args()
                         note("tool_start", "wpscan", "Running wpscan (WordPress detected)")
@@ -3048,11 +3048,11 @@ class AuditOrchestrator:
                         note("tool_end", "wpscan", "Finished wpscan")
                     else:
                         wpscan_entry = self._skip_tool("wpscan", "WordPress not detected by whatweb")
-                else:
+                elif include_content_discovery:
                     wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
-                results.append(tag(wpscan_entry))
-                if canceled() or (isinstance(wpscan_entry.get("data"), dict) and wpscan_entry["data"].get("canceled")):
-                    return results
+                    results.append(tag(wpscan_entry))
+                    if canceled() or (isinstance(wpscan_entry.get("data"), dict) and wpscan_entry["data"].get("canceled")):
+                        return results
 
                 note("tool_start", "nuclei", "Running nuclei")
                 nuclei_entry = self._run_tool_if_enabled(
@@ -3072,68 +3072,69 @@ class AuditOrchestrator:
                 if canceled() or (isinstance(nuclei_entry.get("data"), dict) and nuclei_entry["data"].get("canceled")):
                     return results
 
-                note("tool_start", "gobuster", "Running gobuster")
-                if gobuster_wordlist:
-                    gobuster_entry = self._run_tool_if_enabled(
-                        "gobuster",
-                        lambda: self.scanners["gobuster"].scan(
-                            web_target,
-                            wordlist=gobuster_wordlist,
-                            threads=gobuster_threads,
-                            cancel_event=cancel_event,
-                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
-                        ),
-                    )
-                else:
-                    gobuster_entry = self._run_tool_if_enabled(
-                        "gobuster",
-                        lambda: self.scanners["gobuster"].scan(
-                            web_target,
-                            threads=gobuster_threads,
-                            cancel_event=cancel_event,
-                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
-                        ),
-                    )
-                note("tool_end", "gobuster", "Finished gobuster")
-                results.append(tag(gobuster_entry))
+                if include_content_discovery:
+                    note("tool_start", "gobuster", "Running gobuster")
+                    if gobuster_wordlist:
+                        gobuster_entry = self._run_tool_if_enabled(
+                            "gobuster",
+                            lambda: self.scanners["gobuster"].scan(
+                                web_target,
+                                wordlist=gobuster_wordlist,
+                                threads=gobuster_threads,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                            ),
+                        )
+                    else:
+                        gobuster_entry = self._run_tool_if_enabled(
+                            "gobuster",
+                            lambda: self.scanners["gobuster"].scan(
+                                web_target,
+                                threads=gobuster_threads,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                            ),
+                        )
+                    note("tool_end", "gobuster", "Finished gobuster")
+                    results.append(tag(gobuster_entry))
 
-                # Optional fallback: ffuf (-ac) can handle wildcard/soft-404 responses
-                # where gobuster refuses to continue.
-                if (
-                    not gobuster_entry.get("success")
-                    and self._has_scanner("ffuf")
-                    and self._tool_enabled("ffuf", default=False)
-                ):
-                    note("tool_start", "ffuf", "Running ffuf (fallback for content discovery)")
-                    ffuf_entry = self._run_tool(
-                        "ffuf",
-                        lambda: self.scanners["ffuf"].scan(
-                            web_target,
-                            wordlist=gobuster_wordlist,
-                            threads=max(10, int(gobuster_threads)),
-                            cancel_event=cancel_event,
-                            timeout_seconds=self._tool_timeout_seconds("ffuf"),
-                        ),
-                    )
-                    ffuf_entry["fallback_for"] = "gobuster"
-                    ffuf_entry["reason"] = "Fallback after gobuster failure"
-                    note("tool_end", "ffuf", "Finished ffuf")
-                    results.append(tag(ffuf_entry))
+                    # Optional fallback: ffuf (-ac) can handle wildcard/soft-404 responses
+                    # where gobuster refuses to continue.
+                    if (
+                        not gobuster_entry.get("success")
+                        and self._has_scanner("ffuf")
+                        and self._tool_enabled("ffuf", default=False)
+                    ):
+                        note("tool_start", "ffuf", "Running ffuf (fallback for content discovery)")
+                        ffuf_entry = self._run_tool(
+                            "ffuf",
+                            lambda: self.scanners["ffuf"].scan(
+                                web_target,
+                                wordlist=gobuster_wordlist,
+                                threads=max(10, int(gobuster_threads)),
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("ffuf"),
+                            ),
+                        )
+                        ffuf_entry["fallback_for"] = "gobuster"
+                        ffuf_entry["reason"] = "Fallback after gobuster failure"
+                        note("tool_end", "ffuf", "Finished ffuf")
+                        results.append(tag(ffuf_entry))
 
-                if self._has_scanner("katana"):
-                    note("tool_start", "katana", "Running katana (crawl)")
-                    katana_entry = self._run_tool_if_enabled(
-                        "katana",
-                        lambda: self.scanners["katana"].crawl(
-                            web_target,
-                            depth=int(self._tool_config("katana").get("depth", 3) or 3),
-                            concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
-                            cancel_event=cancel_event,
-                            timeout_seconds=self._tool_timeout_seconds("katana"),
-                        ),
-                    )
-                    results.append(tag(katana_entry))
-                    note("tool_end", "katana", "Finished katana")
+                    if self._has_scanner("katana"):
+                        note("tool_start", "katana", "Running katana (crawl)")
+                        katana_entry = self._run_tool_if_enabled(
+                            "katana",
+                            lambda: self.scanners["katana"].crawl(
+                                web_target,
+                                depth=int(self._tool_config("katana").get("depth", 3) or 3),
+                                concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("katana"),
+                            ),
+                        )
+                        results.append(tag(katana_entry))
+                        note("tool_end", "katana", "Finished katana")
                 return results
 
             # Parallel web tooling
@@ -3174,40 +3175,41 @@ class AuditOrchestrator:
                     ] = "nuclei"
                 else:
                     results.append(tag(self._skip_disabled("nuclei")))
-                note("tool_start", "gobuster", "Running gobuster")
-                if gobuster_wordlist:
-                    if self._tool_enabled("gobuster", default=True):
-                        futures[
-                            ex.submit(
-                                self._run_tool,
-                                "gobuster",
-                                lambda: self.scanners["gobuster"].scan(
-                                    web_target,
-                                    wordlist=gobuster_wordlist,
-                                    threads=gobuster_threads,
-                                    cancel_event=cancel_event,
-                                    timeout_seconds=self._tool_timeout_seconds("gobuster"),
-                                ),
-                            )
-                        ] = "gobuster"
+                if include_content_discovery:
+                    note("tool_start", "gobuster", "Running gobuster")
+                    if gobuster_wordlist:
+                        if self._tool_enabled("gobuster", default=True):
+                            futures[
+                                ex.submit(
+                                    self._run_tool,
+                                    "gobuster",
+                                    lambda: self.scanners["gobuster"].scan(
+                                        web_target,
+                                        wordlist=gobuster_wordlist,
+                                        threads=gobuster_threads,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                    ),
+                                )
+                            ] = "gobuster"
+                        else:
+                            results.append(tag(self._skip_disabled("gobuster")))
                     else:
-                        results.append(tag(self._skip_disabled("gobuster")))
-                else:
-                    if self._tool_enabled("gobuster", default=True):
-                        futures[
-                            ex.submit(
-                                self._run_tool,
-                                "gobuster",
-                                lambda: self.scanners["gobuster"].scan(
-                                    web_target,
-                                    threads=gobuster_threads,
-                                    cancel_event=cancel_event,
-                                    timeout_seconds=self._tool_timeout_seconds("gobuster"),
-                                ),
-                            )
-                        ] = "gobuster"
-                    else:
-                        results.append(tag(self._skip_disabled("gobuster")))
+                        if self._tool_enabled("gobuster", default=True):
+                            futures[
+                                ex.submit(
+                                    self._run_tool,
+                                    "gobuster",
+                                    lambda: self.scanners["gobuster"].scan(
+                                        web_target,
+                                        threads=gobuster_threads,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                    ),
+                                )
+                            ] = "gobuster"
+                        else:
+                            results.append(tag(self._skip_disabled("gobuster")))
 
                 for fut in as_completed(futures):
                     tool = futures.get(fut, "tool")
@@ -3222,7 +3224,7 @@ class AuditOrchestrator:
                 if isinstance(entry, dict) and entry.get("tool") == "whatweb":
                     whatweb_entry = entry
                     break
-            if self._has_scanner("wpscan"):
+            if include_content_discovery and self._has_scanner("wpscan"):
                 if self._whatweb_detects_wordpress(whatweb_entry):
                     wpscan_args = self._wpscan_args()
                     note("tool_start", "wpscan", "Running wpscan (WordPress detected)")
@@ -3240,9 +3242,9 @@ class AuditOrchestrator:
                     note("tool_end", "wpscan", "Finished wpscan")
                 else:
                     wpscan_entry = self._skip_tool("wpscan", "WordPress not detected by whatweb")
-            else:
+            elif include_content_discovery:
                 wpscan_entry = self._skip_tool("wpscan", "Scanner not available")
-            results.append(tag(wpscan_entry))
+                results.append(tag(wpscan_entry))
             return results
 
         # Recon & web scans (optional parallel overlap)
@@ -3280,7 +3282,7 @@ class AuditOrchestrator:
             with ThreadPoolExecutor(max_workers=max_w) as ex:
                 note("tool_start", "nmap", f"Running nmap ({mode})")
                 nmap_future = ex.submit(run_nmap)
-                web_future = ex.submit(run_web_tools, web_target)
+                web_future = ex.submit(run_web_tools, web_target, True)
 
                 nmap_entry = nmap_future.result()
                 agg["results"].append(nmap_entry)
@@ -3291,7 +3293,7 @@ class AuditOrchestrator:
 
             # Continue with additional prioritized web targets (if any).
             for extra_target in [t for t in deep_web_targets_for_run() if t != web_target]:
-                for entry in run_web_tools(extra_target):
+                for entry in run_web_tools(extra_target, include_content_discovery=False):
                     agg["results"].append(entry)
 
             if nmap_entry and nmap_entry.get("success"):
@@ -3614,8 +3616,9 @@ class AuditOrchestrator:
 
             if web_targets:
                 deep_targets = deep_web_targets_for_run()
-                for target_url in deep_targets:
-                    for entry in run_web_tools(target_url):
+                for idx, target_url in enumerate(deep_targets):
+                    include_content_discovery = idx == 0
+                    for entry in run_web_tools(target_url, include_content_discovery=include_content_discovery):
                         agg["results"].append(entry)
                 if run_nikto:
                     if self._has_scanner("nikto"):
