@@ -1485,7 +1485,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     action: Optional[Dict[str, Any]] = None
                     stop_requested = False
                     replan_attempted = False
-                    excluded_actions_for_replan: List[Dict[str, Any]] = []
+                    # Pre-seed exclusions on the very first planner call of each iteration
+                    # so compliant models avoid proposing already-covered actions.
+                    excluded_actions_for_replan: List[Dict[str, Any]] = _covered_action_exclusions()
 
                     while True:
                         try:

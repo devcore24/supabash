@@ -1,0 +1,18 @@
+{
+  "tool": "ffuf",
+  "status": "success",
+  "target": "http://localhost:3001",
+  "command": "ffuf -u http://localhost:3001/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac",
+  "phase": "agentic",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "findings": [],
+    "results": {
+      "results": []
+    },
+    "command": "ffuf -u http://localhost:3001/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac"
+  }
+}

@@ -1,0 +1,3760 @@
+{
+  "schema_version": "1.0",
+  "target": "localhost",
+  "scan_host": "localhost",
+  "results": [
+    {
+      "tool": "nmap",
+      "success": true,
+      "data": {
+        "success": true,
+        "scan_data": {
+          "hosts": [
+            {
+              "ip": "127.0.0.1",
+              "hostnames": [
+                "localhost",
+                "localhost"
+              ],
+              "ports": [
+                {
+                  "port": 3000,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "ppp",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 3001,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Apache httpd",
+                  "version": "2.4.25"
+                },
+                {
+                  "port": 3002,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "exlm-agent",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 4000,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "tcpwrapped",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 4001,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "nginx",
+                  "version": "1.29.4"
+                },
+                {
+                  "port": 5050,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "mmcc",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 5432,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "postgresql",
+                  "product": "PostgreSQL DB",
+                  "version": "9.6.0 or later"
+                },
+                {
+                  "port": 5670,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Node.js Express framework",
+                  "version": ""
+                },
+                {
+                  "port": 6379,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "redis",
+                  "product": "Redis key-value store",
+                  "version": "6.2.11"
+                },
+                {
+                  "port": 8080,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http-proxy",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 9090,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Golang net/http server",
+                  "version": ""
+                },
+                {
+                  "port": 9100,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "jetdirect",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 9417,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Node.js Express framework",
+                  "version": ""
+                },
+                {
+                  "port": 19090,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Golang net/http server",
+                  "version": ""
+                },
+                {
+                  "port": 34547,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "unknown",
+                  "product": "",
+                  "version": ""
+                },
+                {
+                  "port": 44427,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Node.js Express framework",
+                  "version": ""
+                },
+                {
+                  "port": 44717,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "http",
+                  "product": "Node.js Express framework",
+                  "version": ""
+                },
+                {
+                  "port": 51414,
+                  "protocol": "tcp",
+                  "state": "open",
+                  "service": "unknown",
+                  "product": "",
+                  "version": ""
+                }
+              ],
+              "os": []
+            }
+          ]
+        },
+        "command": "nmap localhost -oX - -sV --script ssl-enum-ciphers -p-",
+        "warnings": []
+      },
+      "command": "nmap localhost -oX - -sV --script ssl-enum-ciphers -p-",
+      "phase": "baseline"
+    },
+    {
+      "tool": "httpx",
+      "success": true,
+      "data": {
+        "success": true,
+        "probed": [
+          "http://localhost:19090",
+          "http://localhost:3001",
+          "http://localhost:4001",
+          "http://localhost:44427",
+          "http://localhost:44717",
+          "http://localhost:5670",
+          "http://localhost:8080",
+          "http://localhost:9090",
+          "http://localhost:9417"
+        ],
+        "alive": [
+          "http://localhost:19090",
+          "http://localhost:44427",
+          "http://localhost:5670",
+          "http://localhost:4001",
+          "http://localhost:44717",
+          "http://localhost:9417",
+          "http://localhost:8080",
+          "http://localhost:3001",
+          "http://localhost:9090"
+        ],
+        "results": [
+          {
+            "timestamp": "2026-02-14T20:08:18.109778457+01:00",
+            "port": "19090",
+            "url": "http://localhost:19090",
+            "input": "http://localhost:19090",
+            "scheme": "http",
+            "content_type": "text/plain",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "857.138\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "words": 4,
+            "lines": 1,
+            "status_code": 404,
+            "content_length": 19,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-14T20:08:18.10997931+01:00",
+            "port": "44427",
+            "url": "http://localhost:44427",
+            "input": "http://localhost:44427",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "918.763\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 1,
+            "lines": 1,
+            "status_code": 401,
+            "content_length": 12,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-14T20:08:18.110418044+01:00",
+            "port": "5670",
+            "url": "http://localhost:5670",
+            "input": "http://localhost:5670",
+            "title": "Error",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "835.278\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 6,
+            "lines": 10,
+            "status_code": 404,
+            "content_length": 139,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-14T20:08:18.1109247+01:00",
+            "port": "4001",
+            "url": "http://localhost:4001",
+            "input": "http://localhost:4001",
+            "title": "Supabase Mock",
+            "scheme": "http",
+            "webserver": "nginx/1.29.4",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "770.557\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Nginx:1.29.4"
+            ],
+            "words": 80,
+            "lines": 17,
+            "status_code": 200,
+            "content_length": 552,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-14T20:08:18.111161749+01:00",
+            "port": "44717",
+            "url": "http://localhost:44717",
+            "input": "http://localhost:44717",
+            "title": "Error",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "1.625029ms",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 6,
+            "lines": 10,
+            "status_code": 404,
+            "content_length": 139,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-14T20:08:18.111442636+01:00",
+            "port": "9417",
+            "url": "http://localhost:9417",
+            "input": "http://localhost:9417",
+            "title": "Error",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "1.831306ms",
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Express",
+              "Node.js"
+            ],
+            "words": 6,
+            "lines": 10,
+            "status_code": 404,
+            "content_length": 139,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "error",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-14T20:08:18.111675796+01:00",
+            "port": "8080",
+            "url": "http://localhost:8080",
+            "input": "http://localhost:8080",
+            "scheme": "http",
+            "content_type": "application/xml",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "time": "764.898\u00b5s",
+            "a": [
+              "127.0.0.1"
+            ],
+            "words": 2,
+            "lines": 1,
+            "status_code": 200,
+            "content_length": 279,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "login",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-14T20:08:18.119640171+01:00",
+            "port": "3001",
+            "url": "http://localhost:3001",
+            "input": "http://localhost:3001",
+            "title": "Login :: Damn Vulnerable Web Application (DVWA) v1.10 *Development*",
+            "scheme": "http",
+            "webserver": "Apache/2.4.25 (Debian)",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "final_url": "http://localhost:3001/login.php",
+            "time": "4.51194ms",
+            "chain_status_codes": [
+              302,
+              200
+            ],
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Apache HTTP Server:2.4.25",
+              "Debian",
+              "PHP"
+            ],
+            "words": 89,
+            "lines": 76,
+            "status_code": 200,
+            "content_length": 1523,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "login",
+              "pHash": 0
+            }
+          },
+          {
+            "timestamp": "2026-02-14T20:08:18.179877786+01:00",
+            "port": "9090",
+            "url": "http://localhost:9090",
+            "input": "http://localhost:9090",
+            "title": "Prometheus Time Series Collection and Processing Server",
+            "scheme": "http",
+            "content_type": "text/html",
+            "method": "GET",
+            "host": "localhost",
+            "host_ip": "127.0.0.1",
+            "path": "/",
+            "final_url": "http://localhost:9090/classic/graph",
+            "time": "1.959584ms",
+            "chain_status_codes": [
+              302,
+              200
+            ],
+            "a": [
+              "127.0.0.1"
+            ],
+            "tech": [
+              "Bootstrap:4",
+              "D3",
+              "Glyphicons",
+              "Moment.js",
+              "Mustache",
+              "Popper",
+              "Rickshaw",
+              "jQuery"
+            ],
+            "words": 1158,
+            "lines": 100,
+            "status_code": 200,
+            "content_length": 5450,
+            "failed": false,
+            "knowledgebase": {
+              "PageType": "nonerror",
+              "pHash": 0
+            }
+          }
+        ],
+        "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cnlo8rqf/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects"
+      },
+      "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cnlo8rqf/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "success": true,
+      "data": {
+        "success": true,
+        "scan_data": [
+          {
+            "target": "http://localhost:3001",
+            "plugins": {
+              "Apache": {
+                "version": [
+                  "2.4.25"
+                ]
+              },
+              "Cookies": {
+                "string": [
+                  "PHPSESSID",
+                  "security"
+                ]
+              },
+              "Country": {
+                "string": [
+                  "RESERVED"
+                ],
+                "module": [
+                  "ZZ"
+                ]
+              },
+              "HTTPServer": {
+                "os": [
+                  "Debian Linux"
+                ],
+                "string": [
+                  "Apache/2.4.25 (Debian)"
+                ]
+              },
+              "IP": {
+                "string": [
+                  "127.0.0.1"
+                ]
+              },
+              "RedirectLocation": {
+                "string": [
+                  "login.php"
+                ]
+              }
+            },
+            "banner": null,
+            "status": 302
+          },
+          {
+            "target": "http://localhost:3001/login.php",
+            "plugins": {
+              "Apache": {
+                "version": [
+                  "2.4.25"
+                ]
+              },
+              "Cookies": {
+                "string": [
+                  "PHPSESSID",
+                  "security"
+                ]
+              },
+              "Country": {
+                "string": [
+                  "RESERVED"
+                ],
+                "module": [
+                  "ZZ"
+                ]
+              },
+              "DVWA": {},
+              "HTTPServer": {
+                "os": [
+                  "Debian Linux"
+                ],
+                "string": [
+                  "Apache/2.4.25 (Debian)"
+                ]
+              },
+              "IP": {
+                "string": [
+                  "127.0.0.1"
+                ]
+              },
+              "PasswordField": {
+                "string": [
+                  "password"
+                ]
+              },
+              "Title": {
+                "string": [
+                  "Login :: Damn Vulnerable Web Application (DVWA) v1.10 *Development*"
+                ]
+              }
+            },
+            "banner": null,
+            "status": 200
+          }
+        ],
+        "command": "whatweb http://localhost:3001 --log-json -"
+      },
+      "command": "whatweb http://localhost:3001 --log-json -",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "success": true,
+      "data": {
+        "success": true,
+        "scan_data": [
+          {
+            "target": "http://localhost:8080",
+            "plugins": {
+              "Country": {
+                "string": [
+                  "RESERVED"
+                ],
+                "module": [
+                  "ZZ"
+                ]
+              },
+              "IP": {
+                "string": [
+                  "127.0.0.1"
+                ]
+              }
+            },
+            "banner": null,
+            "status": 200
+          }
+        ],
+        "command": "whatweb http://localhost:8080 --log-json -"
+      },
+      "command": "whatweb http://localhost:8080 --log-json -",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "success": true,
+      "data": {
+        "success": true,
+        "scan_data": [
+          {
+            "target": "http://localhost:9090",
+            "plugins": {
+              "Country": {
+                "string": [
+                  "RESERVED"
+                ],
+                "module": [
+                  "ZZ"
+                ]
+              },
+              "IP": {
+                "string": [
+                  "127.0.0.1"
+                ]
+              },
+              "RedirectLocation": {
+                "string": [
+                  "/classic/graph"
+                ]
+              }
+            },
+            "banner": null,
+            "status": 302
+          },
+          {
+            "target": "http://localhost:9090/classic/graph",
+            "plugins": {
+              "Bootstrap": {},
+              "Country": {
+                "string": [
+                  "RESERVED"
+                ],
+                "module": [
+                  "ZZ"
+                ]
+              },
+              "HTML5": {},
+              "IP": {
+                "string": [
+                  "127.0.0.1"
+                ]
+              },
+              "JQuery": {},
+              "Script": {
+                "string": [
+                  "text/x-handlebars-template"
+                ]
+              },
+              "Title": {
+                "string": [
+                  "Prometheus Time Series Collection and Processing Server"
+                ]
+              }
+            },
+            "banner": null,
+            "status": 200
+          }
+        ],
+        "command": "whatweb http://localhost:9090 --log-json -"
+      },
+      "command": "whatweb http://localhost:9090 --log-json -",
+      "target": "http://localhost:9090",
+      "phase": "baseline"
+    },
+    {
+      "tool": "wpscan",
+      "success": false,
+      "skipped": true,
+      "reason": "WordPress not detected by whatweb",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "wpscan",
+      "success": false,
+      "skipped": true,
+      "reason": "WordPress not detected by whatweb",
+      "target": "http://localhost:9090",
+      "phase": "baseline"
+    },
+    {
+      "tool": "wpscan",
+      "success": false,
+      "skipped": true,
+      "reason": "WordPress not detected by whatweb",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "nuclei",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [
+          {
+            "id": "fingerprinthub-web-fingerprints",
+            "name": "FingerprintHub Technology Fingerprint",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "FingerprintHub Technology Fingerprint tests run in nuclei."
+          },
+          {
+            "id": "missing-cookie-samesite-strict",
+            "name": "Missing Cookie SameSite Strict",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "Identified cookies that lacked the samesite=strict attribute, which prevented enforcement of restrictions on cross-domain cookie transmission.\n"
+          },
+          {
+            "id": "tech-detect",
+            "name": "Wappalyzer Technology Detection",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": ""
+          },
+          {
+            "id": "missing-cookie-samesite-strict",
+            "name": "Missing Cookie SameSite Strict",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001",
+            "description": "Identified cookies that lacked the samesite=strict attribute, which prevented enforcement of restrictions on cross-domain cookie transmission.\n"
+          },
+          {
+            "id": "tech-detect",
+            "name": "Wappalyzer Technology Detection",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001",
+            "description": ""
+          },
+          {
+            "id": "exposed-gitignore",
+            "name": "Gitignore Config - Detect",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/.gitignore",
+            "description": "Gitignore configuration information was detected."
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/login.php",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "caa-fingerprint",
+            "name": "CAA Record",
+            "severity": "info",
+            "type": "dns",
+            "host": "localhost.",
+            "matched_at": "localhost",
+            "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
+          },
+          {
+            "id": "readme-md",
+            "name": "README.md file disclosure",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/README.md",
+            "description": "Internal documentation file often used in projects which can contain sensitive information."
+          },
+          {
+            "id": "waf-detect",
+            "name": "WAF Detection",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/",
+            "description": "A web application firewall was detected."
+          },
+          {
+            "id": "robots-txt-endpoint",
+            "name": "robots.txt endpoint prober",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/robots.txt",
+            "description": ""
+          },
+          {
+            "id": "configuration-listing",
+            "name": "Sensitive Configuration Files Listing - Detect",
+            "severity": "medium",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/config/",
+            "description": "Listing of sensitive configuration files containing items such as usernames, passwords, and IP addresses was detected."
+          },
+          {
+            "id": "robots-txt",
+            "name": "robots.txt file",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:3001",
+            "matched_at": "http://localhost:3001/robots.txt",
+            "description": ""
+          }
+        ],
+        "command": "nuclei -u http://localhost:3001 -jsonl -rate-limit 300"
+      },
+      "command": "nuclei -u http://localhost:3001 -jsonl -rate-limit 300",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "nuclei",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "prometheus-metrics",
+            "name": "Prometheus Metrics - Detect",
+            "severity": "medium",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080/metrics",
+            "description": "Prometheus metrics page was detected."
+          },
+          {
+            "id": "options-method",
+            "name": "Allowed Options Method",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:8080",
+            "matched_at": "http://localhost:8080",
+            "description": ""
+          },
+          {
+            "id": "caa-fingerprint",
+            "name": "CAA Record",
+            "severity": "info",
+            "type": "dns",
+            "host": "localhost.",
+            "matched_at": "localhost",
+            "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
+          }
+        ],
+        "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 300"
+      },
+      "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 300",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "nuclei",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [
+          {
+            "id": "tech-detect",
+            "name": "Wappalyzer Technology Detection",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": ""
+          },
+          {
+            "id": "tech-detect",
+            "name": "Wappalyzer Technology Detection",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": ""
+          },
+          {
+            "id": "tech-detect",
+            "name": "Wappalyzer Technology Detection",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": ""
+          },
+          {
+            "id": "fingerprinthub-web-fingerprints",
+            "name": "FingerprintHub Technology Fingerprint",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "FingerprintHub Technology Fingerprint tests run in nuclei."
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "http-missing-security-headers",
+            "name": "HTTP Missing Security Headers",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/classic/graph",
+            "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+          },
+          {
+            "id": "caa-fingerprint",
+            "name": "CAA Record",
+            "severity": "info",
+            "type": "dns",
+            "host": "localhost.",
+            "matched_at": "localhost",
+            "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
+          },
+          {
+            "id": "options-method",
+            "name": "Allowed Options Method",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090",
+            "description": ""
+          },
+          {
+            "id": "prometheus-unauth",
+            "name": "Prometheus Monitoring System - Unauthenticated",
+            "severity": "high",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/api/v1/status/config",
+            "description": "Detects unauthenticated access to Prometheus Time Series Collection and Processing Server by checking for specific elements in the response from the `/graph` endpoint.\n"
+          },
+          {
+            "id": "prometheus-flags",
+            "name": "Prometheus flags API endpoint",
+            "severity": "info",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/api/v1/status/flags",
+            "description": "The flags endpoint provides a full path to the configuration file. If the file is stored in the home directory, it may leak a username."
+          },
+          {
+            "id": "go-pprof-debug",
+            "name": "Go pprof Debug Page",
+            "severity": "low",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/debug/pprof/heap?debug=1",
+            "description": "go pprof debug page was exposed."
+          },
+          {
+            "id": "prometheus-metrics",
+            "name": "Prometheus Metrics - Detect",
+            "severity": "medium",
+            "type": "http",
+            "host": "http://localhost:9090",
+            "matched_at": "http://localhost:9090/metrics",
+            "description": "Prometheus metrics page was detected."
+          }
+        ],
+        "command": "nuclei -u http://localhost:9090 -jsonl -rate-limit 300"
+      },
+      "command": "nuclei -u http://localhost:9090 -jsonl -rate-limit 300",
+      "target": "http://localhost:9090",
+      "phase": "baseline"
+    },
+    {
+      "tool": "gobuster",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [
+          "\u001b[2K/robots.txt           (Status: 200) [Size: 26]"
+        ],
+        "command": "gobuster dir -u http://localhost:3001 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
+      },
+      "command": "gobuster dir -u http://localhost:3001 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "gobuster",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [],
+        "command": "gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
+      },
+      "command": "gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "target": "http://localhost:9090",
+      "phase": "baseline"
+    },
+    {
+      "tool": "gobuster",
+      "success": false,
+      "data": {
+        "success": false,
+        "error": "Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:8080/50e1cf62-9c8a-430d-868e-76a414dee544 => 501 (Length: 191). To continue please exclude the status code or the length",
+        "canceled": false,
+        "raw_output": "",
+        "command": "gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
+      },
+      "command": "gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "error": "Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:8080/50e1cf62-9c8a-430d-868e-76a414dee544 => 501 (Length: 191). To continue please exclude the status code or the length",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "ffuf",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [],
+        "results": {
+          "results": []
+        },
+        "command": "ffuf -u http://localhost:3001/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac"
+      },
+      "command": "ffuf -u http://localhost:3001/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac",
+      "phase": "agentic",
+      "target": "http://localhost:3001",
+      "profile": "compliance_soc2"
+    },
+    {
+      "tool": "ffuf",
+      "success": true,
+      "data": {
+        "success": true,
+        "findings": [],
+        "results": {
+          "results": []
+        },
+        "command": "ffuf -u http://localhost:8080/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac"
+      },
+      "command": "ffuf -u http://localhost:8080/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac",
+      "fallback_for": "gobuster",
+      "reason": "Fallback after gobuster failure",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "katana",
+      "success": false,
+      "skipped": true,
+      "reason": "Disabled by config (tools.<name>.enabled=false)",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "katana",
+      "success": false,
+      "skipped": true,
+      "reason": "Disabled by config (tools.<name>.enabled=false)",
+      "target": "http://localhost:9090",
+      "phase": "baseline"
+    },
+    {
+      "tool": "katana",
+      "success": false,
+      "skipped": true,
+      "reason": "Disabled by config (tools.<name>.enabled=false)",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "dnsenum",
+      "success": false,
+      "skipped": true,
+      "reason": "Localhost/loopback target (DNS enumeration N/A)",
+      "phase": "baseline"
+    },
+    {
+      "tool": "sslscan",
+      "success": false,
+      "skipped": true,
+      "reason": "No TLS candidate ports detected from discovery",
+      "phase": "baseline"
+    },
+    {
+      "tool": "enum4linux-ng",
+      "success": false,
+      "skipped": true,
+      "reason": "No SMB ports detected (139/445)",
+      "phase": "baseline"
+    },
+    {
+      "tool": "sqlmap",
+      "success": false,
+      "skipped": true,
+      "reason": "No parameterized URL provided (include '?' in target URL)",
+      "phase": "baseline"
+    },
+    {
+      "tool": "searchsploit",
+      "success": false,
+      "skipped": true,
+      "reason": "Disabled by config (tools.<name>.enabled=false)",
+      "phase": "baseline"
+    },
+    {
+      "tool": "supabase_audit",
+      "success": true,
+      "data": {
+        "success": true,
+        "scanned": [
+          "http://localhost:19090",
+          "http://localhost:44427",
+          "http://localhost:5670",
+          "http://localhost:4001",
+          "http://localhost:44717",
+          "http://localhost:9417",
+          "http://localhost:8080",
+          "http://localhost:3001",
+          "http://localhost:9090"
+        ],
+        "page_hits": [
+          {
+            "url": "http://localhost:19090",
+            "status": 404
+          },
+          {
+            "url": "http://localhost:44427",
+            "status": 401
+          },
+          {
+            "url": "http://localhost:5670",
+            "status": 404
+          },
+          {
+            "url": "http://localhost:4001",
+            "status": 200
+          },
+          {
+            "url": "http://localhost:44717",
+            "status": 404
+          },
+          {
+            "url": "http://localhost:9417",
+            "status": 404
+          },
+          {
+            "url": "http://localhost:8080",
+            "status": 200
+          },
+          {
+            "url": "http://localhost:3001",
+            "status": 200
+          },
+          {
+            "url": "http://localhost:9090",
+            "status": 200
+          }
+        ],
+        "supabase_urls": [],
+        "exposed_urls": [],
+        "keys": [
+          {
+            "type": "anon",
+            "value": "eyJhbG\u2026.sig",
+            "source": "http://localhost:4001"
+          },
+          {
+            "type": "service_role",
+            "value": "eyJhbG\u2026.sig",
+            "source": "http://localhost:4001"
+          }
+        ],
+        "rpc_candidates": [
+          "list_users"
+        ],
+        "exposures": [
+          {
+            "type": "rest_api_public",
+            "url": "http://localhost:4001/rest/v1/",
+            "status": 200
+          },
+          {
+            "type": "rpc_root_public",
+            "url": "http://localhost:4001/rest/v1/rpc/",
+            "status": 200
+          },
+          {
+            "type": "rls_misconfig",
+            "url": "http://localhost:4001/rest/v1/",
+            "status": 200
+          },
+          {
+            "type": "rpc_public",
+            "url": "http://localhost:4001/rest/v1/rpc/list_users",
+            "rpc": "list_users",
+            "status": 200
+          }
+        ],
+        "command": "supabase_audit"
+      },
+      "command": "supabase_audit",
+      "phase": "baseline"
+    },
+    {
+      "tool": "readiness_probe",
+      "success": true,
+      "data": {
+        "success": true,
+        "command": "internal readiness probes",
+        "findings": [
+          {
+            "severity": "MEDIUM",
+            "title": "Sensitive services listening on wildcard interfaces",
+            "evidence": "ss -lnt shows wildcard listeners on ports: 5432, 6379, 8080, 9090, 9100",
+            "type": "listener_exposure"
+          },
+          {
+            "severity": "MEDIUM",
+            "title": "Unauthenticated metrics endpoint accessible",
+            "evidence": "http://localhost:8080/metrics (HTTP 200)",
+            "type": "metrics_exposure"
+          },
+          {
+            "severity": "MEDIUM",
+            "title": "Unauthenticated metrics endpoint accessible",
+            "evidence": "http://localhost:9090/metrics (HTTP 200)",
+            "type": "metrics_exposure"
+          },
+          {
+            "severity": "HIGH",
+            "title": "Prometheus config endpoint accessible without authentication",
+            "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+            "type": "prometheus_config_exposure"
+          },
+          {
+            "severity": "MEDIUM",
+            "title": "Redis reachable without authentication",
+            "evidence": "redis-cli PING returned PONG for localhost:6379",
+            "type": "redis_auth_exposure"
+          }
+        ],
+        "checks": [
+          {
+            "name": "listener_scope",
+            "success": true,
+            "wildcard_ports": [
+              3000,
+              3001,
+              3002,
+              4000,
+              4001,
+              5050,
+              5432,
+              6379,
+              8080,
+              9090,
+              9100,
+              9417,
+              19090,
+              44717
+            ],
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:8080/metrics",
+            "status": 200,
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:8080/api/v1/status/config",
+            "status": 404,
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:8080/debug/vars",
+            "status": 404,
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:9090/metrics",
+            "status": 200,
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:9090/api/v1/status/config",
+            "status": 200,
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:9090/debug/vars",
+            "status": 404,
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:3001/metrics",
+            "status": 404,
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:3001/api/v1/status/config",
+            "status": 404,
+            "error": null
+          },
+          {
+            "name": "http_probe",
+            "url": "http://localhost:3001/debug/vars",
+            "status": 404,
+            "error": null
+          },
+          {
+            "name": "redis_auth_probe",
+            "success": true,
+            "output": "pong"
+          }
+        ],
+        "commands": [
+          "ss -lnt",
+          "redis-cli -h localhost -p 6379 PING"
+        ]
+      },
+      "command": "internal readiness probes",
+      "phase": "baseline"
+    }
+  ],
+  "mode": "normal",
+  "started_at": 1771095938.9294152,
+  "tuning": {
+    "nuclei_rate_limit": 300,
+    "nuclei_templates": null,
+    "gobuster_threads": 10,
+    "gobuster_wordlist": null,
+    "nikto_enabled": false,
+    "hydra_enabled": false,
+    "hydra_services": "ssh,ftp",
+    "hydra_threads": 4,
+    "theharvester_enabled": false,
+    "theharvester_sources": null,
+    "theharvester_limit": null,
+    "theharvester_start": null,
+    "netdiscover_enabled": false,
+    "netdiscover_range": null,
+    "netdiscover_interface": null,
+    "netdiscover_passive": false,
+    "netdiscover_fast": true,
+    "aircrack_enabled": false,
+    "aircrack_interface": null,
+    "aircrack_channel": null,
+    "aircrack_args": null,
+    "aircrack_airmon": false,
+    "medusa_enabled": false,
+    "medusa_module": null,
+    "medusa_port": null,
+    "medusa_threads": 4,
+    "crackmapexec_enabled": false,
+    "cme_protocol": "smb",
+    "cme_module": null,
+    "scoutsuite_enabled": false,
+    "scoutsuite_provider": "aws",
+    "prowler_enabled": false,
+    "compliance_profile": "compliance_soc2"
+  },
+  "safety": {
+    "aggressive_caps": {
+      "enabled": false,
+      "caps": {},
+      "applied": []
+    }
+  },
+  "compliance_profile": "compliance_soc2",
+  "compliance_framework": "SOC 2 Type II",
+  "compliance_focus": "Security and availability controls with evidence of exposure management and vulnerability assessment.",
+  "web_targets": [
+    "http://localhost:19090",
+    "http://localhost:44427",
+    "http://localhost:5670",
+    "http://localhost:4001",
+    "http://localhost:44717",
+    "http://localhost:9417",
+    "http://localhost:8080",
+    "http://localhost:3001",
+    "http://localhost:9090"
+  ],
+  "llm": {
+    "enabled": true,
+    "calls": [
+      {
+        "provider": "openai",
+        "model": "gpt-5.2",
+        "usage": {
+          "completion_tokens": 292,
+          "prompt_tokens": 3461,
+          "total_tokens": 3753,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0,
+            "text_tokens": null,
+            "image_tokens": null
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0,
+            "text_tokens": null,
+            "image_tokens": null
+          }
+        },
+        "tool_calling": true,
+        "cost_usd": 0.01014475,
+        "call_type": "plan",
+        "stage": "ai_audit_tool_call",
+        "input_truncated": false,
+        "input_chars": 10152,
+        "max_input_chars": 12000
+      },
+      {
+        "provider": "openai",
+        "model": "gpt-5.2",
+        "usage": {
+          "completion_tokens": 982,
+          "prompt_tokens": 3476,
+          "total_tokens": 4458,
+          "completion_tokens_details": {
+            "accepted_prediction_tokens": 0,
+            "audio_tokens": 0,
+            "reasoning_tokens": 0,
+            "rejected_prediction_tokens": 0,
+            "text_tokens": null,
+            "image_tokens": null
+          },
+          "prompt_tokens_details": {
+            "audio_tokens": 0,
+            "cached_tokens": 0,
+            "text_tokens": null,
+            "image_tokens": null
+          }
+        },
+        "cost_usd": 0.019831,
+        "call_type": "summary",
+        "input_truncated": false,
+        "input_chars": 10549,
+        "max_input_chars": 12000
+      }
+    ]
+  },
+  "open_ports": [
+    3000,
+    3001,
+    3002,
+    4000,
+    4001,
+    5050,
+    5432,
+    5670,
+    6379,
+    8080,
+    9090,
+    9100,
+    9417,
+    19090,
+    34547,
+    44427,
+    44717,
+    51414
+  ],
+  "summary_notes": [
+    "ffuf fallback (after gobuster failure) ran and found 0 paths across 1 target(s): http://localhost:8080 (0).",
+    "agentic ffuf action(s) ran and found 0 paths across 1 target(s): http://localhost:3001 (0)."
+  ],
+  "findings": [
+    {
+      "severity": "INFO",
+      "title": "Open port 3000/tcp",
+      "evidence": "ppp",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 3001/tcp",
+      "evidence": "http Apache httpd 2.4.25",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 3002/tcp",
+      "evidence": "exlm-agent",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 4000/tcp",
+      "evidence": "tcpwrapped",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 4001/tcp",
+      "evidence": "http nginx 1.29.4",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 5050/tcp",
+      "evidence": "mmcc",
+      "tool": "nmap"
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 5432/tcp",
+      "evidence": "postgresql PostgreSQL DB 9.6.0 or later",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "medium"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)",
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 5670/tcp",
+      "evidence": "http Node.js Express framework",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 6379/tcp",
+      "evidence": "redis Redis key-value store 6.2.11",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "medium"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)",
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 8080/tcp",
+      "evidence": "http-proxy",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 9090/tcp",
+      "evidence": "http Golang net/http server",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 9100/tcp",
+      "evidence": "jetdirect",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 9417/tcp",
+      "evidence": "http Node.js Express framework",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 19090/tcp",
+      "evidence": "http Golang net/http server",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 34547/tcp",
+      "evidence": "unknown",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 44427/tcp",
+      "evidence": "http Node.js Express framework",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 44717/tcp",
+      "evidence": "http Node.js Express framework",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Open port 51414/tcp",
+      "evidence": "unknown",
+      "tool": "nmap",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Tech stack detected",
+      "evidence": "Apache, Cookies, Country, HTTPServer, IP, RedirectLocation",
+      "tool": "whatweb",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Tech stack detected",
+      "evidence": "Apache, Cookies, Country, DVWA, HTTPServer, IP, PasswordField, Title",
+      "tool": "whatweb",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "low"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "low"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)",
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: low)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Tech stack detected",
+      "evidence": "Country, IP",
+      "tool": "whatweb"
+    },
+    {
+      "severity": "INFO",
+      "title": "Tech stack detected",
+      "evidence": "Country, IP, RedirectLocation",
+      "tool": "whatweb"
+    },
+    {
+      "severity": "INFO",
+      "title": "Tech stack detected",
+      "evidence": "Bootstrap, Country, HTML5, IP, JQuery, Script, Title",
+      "tool": "whatweb"
+    },
+    {
+      "severity": "INFO",
+      "title": "FingerprintHub Technology Fingerprint",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "Missing Cookie SameSite Strict",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "Wappalyzer Technology Detection",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "Missing Cookie SameSite Strict",
+      "evidence": "http://localhost:3001",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "Wappalyzer Technology Detection",
+      "evidence": "http://localhost:3001",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "Gitignore Config - Detect",
+      "evidence": "http://localhost:3001/.gitignore",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:3001/login.php",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "CAA Record",
+      "evidence": "localhost",
+      "tool": "nuclei",
+      "type": "dns"
+    },
+    {
+      "severity": "INFO",
+      "title": "README.md file disclosure",
+      "evidence": "http://localhost:3001/README.md",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "WAF Detection",
+      "evidence": "http://localhost:3001/",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "robots.txt endpoint prober",
+      "evidence": "http://localhost:3001/robots.txt",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Sensitive Configuration Files Listing - Detect",
+      "evidence": "http://localhost:3001/config/",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "vuln_mgmt",
+          "reference": "SOC 2 CC7.1 (Vulnerability Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "robots.txt file",
+      "evidence": "http://localhost:3001/robots.txt",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Prometheus Metrics - Detect",
+      "evidence": "http://localhost:8080/metrics",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "high"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: high)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Allowed Options Method",
+      "evidence": "http://localhost:8080",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "CAA Record",
+      "evidence": "localhost",
+      "tool": "nuclei",
+      "type": "dns"
+    },
+    {
+      "severity": "INFO",
+      "title": "Wappalyzer Technology Detection",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "Wappalyzer Technology Detection",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "Wappalyzer Technology Detection",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "FingerprintHub Technology Fingerprint",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "HTTP Missing Security Headers",
+      "evidence": "http://localhost:9090/classic/graph",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "CAA Record",
+      "evidence": "localhost",
+      "tool": "nuclei",
+      "type": "dns"
+    },
+    {
+      "severity": "INFO",
+      "title": "Allowed Options Method",
+      "evidence": "http://localhost:9090",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "HIGH",
+      "title": "Prometheus Monitoring System - Unauthenticated",
+      "evidence": "http://localhost:9090/api/v1/status/config",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "high"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Prometheus flags API endpoint",
+      "evidence": "http://localhost:9090/api/v1/status/flags",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "LOW",
+      "title": "Go pprof Debug Page",
+      "evidence": "http://localhost:9090/debug/pprof/heap?debug=1",
+      "tool": "nuclei",
+      "type": "http"
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Prometheus Metrics - Detect",
+      "evidence": "http://localhost:9090/metrics",
+      "tool": "nuclei",
+      "type": "http",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "high"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: high)"
+      ]
+    },
+    {
+      "severity": "INFO",
+      "title": "Discovered path",
+      "evidence": "\u001b[2K/robots.txt           (Status: 200) [Size: 26]",
+      "tool": "gobuster",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "LOW",
+      "title": "Supabase anon key exposed in client content",
+      "evidence": "key=eyJhbG\u2026.sig, source=http://localhost:4001",
+      "recommendation": "Verify RLS policies and limit anon key usage to least privilege.",
+      "tool": "supabase_audit",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "CRITICAL",
+      "title": "Supabase service role key exposed",
+      "evidence": "key=eyJhbG\u2026.sig, source=http://localhost:4001",
+      "recommendation": "Rotate the service role key immediately and remove it from client-side code.",
+      "tool": "supabase_audit",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "vuln_mgmt",
+          "reference": "SOC 2 CC7.1 (Vulnerability Management)",
+          "confidence": "medium"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "high"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "high"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium)",
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)",
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: high)"
+      ]
+    },
+    {
+      "severity": "HIGH",
+      "title": "Supabase REST API accessible without authentication",
+      "evidence": "http://localhost:4001/rest/v1/ (HTTP 200)",
+      "recommendation": "Enforce RLS and require API keys/auth for REST endpoints.",
+      "tool": "supabase_audit",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "high"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)",
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Supabase RPC endpoint exposed without authentication",
+      "evidence": "http://localhost:4001/rest/v1/rpc/ (HTTP 200)",
+      "recommendation": "Restrict RPC access with policies and authentication.",
+      "tool": "supabase_audit",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "high"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "vuln_mgmt",
+          "reference": "SOC 2 CC7.1 (Vulnerability Management)",
+          "confidence": "medium"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)",
+        "Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium)",
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "HIGH",
+      "title": "Supabase RLS may be disabled",
+      "evidence": "http://localhost:4001/rest/v1/ (HTTP 200)",
+      "recommendation": "Enable RLS and verify policies for affected tables/views.",
+      "tool": "supabase_audit",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "high"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)",
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "HIGH",
+      "title": "Supabase RPC 'list_users' callable without authentication",
+      "evidence": "http://localhost:4001/rest/v1/rpc/list_users (HTTP 200)",
+      "recommendation": "Require authentication for RPCs and enforce RLS or role checks.",
+      "tool": "supabase_audit",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "high"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "data_protection",
+          "reference": "SOC 2 CC6.8 (Data Classification & Protection)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)",
+        "Potential Gap: SOC 2 CC6.8 (Data Classification & Protection) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Sensitive services listening on wildcard interfaces",
+      "evidence": "ss -lnt shows wildcard listeners on ports: 5432, 6379, 8080, 9090, 9100",
+      "tool": "readiness_probe",
+      "type": "listener_exposure",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Unauthenticated metrics endpoint accessible",
+      "evidence": "http://localhost:8080/metrics (HTTP 200)",
+      "tool": "readiness_probe",
+      "type": "metrics_exposure",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "medium"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)",
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Unauthenticated metrics endpoint accessible",
+      "evidence": "http://localhost:9090/metrics (HTTP 200)",
+      "tool": "readiness_probe",
+      "type": "metrics_exposure",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "medium"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)",
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "HIGH",
+      "title": "Prometheus config endpoint accessible without authentication",
+      "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+      "tool": "readiness_probe",
+      "type": "prometheus_config_exposure",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "high"
+        },
+        {
+          "status": "potential_gap",
+          "control_key": "secure_config",
+          "reference": "SOC 2 CC8.1 (Configuration Management)",
+          "confidence": "medium"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)",
+        "Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)"
+      ]
+    },
+    {
+      "severity": "MEDIUM",
+      "title": "Redis reachable without authentication",
+      "evidence": "redis-cli PING returned PONG for localhost:6379",
+      "tool": "readiness_probe",
+      "type": "redis_auth_exposure",
+      "compliance_mappings": [
+        {
+          "status": "potential_gap",
+          "control_key": "access_control",
+          "reference": "SOC 2 CC6.1 (Logical Access)",
+          "confidence": "high"
+        }
+      ],
+      "compliance_tags": [
+        "Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)"
+      ]
+    }
+  ],
+  "recommended_next_actions": [
+    "Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported.",
+    "Reduce attack surface by closing unused listeners and rebinding critical services from wildcard interfaces to least-privilege network zones.",
+    "Limit PostgreSQL exposure to required application hosts and enforce strong auth/TLS policies for database connectivity.",
+    "Harden Redis: require authentication/ACLs, bind to localhost or private interfaces, and block untrusted network access at the firewall.",
+    "Collect SOC 2 control-operation evidence not assessable by scanning (JML/access reviews, change approvals, incident response drills, and policy governance records).",
+    "After remediation, rerun the readiness assessment and compare deltas in findings severity, exposed services, and evidence artifacts."
+  ],
+  "compliance_coverage_matrix": [
+    {
+      "area": "Security Surface Inventory",
+      "status": "Covered",
+      "evidence_source": "nmap, httpx, whatweb",
+      "notes": "based on successful tool runs",
+      "coverage_basis": "corroborated_findings",
+      "mapped_tools": [
+        "nmap",
+        "httpx",
+        "whatweb"
+      ]
+    },
+    {
+      "area": "Vulnerability & Misconfiguration Checks",
+      "status": "Partial",
+      "evidence_source": "nuclei, gobuster, ffuf",
+      "notes": "skipped: sqlmap (No parameterized URL provided (include '?' in target URL))",
+      "coverage_basis": "corroborated_findings",
+      "mapped_tools": [
+        "nuclei",
+        "gobuster",
+        "ffuf",
+        "nikto",
+        "sqlmap"
+      ]
+    },
+    {
+      "area": "Encryption/Transport Control Review",
+      "status": "Partial",
+      "evidence_source": "nmap",
+      "notes": "skipped: sslscan (No TLS candidate ports detected from discovery)",
+      "coverage_basis": "corroborated_findings",
+      "mapped_tools": [
+        "sslscan",
+        "nmap"
+      ]
+    },
+    {
+      "area": "Access Control Exposure Review",
+      "status": "Partial",
+      "evidence_source": "readiness_probe, nuclei, supabase_audit",
+      "notes": "based on successful tool runs",
+      "coverage_basis": "corroborated_findings",
+      "mapped_tools": [
+        "readiness_probe",
+        "nuclei",
+        "hydra",
+        "medusa",
+        "crackmapexec",
+        "supabase_audit"
+      ]
+    }
+  ],
+  "finished_at": 1771096241.0621881,
+  "schema_validation": {
+    "valid": true,
+    "errors": []
+  },
+  "saved_to": null,
+  "report_kind": "ai_audit",
+  "ai_audit": {
+    "phase": "baseline+agentic",
+    "baseline_finished_at": 1771096234.9720645,
+    "planner": {
+      "type": "tool_calling",
+      "plans": [
+        {
+          "actions": [
+            {
+              "tool": "ffuf",
+              "arguments": {
+                "profile": "compliance_soc2",
+                "target": "http://localhost:3001",
+                "threads": 20,
+                "rate_limit": 50,
+                "wordlist": "common.txt"
+              },
+              "profile": "compliance_soc2",
+              "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+              "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+              "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality.",
+              "priority": 10
+            }
+          ],
+          "notes": "Only one action proposed (remaining_actions=1). Note: gobuster and nuclei/httpx/whatweb for this target/profile were already run; ffuf provides complementary fuzzing-based discovery not excluded for :3001 in constraints.",
+          "stop": false
+        }
+      ],
+      "error": null,
+      "warning": null
+    },
+    "planner_mode": "iterative",
+    "decision_trace_version": 1,
+    "decision_trace": [
+      {
+        "iteration": 1,
+        "remaining_actions_before": 1,
+        "started_at": 1771096234.9727046,
+        "planner": {
+          "stop": false,
+          "notes": "Only one action proposed (remaining_actions=1). Note: gobuster and nuclei/httpx/whatweb for this target/profile were already run; ffuf provides complementary fuzzing-based discovery not excluded for :3001 in constraints.",
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "tool": "ffuf",
+              "target": "http://localhost:3001",
+              "profile": "compliance_soc2",
+              "priority": 10,
+              "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+              "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+              "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality."
+            }
+          ]
+        },
+        "selected_action": {
+          "tool": "ffuf",
+          "target": "http://localhost:3001",
+          "profile": "compliance_soc2",
+          "priority": 10,
+          "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+          "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+          "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality."
+        },
+        "outcome": {
+          "status": "success",
+          "tool_result_reason": null,
+          "tool_result_error": null,
+          "extra_results_added": 0,
+          "findings_count_before": 93,
+          "findings_count_after": 93,
+          "findings_count_delta": 0,
+          "web_target_count_before": 9,
+          "web_target_count_after": 9,
+          "web_target_count_delta": 0
+        },
+        "critique": {
+          "signal": "medium",
+          "summary": "Action succeeded but added limited net-new signal."
+        },
+        "decision": {
+          "result": "executed"
+        },
+        "finished_at": 1771096241.0621862
+      }
+    ],
+    "max_actions": 1,
+    "actions": [
+      {
+        "tool": "ffuf",
+        "target": "http://localhost:3001",
+        "profile": "compliance_soc2",
+        "priority": 10,
+        "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+        "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+        "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality.",
+        "phase": "agentic",
+        "success": true,
+        "skipped": false,
+        "error": null,
+        "reason": null,
+        "started_at": 1771096241.0486033,
+        "finished_at": 1771096241.0609841
+      }
+    ],
+    "notes": "Only one action proposed (remaining_actions=1). Note: gobuster and nuclei/httpx/whatweb for this target/profile were already run; ffuf provides complementary fuzzing-based discovery not excluded for :3001 in constraints.",
+    "compliance_profile": "compliance_soc2",
+    "compliance_framework": "SOC 2 Type II",
+    "compliance_focus": "Security and availability controls with evidence of exposure management and vulnerability assessment.",
+    "replay_trace_file": "ai-audit-soc2-20260214-200538-replay.json",
+    "replay_trace_version": 1,
+    "llm_reasoning_json_file": "ai-audit-soc2-20260214-200538-llm-trace.json",
+    "llm_reasoning_markdown_file": "ai-audit-soc2-20260214-200538-llm-trace.md"
+  },
+  "llm_thinking_events": [
+    {
+      "timestamp": 1771096234.9729588,
+      "event": "llm_start",
+      "tool": "planner",
+      "message": "Formulating audit expansion plan with tool-calling"
+    },
+    {
+      "timestamp": 1771096241.0465558,
+      "event": "llm_plan",
+      "tool": "planner",
+      "message": "iteration=1 candidates=1 top=ffuf p10 @http://localhost:3001"
+    },
+    {
+      "timestamp": 1771096241.047057,
+      "event": "llm_decision",
+      "tool": "ffuf",
+      "message": "selected=ffuf p10 @http://localhost:3001 | rationale=SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md... | hypothesis=The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized a... | expect=HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content..."
+    },
+    {
+      "timestamp": 1771096241.0616918,
+      "event": "llm_critique",
+      "tool": "ffuf",
+      "message": "signal=medium; status=success; findings_delta=0; web_targets_delta=0; extra_results=0"
+    },
+    {
+      "timestamp": 1771096241.0623012,
+      "event": "llm_start",
+      "tool": "summary",
+      "message": "Summarizing with LLM"
+    }
+  ],
+  "summary": {
+    "summary": "The localhost environment exposes multiple unauthenticated administrative/metrics endpoints and Supabase secrets, including a service role key, creating immediate risk of full database access, user enumeration, and sensitive configuration disclosure. Several data services (Postgres/Redis/metrics) are reachable and some listen on wildcard interfaces, increasing the attack surface.",
+    "findings": [
+      {
+        "severity": "HIGH",
+        "title": "Supabase service role key exposed (credential/secrets leakage)",
+        "evidence": "Supabase audit detected service role JWT in content: key=eyJhbG\u2026.sig, source=http://localhost:4001",
+        "recommendation": "Rotate the service role key immediately, remove it from any client-accessible responses/assets, and restrict usage to trusted server-side components only."
+      },
+      {
+        "severity": "HIGH",
+        "title": "Prometheus accessible without authentication (config exposure)",
+        "evidence": "Prometheus config endpoint reachable: http://localhost:9090/api/v1/status/config (HTTP 200); nuclei also flagged unauth Prometheus at the same endpoint",
+        "recommendation": "Require authentication/authorization for Prometheus UI and APIs, and restrict access via firewall/allowlist (bind to localhost or internal network only)."
+      },
+      {
+        "severity": "HIGH",
+        "title": "Supabase REST API accessible without authentication / potential missing RLS",
+        "evidence": "REST endpoint reachable without auth: http://localhost:4001/rest/v1/ (HTTP 200); tool notes 'RLS may be disabled'",
+        "recommendation": "Enable and verify Row Level Security (RLS) on all tables, ensure policies are least-privilege, and require appropriate API keys/JWT auth for data access."
+      },
+      {
+        "severity": "HIGH",
+        "title": "Unauthenticated Supabase RPC allows user enumeration",
+        "evidence": "RPC callable without auth: http://localhost:4001/rest/v1/rpc/list_users (HTTP 200)",
+        "recommendation": "Restrict RPC execution to authenticated roles, add explicit role checks within functions, and ensure underlying tables/views are protected by RLS/policies."
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Unauthenticated metrics endpoints exposed",
+        "evidence": "Metrics accessible: http://localhost:8080/metrics (HTTP 200) and http://localhost:9090/metrics (HTTP 200); nuclei detected Prometheus metrics endpoints",
+        "recommendation": "Protect metrics with authentication and/or network segmentation; avoid exposing metrics publicly as they can leak internal topology, versions, and operational data."
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Redis reachable without authentication",
+        "evidence": "readiness_probe: redis-cli PING returned PONG for localhost:6379",
+        "recommendation": "Enable Redis AUTH/ACLs, bind to localhost/internal interfaces, and enforce firewall rules to prevent untrusted network access."
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Sensitive services listening on wildcard interfaces (increased exposure)",
+        "evidence": "ss -lnt shows wildcard listeners on ports: 5432, 6379, 8080, 9090, 9100",
+        "recommendation": "Bind services to localhost/internal interfaces where possible and enforce host/network firewall policies to limit access to trusted sources only."
+      },
+      {
+        "severity": "MEDIUM",
+        "title": "Directory listing / sensitive configuration path detected",
+        "evidence": "nuclei: Sensitive Configuration Files Listing - Detect at http://localhost:3001/config/",
+        "recommendation": "Disable directory listing, remove sensitive files from web roots, and restrict access to configuration endpoints/paths."
+      },
+      {
+        "severity": "LOW",
+        "title": "Go pprof debug endpoint exposed",
+        "evidence": "nuclei: http://localhost:9090/debug/pprof/heap?debug=1",
+        "recommendation": "Disable pprof in production or restrict it to localhost/admin networks with authentication to prevent information leakage and potential DoS vectors."
+      },
+      {
+        "severity": "LOW",
+        "title": "Supabase anon key exposed in client content",
+        "evidence": "Supabase audit detected anon JWT in content: key=eyJhbG\u2026.sig, source=http://localhost:4001",
+        "recommendation": "Treat anon keys as public but ensure RLS and policies prevent data exposure; rotate if mistakenly granted elevated privileges and minimize scope/permissions."
+      }
+    ]
+  },
+  "evidence_pack": {
+    "dir": "evidence",
+    "manifest": "evidence/manifest.json",
+    "artifact_count": 26,
+    "artifact_status_counts": {
+      "success": 14,
+      "failed": 1,
+      "skipped": 11
+    },
+    "generated_at_utc": "2026-02-14 19:10:56 UTC",
+    "manifest_version": 2,
+    "artifacts": [
+      {
+        "tool": "nmap",
+        "status": "success",
+        "path": "evidence/results/000-nmap.json",
+        "sha256": "b36e40b46a9e98e99510f52ecd2070e6249f9dbd1179ee4a706d17381c96a6cd"
+      },
+      {
+        "tool": "httpx",
+        "status": "success",
+        "path": "evidence/results/001-httpx.json",
+        "sha256": "94dad1448aa11cd51da3963ed4062db826d54c27636a8f9abcc7a922cf45a2ea"
+      },
+      {
+        "tool": "whatweb",
+        "status": "success",
+        "path": "evidence/results/002-whatweb.json",
+        "sha256": "896e15ea120b96da383f41e9a28670435ee9c2a0560a9d0efc9b700bfb6bd31f"
+      },
+      {
+        "tool": "whatweb",
+        "status": "success",
+        "path": "evidence/results/003-whatweb.json",
+        "sha256": "d970ee70c27588f0b1107e73897004a7dc747afa6e20b13c540c92dd135d0f8f"
+      },
+      {
+        "tool": "whatweb",
+        "status": "success",
+        "path": "evidence/results/004-whatweb.json",
+        "sha256": "b955c3b58e335bb6dd3f6249df98dbd6aa912f413c583f75217164142f1c1615"
+      },
+      {
+        "tool": "wpscan",
+        "status": "skipped",
+        "path": "evidence/results/005-wpscan.json",
+        "sha256": "8431d9de437740afcbded49a73af2e8ab623867707e9d801f9a94ad5a053531f"
+      },
+      {
+        "tool": "wpscan",
+        "status": "skipped",
+        "path": "evidence/results/006-wpscan.json",
+        "sha256": "181b22d70984b1961bdb1bece0c3d11e8f81abde2e9c221971c0c0c5fc972d43"
+      },
+      {
+        "tool": "wpscan",
+        "status": "skipped",
+        "path": "evidence/results/007-wpscan.json",
+        "sha256": "ea51c5b3b4d9054693cff6439635ead403d3b0fd43b477ab498af31db8879ec8"
+      },
+      {
+        "tool": "nuclei",
+        "status": "success",
+        "path": "evidence/results/008-nuclei.json",
+        "sha256": "40e226f50d8231c48dd41aea38ae5963594b35ff5148411bee41814904239a2c"
+      },
+      {
+        "tool": "nuclei",
+        "status": "success",
+        "path": "evidence/results/009-nuclei.json",
+        "sha256": "23e4e7cb023c583291919430a60efdc8d2013fe14aa41d59c8496a14a8fe8712"
+      },
+      {
+        "tool": "nuclei",
+        "status": "success",
+        "path": "evidence/results/010-nuclei.json",
+        "sha256": "bae03eff010352fd52e1664a73d3a28f1b6f0fa2096d33b2fed6fb1535999c1a"
+      },
+      {
+        "tool": "gobuster",
+        "status": "success",
+        "path": "evidence/results/011-gobuster.json",
+        "sha256": "c329ea3f6030d18d2996d3f7c5ee8cd99e12cac06e26789ff6406164b138ce2c"
+      },
+      {
+        "tool": "gobuster",
+        "status": "success",
+        "path": "evidence/results/012-gobuster.json",
+        "sha256": "ef858bf2d617331dec2ff6d5778851959384f525e81ff82e5784fb2d2cfcd8e8"
+      },
+      {
+        "tool": "gobuster",
+        "status": "failed",
+        "path": "evidence/results/013-gobuster.json",
+        "sha256": "9c81101d702e395c154b32e4bb584f43adb92d800dbb234b2bd0e9d40d6fe1b6"
+      },
+      {
+        "tool": "ffuf",
+        "status": "success",
+        "path": "evidence/results/014-ffuf.json",
+        "sha256": "c19e33fe9d0cec277e7978083ed18e9bebb143ffe8df0e0419ea1d8b237aeafd"
+      },
+      {
+        "tool": "ffuf",
+        "status": "success",
+        "path": "evidence/results/015-ffuf.json",
+        "sha256": "98deeee07606f42bcab54d4b85b271c12b2a5ff559cb48134f61a0636db356ad"
+      },
+      {
+        "tool": "katana",
+        "status": "skipped",
+        "path": "evidence/results/016-katana.json",
+        "sha256": "4393cef86701e90759a426d17874a681b2390f5f8589db88e2432fd4cdc0e8ce"
+      },
+      {
+        "tool": "katana",
+        "status": "skipped",
+        "path": "evidence/results/017-katana.json",
+        "sha256": "c3c59587face4e40281f0559e3af22559946eca9a63600cde1aea7bfd8707fd3"
+      },
+      {
+        "tool": "katana",
+        "status": "skipped",
+        "path": "evidence/results/018-katana.json",
+        "sha256": "fa36f833b917faad4380d0e6609bd895c172833d3bf18e0f62c14732f9f54e55"
+      },
+      {
+        "tool": "dnsenum",
+        "status": "skipped",
+        "path": "evidence/results/019-dnsenum.json",
+        "sha256": "182472f10cfca5d527f47b46a1b7da26bf9ca35b582e088be6d5b7b291016de6"
+      },
+      {
+        "tool": "sslscan",
+        "status": "skipped",
+        "path": "evidence/results/020-sslscan.json",
+        "sha256": "be78b642c276bfc0808127281127bf6851eb583a286d7ddb0fb8ca0ed8bdcf6f"
+      },
+      {
+        "tool": "enum4linux-ng",
+        "status": "skipped",
+        "path": "evidence/results/021-enum4linux-ng.json",
+        "sha256": "8f82bbc5473be6006a97a0b4f6c31a892a351c04b94656c19b9de1c44a5b6f79"
+      },
+      {
+        "tool": "sqlmap",
+        "status": "skipped",
+        "path": "evidence/results/022-sqlmap.json",
+        "sha256": "4a5c11bec83d806d2040aa6cbe4f356b04e17ebe8854485d73baefb759683ad3"
+      },
+      {
+        "tool": "searchsploit",
+        "status": "skipped",
+        "path": "evidence/results/023-searchsploit.json",
+        "sha256": "d9467eab2125555a4ed80ff38adac7e993a9956a0fee29870da5ab2fc5e109ba"
+      },
+      {
+        "tool": "supabase_audit",
+        "status": "success",
+        "path": "evidence/results/024-supabase_audit.json",
+        "sha256": "a225c0db2c731af11331bf350a4e90e2e88dd2362287351399160f472d4662b1"
+      },
+      {
+        "tool": "readiness_probe",
+        "status": "success",
+        "path": "evidence/results/025-readiness_probe.json",
+        "sha256": "8f77dcb8c6724e6b6e9da5406a864b38525df784e638aa95b1c17987a784e28e"
+      }
+    ],
+    "runtime": {
+      "python_version": "3.14.2",
+      "platform": "Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+      "executable": "/home/devcore24/projects/supabash/venv/bin/python3.14",
+      "working_directory": "/home/devcore24/projects/supabash",
+      "schema_version": "1.0",
+      "report_kind": "ai_audit",
+      "target": "localhost",
+      "scan_host": "localhost",
+      "compliance_profile": "compliance_soc2",
+      "compliance_framework": "SOC 2 Type II",
+      "started_at_utc": "2026-02-14 19:05:38 UTC",
+      "finished_at_utc": "2026-02-14 19:10:41 UTC",
+      "duration_seconds": 302.133,
+      "llm_providers": [
+        "openai"
+      ],
+      "llm_models": [
+        "gpt-5.2"
+      ],
+      "llm_usage": {
+        "total_tokens": 8211,
+        "cost_usd": 0.029976
+      },
+      "tool_versions": {
+        "nmap": "7.94SVN",
+        "httpx": "v1.8.1",
+        "whatweb": "0.5.5",
+        "wpscan": "3.8.28",
+        "nuclei": "v2.9.8",
+        "gobuster": "3.6",
+        "ffuf": "2.1.0-dev",
+        "katana": "v1.3.0",
+        "dnsenum": "1.2.6",
+        "sslscan": "2.1.2",
+        "sqlmap": "1.8.4#stable"
+      },
+      "nuclei": {
+        "engine_version": "v2.9.8"
+      }
+    }
+  },
+  "replay_trace": {
+    "file": "ai-audit-soc2-20260214-200538-replay.json",
+    "markdown_file": "ai-audit-soc2-20260214-200538-replay.md",
+    "step_count": 1,
+    "version": 1
+  },
+  "llm_reasoning_trace": {
+    "version": 1,
+    "json_file": "ai-audit-soc2-20260214-200538-llm-trace.json",
+    "markdown_file": "ai-audit-soc2-20260214-200538-llm-trace.md",
+    "event_count": 5,
+    "decision_steps": 1,
+    "llm_calls": 2
+  }
+}

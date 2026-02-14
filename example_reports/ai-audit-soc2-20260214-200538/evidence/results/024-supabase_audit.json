@@ -1,0 +1,103 @@
+{
+  "tool": "supabase_audit",
+  "status": "success",
+  "target": null,
+  "command": "supabase_audit",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "scanned": [
+      "http://localhost:19090",
+      "http://localhost:44427",
+      "http://localhost:5670",
+      "http://localhost:4001",
+      "http://localhost:44717",
+      "http://localhost:9417",
+      "http://localhost:8080",
+      "http://localhost:3001",
+      "http://localhost:9090"
+    ],
+    "page_hits": [
+      {
+        "url": "http://localhost:19090",
+        "status": 404
+      },
+      {
+        "url": "http://localhost:44427",
+        "status": 401
+      },
+      {
+        "url": "http://localhost:5670",
+        "status": 404
+      },
+      {
+        "url": "http://localhost:4001",
+        "status": 200
+      },
+      {
+        "url": "http://localhost:44717",
+        "status": 404
+      },
+      {
+        "url": "http://localhost:9417",
+        "status": 404
+      },
+      {
+        "url": "http://localhost:8080",
+        "status": 200
+      },
+      {
+        "url": "http://localhost:3001",
+        "status": 200
+      },
+      {
+        "url": "http://localhost:9090",
+        "status": 200
+      }
+    ],
+    "supabase_urls": [],
+    "exposed_urls": [],
+    "keys": [
+      {
+        "type": "anon",
+        "value": "eyJhbG\u2026.sig",
+        "source": "http://localhost:4001"
+      },
+      {
+        "type": "service_role",
+        "value": "eyJhbG\u2026.sig",
+        "source": "http://localhost:4001"
+      }
+    ],
+    "rpc_candidates": [
+      "list_users"
+    ],
+    "exposures": [
+      {
+        "type": "rest_api_public",
+        "url": "http://localhost:4001/rest/v1/",
+        "status": 200
+      },
+      {
+        "type": "rpc_root_public",
+        "url": "http://localhost:4001/rest/v1/rpc/",
+        "status": 200
+      },
+      {
+        "type": "rls_misconfig",
+        "url": "http://localhost:4001/rest/v1/",
+        "status": 200
+      },
+      {
+        "type": "rpc_public",
+        "url": "http://localhost:4001/rest/v1/rpc/list_users",
+        "rpc": "list_users",
+        "status": 200
+      }
+    ],
+    "command": "supabase_audit"
+  }
+}

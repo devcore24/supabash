@@ -48,16 +48,19 @@
         "success": true,
         "wildcard_ports": [
           3000,
+          3001,
+          3002,
           4000,
+          4001,
           5050,
           5432,
           6379,
           8080,
           9090,
           9100,
-          9923,
+          9417,
           19090,
-          41175
+          44717
         ],
         "error": null
       },
@@ -99,19 +102,19 @@
       },
       {
         "name": "http_probe",
-        "url": "http://localhost:4876/metrics",
+        "url": "http://localhost:3001/metrics",
         "status": 404,
         "error": null
       },
       {
         "name": "http_probe",
-        "url": "http://localhost:4876/api/v1/status/config",
+        "url": "http://localhost:3001/api/v1/status/config",
         "status": 404,
         "error": null
       },
       {
         "name": "http_probe",
-        "url": "http://localhost:4876/debug/vars",
+        "url": "http://localhost:3001/debug/vars",
         "status": 404,
         "error": null
       },

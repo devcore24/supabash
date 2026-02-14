@@ -1,8 +1,8 @@
 {
   "tool": "nuclei",
   "status": "success",
-  "target": "http://localhost:9090",
-  "command": "nuclei -u http://localhost:9090 -jsonl -rate-limit 100",
+  "target": "http://localhost:3001",
+  "command": "nuclei -u http://localhost:3001 -jsonl -rate-limit 300",
   "phase": "baseline",
   "reason": null,
   "error": null,
@@ -15,36 +15,153 @@
         "name": "FingerprintHub Technology Fingerprint",
         "severity": "info",
         "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
         "description": "FingerprintHub Technology Fingerprint tests run in nuclei."
       },
       {
-        "id": "tech-detect",
-        "name": "Wappalyzer Technology Detection",
+        "id": "missing-cookie-samesite-strict",
+        "name": "Missing Cookie SameSite Strict",
         "severity": "info",
         "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": ""
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "Identified cookies that lacked the samesite=strict attribute, which prevented enforcement of restrictions on cross-domain cookie transmission.\n"
       },
       {
         "id": "tech-detect",
         "name": "Wappalyzer Technology Detection",
         "severity": "info",
         "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
         "description": ""
+      },
+      {
+        "id": "missing-cookie-samesite-strict",
+        "name": "Missing Cookie SameSite Strict",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001",
+        "description": "Identified cookies that lacked the samesite=strict attribute, which prevented enforcement of restrictions on cross-domain cookie transmission.\n"
       },
       {
         "id": "tech-detect",
         "name": "Wappalyzer Technology Detection",
         "severity": "info",
         "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001",
         "description": ""
+      },
+      {
+        "id": "exposed-gitignore",
+        "name": "Gitignore Config - Detect",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/.gitignore",
+        "description": "Gitignore configuration information was detected."
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+      },
+      {
+        "id": "http-missing-security-headers",
+        "name": "HTTP Missing Security Headers",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/login.php",
+        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
       },
       {
         "id": "caa-fingerprint",
@@ -56,150 +173,51 @@
         "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
       },
       {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
+        "id": "readme-md",
+        "name": "README.md file disclosure",
         "severity": "info",
         "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/README.md",
+        "description": "Internal documentation file often used in projects which can contain sensitive information."
       },
       {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
+        "id": "waf-detect",
+        "name": "WAF Detection",
         "severity": "info",
         "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/",
+        "description": "A web application firewall was detected."
       },
       {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
+        "id": "robots-txt-endpoint",
+        "name": "robots.txt endpoint prober",
         "severity": "info",
         "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "http-missing-security-headers",
-        "name": "HTTP Missing Security Headers",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/classic/graph",
-        "description": "This template searches for missing HTTP security headers. The impact of these missing headers can vary.\n"
-      },
-      {
-        "id": "options-method",
-        "name": "Allowed Options Method",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/robots.txt",
         "description": ""
       },
       {
-        "id": "prometheus-flags",
-        "name": "Prometheus flags API endpoint",
-        "severity": "info",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/api/v1/status/flags",
-        "description": "The flags endpoint provides a full path to the configuration file. If the file is stored in the home directory, it may leak a username."
-      },
-      {
-        "id": "go-pprof-debug",
-        "name": "Go pprof Debug Page",
-        "severity": "low",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/debug/pprof/heap?debug=1",
-        "description": "go pprof debug page was exposed."
-      },
-      {
-        "id": "prometheus-unauth",
-        "name": "Prometheus Monitoring System - Unauthenticated",
-        "severity": "high",
-        "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/api/v1/status/config",
-        "description": "Detects unauthenticated access to Prometheus Time Series Collection and Processing Server by checking for specific elements in the response from the `/graph` endpoint.\n"
-      },
-      {
-        "id": "prometheus-metrics",
-        "name": "Prometheus Metrics - Detect",
+        "id": "configuration-listing",
+        "name": "Sensitive Configuration Files Listing - Detect",
         "severity": "medium",
         "type": "http",
-        "host": "http://localhost:9090",
-        "matched_at": "http://localhost:9090/metrics",
-        "description": "Prometheus metrics page was detected."
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/config/",
+        "description": "Listing of sensitive configuration files containing items such as usernames, passwords, and IP addresses was detected."
+      },
+      {
+        "id": "robots-txt",
+        "name": "robots.txt file",
+        "severity": "info",
+        "type": "http",
+        "host": "http://localhost:3001",
+        "matched_at": "http://localhost:3001/robots.txt",
+        "description": ""
       }
     ],
-    "command": "nuclei -u http://localhost:9090 -jsonl -rate-limit 100"
+    "command": "nuclei -u http://localhost:3001 -jsonl -rate-limit 300"
   }
 }

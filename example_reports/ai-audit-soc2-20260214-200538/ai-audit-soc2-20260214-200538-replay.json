@@ -1,0 +1,176 @@
+{
+  "version": 1,
+  "generated_at": 1771096257.9881704,
+  "generated_at_utc": "2026-02-14 19:10:57 UTC",
+  "report_file": "ai-audit-soc2-20260214-200538.json",
+  "report_kind": "ai_audit",
+  "target": "localhost",
+  "scan_host": "localhost",
+  "compliance_profile": "compliance_soc2",
+  "compliance_framework": "SOC 2 Type II",
+  "planner_type": "tool_calling",
+  "planner_mode": "iterative",
+  "max_actions": 1,
+  "actions": [
+    {
+      "tool": "ffuf",
+      "target": "http://localhost:3001",
+      "profile": "compliance_soc2",
+      "priority": 10,
+      "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+      "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+      "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality.",
+      "phase": "agentic",
+      "success": true,
+      "skipped": false,
+      "error": null,
+      "reason": null,
+      "started_at": 1771096241.0486033,
+      "finished_at": 1771096241.0609841
+    }
+  ],
+  "decision_trace": [
+    {
+      "iteration": 1,
+      "remaining_actions_before": 1,
+      "started_at": 1771096234.9727046,
+      "planner": {
+        "stop": false,
+        "notes": "Only one action proposed (remaining_actions=1). Note: gobuster and nuclei/httpx/whatweb for this target/profile were already run; ffuf provides complementary fuzzing-based discovery not excluded for :3001 in constraints.",
+        "candidate_count": 1,
+        "candidates": [
+          {
+            "tool": "ffuf",
+            "target": "http://localhost:3001",
+            "profile": "compliance_soc2",
+            "priority": 10,
+            "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+            "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+            "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality."
+          }
+        ]
+      },
+      "selected_action": {
+        "tool": "ffuf",
+        "target": "http://localhost:3001",
+        "profile": "compliance_soc2",
+        "priority": 10,
+        "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+        "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+        "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality."
+      },
+      "outcome": {
+        "status": "success",
+        "tool_result_reason": null,
+        "tool_result_error": null,
+        "extra_results_added": 0,
+        "findings_count_before": 93,
+        "findings_count_after": 93,
+        "findings_count_delta": 0,
+        "web_target_count_before": 9,
+        "web_target_count_after": 9,
+        "web_target_count_delta": 0
+      },
+      "critique": {
+        "signal": "medium",
+        "summary": "Action succeeded but added limited net-new signal."
+      },
+      "decision": {
+        "result": "executed"
+      },
+      "finished_at": 1771096241.0621862
+    }
+  ],
+  "commands": [
+    {
+      "tool": "nmap",
+      "command": "nmap localhost -oX - -sV --script ssl-enum-ciphers -p-",
+      "target": null,
+      "phase": "baseline"
+    },
+    {
+      "tool": "httpx",
+      "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cnlo8rqf/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
+      "target": null,
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "command": "whatweb http://localhost:3001 --log-json -",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "command": "whatweb http://localhost:8080 --log-json -",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "command": "whatweb http://localhost:9090 --log-json -",
+      "target": "http://localhost:9090",
+      "phase": "baseline"
+    },
+    {
+      "tool": "nuclei",
+      "command": "nuclei -u http://localhost:3001 -jsonl -rate-limit 300",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "nuclei",
+      "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 300",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "nuclei",
+      "command": "nuclei -u http://localhost:9090 -jsonl -rate-limit 300",
+      "target": "http://localhost:9090",
+      "phase": "baseline"
+    },
+    {
+      "tool": "gobuster",
+      "command": "gobuster dir -u http://localhost:3001 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "gobuster",
+      "command": "gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "target": "http://localhost:9090",
+      "phase": "baseline"
+    },
+    {
+      "tool": "gobuster",
+      "command": "gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "ffuf",
+      "command": "ffuf -u http://localhost:3001/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac",
+      "target": "http://localhost:3001",
+      "phase": "agentic"
+    },
+    {
+      "tool": "ffuf",
+      "command": "ffuf -u http://localhost:8080/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac",
+      "target": "http://localhost:8080",
+      "phase": "baseline"
+    },
+    {
+      "tool": "supabase_audit",
+      "command": "supabase_audit",
+      "target": null,
+      "phase": "baseline"
+    },
+    {
+      "tool": "readiness_probe",
+      "command": "internal readiness probes",
+      "target": null,
+      "phase": "baseline"
+    }
+  ]
+}

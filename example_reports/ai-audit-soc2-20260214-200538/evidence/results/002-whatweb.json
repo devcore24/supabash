@@ -1,0 +1,110 @@
+{
+  "tool": "whatweb",
+  "status": "success",
+  "target": "http://localhost:3001",
+  "command": "whatweb http://localhost:3001 --log-json -",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "scan_data": [
+      {
+        "target": "http://localhost:3001",
+        "plugins": {
+          "Apache": {
+            "version": [
+              "2.4.25"
+            ]
+          },
+          "Cookies": {
+            "string": [
+              "PHPSESSID",
+              "security"
+            ]
+          },
+          "Country": {
+            "string": [
+              "RESERVED"
+            ],
+            "module": [
+              "ZZ"
+            ]
+          },
+          "HTTPServer": {
+            "os": [
+              "Debian Linux"
+            ],
+            "string": [
+              "Apache/2.4.25 (Debian)"
+            ]
+          },
+          "IP": {
+            "string": [
+              "127.0.0.1"
+            ]
+          },
+          "RedirectLocation": {
+            "string": [
+              "login.php"
+            ]
+          }
+        },
+        "banner": null,
+        "status": 302
+      },
+      {
+        "target": "http://localhost:3001/login.php",
+        "plugins": {
+          "Apache": {
+            "version": [
+              "2.4.25"
+            ]
+          },
+          "Cookies": {
+            "string": [
+              "PHPSESSID",
+              "security"
+            ]
+          },
+          "Country": {
+            "string": [
+              "RESERVED"
+            ],
+            "module": [
+              "ZZ"
+            ]
+          },
+          "DVWA": {},
+          "HTTPServer": {
+            "os": [
+              "Debian Linux"
+            ],
+            "string": [
+              "Apache/2.4.25 (Debian)"
+            ]
+          },
+          "IP": {
+            "string": [
+              "127.0.0.1"
+            ]
+          },
+          "PasswordField": {
+            "string": [
+              "password"
+            ]
+          },
+          "Title": {
+            "string": [
+              "Login :: Damn Vulnerable Web Application (DVWA) v1.10 *Development*"
+            ]
+          }
+        },
+        "banner": null,
+        "status": 200
+      }
+    ],
+    "command": "whatweb http://localhost:3001 --log-json -"
+  }
+}

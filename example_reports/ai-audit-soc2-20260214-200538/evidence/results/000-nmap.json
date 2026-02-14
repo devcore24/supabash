@@ -27,20 +27,36 @@
               "version": ""
             },
             {
-              "port": 4000,
+              "port": 3001,
               "protocol": "tcp",
               "state": "open",
-              "service": "remoteanything",
+              "service": "http",
+              "product": "Apache httpd",
+              "version": "2.4.25"
+            },
+            {
+              "port": 3002,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "exlm-agent",
               "product": "",
               "version": ""
             },
             {
-              "port": 4876,
+              "port": 4000,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "tcpwrapped",
+              "product": "",
+              "version": ""
+            },
+            {
+              "port": 4001,
               "protocol": "tcp",
               "state": "open",
               "service": "http",
-              "product": "Node.js Express framework",
-              "version": ""
+              "product": "nginx",
+              "version": "1.29.4"
             },
             {
               "port": 5050,
@@ -57,6 +73,14 @@
               "service": "postgresql",
               "product": "PostgreSQL DB",
               "version": "9.6.0 or later"
+            },
+            {
+              "port": 5670,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Node.js Express framework",
+              "version": ""
             },
             {
               "port": 6379,
@@ -91,7 +115,7 @@
               "version": ""
             },
             {
-              "port": 9923,
+              "port": 9417,
               "protocol": "tcp",
               "state": "open",
               "service": "http",
@@ -107,7 +131,7 @@
               "version": ""
             },
             {
-              "port": 25835,
+              "port": 34547,
               "protocol": "tcp",
               "state": "open",
               "service": "unknown",
@@ -115,27 +139,27 @@
               "version": ""
             },
             {
-              "port": 34155,
+              "port": 44427,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Node.js Express framework",
+              "version": ""
+            },
+            {
+              "port": 44717,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http",
+              "product": "Node.js Express framework",
+              "version": ""
+            },
+            {
+              "port": 51414,
               "protocol": "tcp",
               "state": "open",
               "service": "unknown",
               "product": "",
-              "version": ""
-            },
-            {
-              "port": 41175,
-              "protocol": "tcp",
-              "state": "open",
-              "service": "http",
-              "product": "Node.js Express framework",
-              "version": ""
-            },
-            {
-              "port": 42567,
-              "protocol": "tcp",
-              "state": "open",
-              "service": "http",
-              "product": "Node.js Express framework",
               "version": ""
             }
           ],

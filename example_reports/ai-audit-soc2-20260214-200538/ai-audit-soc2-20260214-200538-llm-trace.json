@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "generated_at": 1771096257.9884872,
+  "generated_at_utc": "2026-02-14 19:10:57 UTC",
+  "report_file": "ai-audit-soc2-20260214-200538.json",
+  "report_kind": "ai_audit",
+  "target": "localhost",
+  "scan_host": "localhost",
+  "compliance_profile": "compliance_soc2",
+  "compliance_framework": "SOC 2 Type II",
+  "note": "This trace includes explicit planner rationale/messages and tool-selection decisions. It does not include hidden model internals.",
+  "llm_events": [
+    {
+      "timestamp": 1771096234.9729588,
+      "event": "llm_start",
+      "tool": "planner",
+      "message": "Formulating audit expansion plan with tool-calling"
+    },
+    {
+      "timestamp": 1771096241.0465558,
+      "event": "llm_plan",
+      "tool": "planner",
+      "message": "iteration=1 candidates=1 top=ffuf p10 @http://localhost:3001"
+    },
+    {
+      "timestamp": 1771096241.047057,
+      "event": "llm_decision",
+      "tool": "ffuf",
+      "message": "selected=ffuf p10 @http://localhost:3001 | rationale=SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md... | hypothesis=The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized a... | expect=HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content..."
+    },
+    {
+      "timestamp": 1771096241.0616918,
+      "event": "llm_critique",
+      "tool": "ffuf",
+      "message": "signal=medium; status=success; findings_delta=0; web_targets_delta=0; extra_results=0"
+    },
+    {
+      "timestamp": 1771096241.0623012,
+      "event": "llm_start",
+      "tool": "summary",
+      "message": "Summarizing with LLM"
+    }
+  ],
+  "llm_calls": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.2",
+      "usage": {
+        "completion_tokens": 292,
+        "prompt_tokens": 3461,
+        "total_tokens": 3753,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0,
+          "text_tokens": null,
+          "image_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0,
+          "text_tokens": null,
+          "image_tokens": null
+        }
+      },
+      "tool_calling": true,
+      "cost_usd": 0.01014475,
+      "call_type": "plan",
+      "stage": "ai_audit_tool_call",
+      "input_truncated": false,
+      "input_chars": 10152,
+      "max_input_chars": 12000
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-5.2",
+      "usage": {
+        "completion_tokens": 982,
+        "prompt_tokens": 3476,
+        "total_tokens": 4458,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0,
+          "text_tokens": null,
+          "image_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0,
+          "text_tokens": null,
+          "image_tokens": null
+        }
+      },
+      "cost_usd": 0.019831,
+      "call_type": "summary",
+      "input_truncated": false,
+      "input_chars": 10549,
+      "max_input_chars": 12000
+    }
+  ],
+  "planner_calls": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.2",
+      "usage": {
+        "completion_tokens": 292,
+        "prompt_tokens": 3461,
+        "total_tokens": 3753,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0,
+          "text_tokens": null,
+          "image_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0,
+          "text_tokens": null,
+          "image_tokens": null
+        }
+      },
+      "tool_calling": true,
+      "cost_usd": 0.01014475,
+      "call_type": "plan",
+      "stage": "ai_audit_tool_call",
+      "input_truncated": false,
+      "input_chars": 10152,
+      "max_input_chars": 12000
+    }
+  ],
+  "summary_calls": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.2",
+      "usage": {
+        "completion_tokens": 982,
+        "prompt_tokens": 3476,
+        "total_tokens": 4458,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0,
+          "text_tokens": null,
+          "image_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0,
+          "text_tokens": null,
+          "image_tokens": null
+        }
+      },
+      "cost_usd": 0.019831,
+      "call_type": "summary",
+      "input_truncated": false,
+      "input_chars": 10549,
+      "max_input_chars": 12000
+    }
+  ],
+  "decision_trace": [
+    {
+      "iteration": 1,
+      "remaining_actions_before": 1,
+      "started_at": 1771096234.9727046,
+      "planner": {
+        "stop": false,
+        "notes": "Only one action proposed (remaining_actions=1). Note: gobuster and nuclei/httpx/whatweb for this target/profile were already run; ffuf provides complementary fuzzing-based discovery not excluded for :3001 in constraints.",
+        "candidate_count": 1,
+        "candidates": [
+          {
+            "tool": "ffuf",
+            "target": "http://localhost:3001",
+            "profile": "compliance_soc2",
+            "priority": 10,
+            "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+            "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+            "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality."
+          }
+        ]
+      },
+      "selected_action": {
+        "tool": "ffuf",
+        "target": "http://localhost:3001",
+        "profile": "compliance_soc2",
+        "priority": 10,
+        "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+        "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+        "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality."
+      },
+      "outcome": {
+        "status": "success",
+        "tool_result_reason": null,
+        "tool_result_error": null,
+        "extra_results_added": 0,
+        "findings_count_before": 93,
+        "findings_count_after": 93,
+        "findings_count_delta": 0,
+        "web_target_count_before": 9,
+        "web_target_count_after": 9,
+        "web_target_count_delta": 0
+      },
+      "critique": {
+        "signal": "medium",
+        "summary": "Action succeeded but added limited net-new signal."
+      },
+      "decision": {
+        "result": "executed"
+      },
+      "finished_at": 1771096241.0621862
+    }
+  ],
+  "actions": [
+    {
+      "tool": "ffuf",
+      "target": "http://localhost:3001",
+      "profile": "compliance_soc2",
+      "priority": 10,
+      "reasoning": "SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.",
+      "hypothesis": "The application on :3001 exposes additional hidden or unlinked sensitive paths (admin, backups, config leaks) beyond those already found, increasing likelihood of unauthorized access or data disclosure.",
+      "expected_evidence": "HTTP 200/30x responses for high-risk paths (e.g., /admin, /backup, /.env, /config.php, /phpinfo.php, /db.sql, /api/docs) with response sizes/titles indicating sensitive content or privileged functionality.",
+      "phase": "agentic",
+      "success": true,
+      "skipped": false,
+      "error": null,
+      "reason": null,
+      "started_at": 1771096241.0486033,
+      "finished_at": 1771096241.0609841
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "tool": "katana",
   "status": "skipped",
-  "target": "http://localhost:4876",
+  "target": "http://localhost:3001",
   "command": null,
   "phase": "baseline",
   "reason": "Disabled by config (tools.<name>.enabled=false)",

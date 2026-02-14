@@ -2,7 +2,7 @@
   "tool": "nuclei",
   "status": "success",
   "target": "http://localhost:8080",
-  "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 100",
+  "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 300",
   "phase": "baseline",
   "reason": null,
   "error": null,
@@ -137,6 +137,6 @@
         "description": "A CAA record was discovered. A CAA record is used to specify which certificate authorities (CAs) are allowed to issue certificates for a domain."
       }
     ],
-    "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 100"
+    "command": "nuclei -u http://localhost:8080 -jsonl -rate-limit 300"
   }
 }

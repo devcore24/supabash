@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.45;
+      margin: 20px;
+      color: #111;
+    }
+    h1, h2, h3, h4 {
+      margin-top: 1.1em;
+      margin-bottom: 0.5em;
+    }
+    p, ul, ol {
+      margin: 0.5em 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.6em 0 1em 0;
+      font-size: 0.95em;
+    }
+    th, td {
+      border: 1px solid #cfcfcf;
+      padding: 6px 8px;
+      vertical-align: top;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+    th {
+      background: #f5f5f5;
+      text-align: left;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow-wrap: normal;
+      word-break: normal;
+    }
+    .tools-run-table {
+      table-layout: fixed;
+    }
+    .tools-run-table th:nth-child(1),
+    .tools-run-table td:nth-child(1) {
+      width: 14%;
+    }
+    .tools-run-table th:nth-child(2),
+    .tools-run-table td:nth-child(2) {
+      width: 12%;
+    }
+    .tools-run-table th:nth-child(3),
+    .tools-run-table td:nth-child(3) {
+      width: 74%;
+    }
+    .tools-run-table td:nth-child(2) {
+      white-space: nowrap;
+    }
+    .tools-run-table td:nth-child(3) code {
+      display: block;
+    }
+    .compliance-matrix-table {
+      table-layout: fixed;
+    }
+    .compliance-matrix-table th:nth-child(1),
+    .compliance-matrix-table td:nth-child(1) {
+      width: 34%;
+    }
+    .compliance-matrix-table th:nth-child(2),
+    .compliance-matrix-table td:nth-child(2) {
+      width: 12%;
+      white-space: nowrap;
+    }
+    .compliance-matrix-table th:nth-child(3),
+    .compliance-matrix-table td:nth-child(3) {
+      width: 20%;
+    }
+    .compliance-matrix-table th:nth-child(4),
+    .compliance-matrix-table td:nth-child(4) {
+      width: 34%;
+    }
+    code {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border: 1px solid #ddd;
+      padding: 8px;
+      background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+<h1 id="supabash-audit-report">Supabash Audit Report</h1>
+<p><strong>Target:</strong> localhost<br>
+<strong>Assessment Type:</strong> Supabash Audit<br>
+<strong>Run Type:</strong> ai-audit<br>
+<strong>Compliance Profile:</strong> SOC 2 Type II<br>
+<strong>Compliance Focus:</strong> Security and availability controls with evidence of exposure management and vulnerability assessment.  </p>
+<h2 id="run-info">Run Info</h2>
+<ul>
+<li>started_at: 2026-02-14 19:05:38 UTC</li>
+<li>finished_at: 2026-02-14 19:10:41 UTC</li>
+</ul>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ul>
+<li><a href="#summary">Summary</a></li>
+<li><a href="#methodology">Methodology</a></li>
+<li><a href="#scope--assumptions">Scope &amp; Assumptions</a></li>
+<li><a href="#compliance-coverage-matrix">Compliance Coverage Matrix</a></li>
+<li><a href="#not-assessable-automatically">Not Assessable Automatically</a></li>
+<li><a href="#evidence-pack">Evidence Pack</a></li>
+<li><a href="#reproducibility-trace">Reproducibility Trace</a></li>
+<li><a href="#llm-reasoning-trace">LLM Reasoning Trace</a></li>
+<li><a href="#agentic-expansion">Agentic Expansion</a></li>
+<li><a href="#findings-overview">Findings Overview</a></li>
+<li><a href="#findings-detailed">Findings (Detailed)</a></li>
+<li><a href="#recommended-next-actions">Recommended Next Actions</a></li>
+<li><a href="#tools-run">Tools Run</a></li>
+<li><a href="#commands-executed">Commands Executed</a></li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p>The localhost environment exposes multiple unauthenticated administrative/metrics endpoints and Supabase secrets, including a service role key, creating immediate risk of full database access, user enumeration, and sensitive configuration disclosure. Several data services (Postgres/Redis/metrics) are reachable and some listen on wildcard interfaces, increasing the attack surface.</p>
+<h3 id="notes">Notes</h3>
+<ul>
+<li>ffuf fallback (after gobuster failure) ran and found 0 paths across 1 target(s): http://localhost:8080 (0).</li>
+<li>agentic ffuf action(s) ran and found 0 paths across 1 target(s): http://localhost:3001 (0).</li>
+</ul>
+<h3 id="llm-usage">LLM Usage</h3>
+<ul>
+<li>total_tokens=8211</li>
+<li>cost_usd=0.029976</li>
+<li>provider=openai</li>
+<li>model=gpt-5.2</li>
+</ul>
+<h3 id="findings">Findings</h3>
+<ul>
+<li><strong>CRITICAL</strong> Supabase service role key exposed (credential/secrets leakage)</li>
+<li>Evidence: Supabase audit detected service role JWT in content: key=eyJhbG….sig, source=http://localhost:4001</li>
+<li>Recommendation: Rotate the service role key immediately, remove it from any client-accessible responses/assets, and restrict usage to trusted server-side components only.</li>
+<li><strong>HIGH</strong> Prometheus accessible without authentication (config exposure)</li>
+<li>Evidence: Prometheus config endpoint reachable: http://localhost:9090/api/v1/status/config (HTTP 200); nuclei also flagged unauth Prometheus at the same endpoint</li>
+<li>Recommendation: Require authentication/authorization for Prometheus UI and APIs, and restrict access via firewall/allowlist (bind to localhost or internal network only).</li>
+<li><strong>HIGH</strong> Supabase REST API accessible without authentication / potential missing RLS</li>
+<li>Evidence: REST endpoint reachable without auth: http://localhost:4001/rest/v1/ (HTTP 200); tool notes 'RLS may be disabled'</li>
+<li>Recommendation: Enable and verify Row Level Security (RLS) on all tables, ensure policies are least-privilege, and require appropriate API keys/JWT auth for data access.</li>
+<li><strong>HIGH</strong> Unauthenticated Supabase RPC allows user enumeration</li>
+<li>Evidence: RPC callable without auth: http://localhost:4001/rest/v1/rpc/list_users (HTTP 200)</li>
+<li>Recommendation: Restrict RPC execution to authenticated roles, add explicit role checks within functions, and ensure underlying tables/views are protected by RLS/policies.</li>
+<li><strong>MEDIUM</strong> Unauthenticated metrics endpoints exposed</li>
+<li>Evidence: Metrics accessible: http://localhost:8080/metrics (HTTP 200) and http://localhost:9090/metrics (HTTP 200); nuclei detected Prometheus metrics endpoints</li>
+<li>Recommendation: Protect metrics with authentication and/or network segmentation; avoid exposing metrics publicly as they can leak internal topology, versions, and operational data.</li>
+<li><strong>MEDIUM</strong> Redis reachable without authentication</li>
+<li>Evidence: readiness_probe: redis-cli PING returned PONG for localhost:6379</li>
+<li>Recommendation: Enable Redis AUTH/ACLs, bind to localhost/internal interfaces, and enforce firewall rules to prevent untrusted network access.</li>
+<li>Compliance Mapping:<ul>
+<li>Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+</ul>
+</li>
+<li>Mapping Basis: corroborated by readiness_probe findings</li>
+<li>Evidence Artifacts: <code>evidence/results/025-readiness_probe.json</code></li>
+<li>Manifest Reference: <code>evidence/manifest.json</code></li>
+<li><strong>MEDIUM</strong> Sensitive services listening on wildcard interfaces (increased exposure)</li>
+<li>Evidence: ss -lnt shows wildcard listeners on ports: 5432, 6379, 8080, 9090, 9100</li>
+<li>Recommendation: Bind services to localhost/internal interfaces where possible and enforce host/network firewall policies to limit access to trusted sources only.</li>
+<li><strong>MEDIUM</strong> Directory listing / sensitive configuration path detected</li>
+<li>Evidence: nuclei: Sensitive Configuration Files Listing - Detect at http://localhost:3001/config/</li>
+<li>Recommendation: Disable directory listing, remove sensitive files from web roots, and restrict access to configuration endpoints/paths.</li>
+<li><strong>LOW</strong> Go pprof debug endpoint exposed</li>
+<li>Evidence: nuclei: http://localhost:9090/debug/pprof/heap?debug=1</li>
+<li>Recommendation: Disable pprof in production or restrict it to localhost/admin networks with authentication to prevent information leakage and potential DoS vectors.</li>
+<li><strong>LOW</strong> Supabase anon key exposed in client content</li>
+<li>Evidence:<ul>
+<li>Supabase audit detected anon JWT in content: key=eyJhbG….sig, source=http://localhost:4001</li>
+<li>supabase_audit: key=eyJhbG….sig, source=http://localhost:4001</li>
+</ul>
+</li>
+<li>Recommendation: Treat anon keys as public but ensure RLS and policies prevent data exposure; rotate if mistakenly granted elevated privileges and minimize scope/permissions.</li>
+<li>Compliance Mapping:<ul>
+<li>Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+</ul>
+</li>
+<li>Mapping Basis: corroborated by supabase_audit findings</li>
+<li>Evidence Artifacts: <code>evidence/results/024-supabase_audit.json</code></li>
+<li>Manifest Reference: <code>evidence/manifest.json</code></li>
+</ul>
+<h2 id="methodology">Methodology</h2>
+<ul>
+<li>Baseline: deterministic evidence collection with scope controls and safe defaults.</li>
+<li>Agentic expansion: tool-calling planner proposes additional evidence collection within allowed scope.</li>
+<li>Compliance profile: SOC 2 Type II</li>
+<li>Compliance focus: Security and availability controls with evidence of exposure management and vulnerability assessment.</li>
+</ul>
+<h2 id="scope-assumptions">Scope &amp; Assumptions</h2>
+<ul>
+<li>In scope: localhost, http://localhost:19090, http://localhost:44427, http://localhost:5670, http://localhost:4001, http://localhost:44717, http://localhost:9417, http://localhost:8080 ...</li>
+<li>Authentication context: unauthenticated network/web checks unless explicitly configured otherwise.</li>
+<li>Control mapping note: mapped controls indicate potential relevance and require manual validation.</li>
+<li>Localhost limitation: this run cannot validate external exposure paths or network segmentation boundaries.</li>
+<li>Out of scope: independent attestation/certification decisions and control operation effectiveness testing.</li>
+</ul>
+<h2 id="compliance-coverage-matrix">Compliance Coverage Matrix</h2>
+<table class="compliance-matrix-table">
+<thead>
+<tr>
+<th>Control Area</th>
+<th>Status</th>
+<th>Evidence Source</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Security Surface Inventory</td>
+<td>Covered</td>
+<td>nmap, httpx, whatweb</td>
+<td>basis=corroborated_findings; based on successful tool runs</td>
+</tr>
+<tr>
+<td>Vulnerability &amp; Misconfiguration Checks</td>
+<td>Partial</td>
+<td>nuclei, gobuster, ffuf</td>
+<td>basis=corroborated_findings; skipped: sqlmap (No parameterized URL provided (include '?' in target URL))</td>
+</tr>
+<tr>
+<td>Encryption/Transport Control Review</td>
+<td>Partial</td>
+<td>nmap</td>
+<td>basis=corroborated_findings; skipped: sslscan (No TLS candidate ports detected from discovery)</td>
+</tr>
+<tr>
+<td>Access Control Exposure Review</td>
+<td>Partial</td>
+<td>readiness_probe, nuclei, supabase_audit</td>
+<td>basis=corroborated_findings; based on successful tool runs</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Status legend: <code>Covered</code> = mapped checks succeeded with corroborating evidence, <code>Partial</code> = some mapped checks/evidence present, <code>Not Assessed</code> = no successful mapped checks or signal was inconclusive.</li>
+</ul>
+<h2 id="not-assessable-automatically">Not Assessable Automatically</h2>
+<ul>
+<li>The following areas require manual validation, process evidence, or third-party assessment:</li>
+<li>Policy design/effectiveness over the audit period (not point-in-time scan evidence).</li>
+<li>Access review governance (JML workflow approvals and periodic recertifications).</li>
+<li>Change management control operation evidence (tickets, approvals, segregation).</li>
+<li>Incident response process effectiveness and tabletop/drill execution records.</li>
+</ul>
+<h2 id="evidence-pack">Evidence Pack</h2>
+<ul>
+<li>directory: <code>evidence</code></li>
+<li>manifest: <code>evidence/manifest.json</code></li>
+<li>artifact_count: 26</li>
+</ul>
+<h3 id="runtime-metadata">Runtime Metadata</h3>
+<ul>
+<li>python_version: 3.14.2</li>
+<li>platform: Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39</li>
+<li>llm_providers: openai</li>
+<li>llm_models: gpt-5.2</li>
+</ul>
+<h3 id="tool-versions">Tool Versions</h3>
+<ul>
+<li><code>dnsenum</code>: 1.2.6</li>
+<li><code>ffuf</code>: 2.1.0-dev</li>
+<li><code>gobuster</code>: 3.6</li>
+<li><code>httpx</code>: v1.8.1</li>
+<li><code>katana</code>: v1.3.0</li>
+<li><code>nmap</code>: 7.94SVN</li>
+<li><code>nuclei</code>: v2.9.8</li>
+<li><code>sqlmap</code>: 1.8.4#stable</li>
+<li><code>sslscan</code>: 2.1.2</li>
+<li><code>whatweb</code>: 0.5.5</li>
+<li><code>wpscan</code>: 3.8.28</li>
+</ul>
+<h2 id="reproducibility-trace">Reproducibility Trace</h2>
+<ul>
+<li>file: <code>ai-audit-soc2-20260214-200538-replay.json</code></li>
+<li>markdown_file: <code>ai-audit-soc2-20260214-200538-replay.md</code></li>
+<li>step_count: 1</li>
+<li>version: 1</li>
+</ul>
+<h2 id="llm-reasoning-trace">LLM Reasoning Trace</h2>
+<ul>
+<li>json_file: <code>ai-audit-soc2-20260214-200538-llm-trace.json</code></li>
+<li>markdown_file: <code>ai-audit-soc2-20260214-200538-llm-trace.md</code></li>
+<li>llm_event_count: 5</li>
+<li>decision_steps: 1</li>
+<li>llm_calls: 2</li>
+<li>version: 1</li>
+<li>note: captures explicit planner rationale/messages and decisions; hidden model internals are not included.</li>
+</ul>
+<h2 id="agentic-expansion">Agentic Expansion</h2>
+<ul>
+<li>phase: baseline+agentic</li>
+<li>baseline_finished_at: 2026-02-14 19:10:34 UTC</li>
+<li>max_actions: 1</li>
+<li>notes: Only one action proposed (remaining_actions=1). Note: gobuster and nuclei/httpx/whatweb for this target/profile were already run; ffuf provides complementary fuzzing-based discovery not excluded for :3001 in constraints.</li>
+<li>decision_steps: 1</li>
+<li>planner: tool_calling</li>
+</ul>
+<h3 id="decision-trace-highlights">Decision Trace Highlights</h3>
+<ul>
+<li>step 1: executed</li>
+<li>initial_candidate: tool=ffuf target=http://localhost:3001 priority=10</li>
+<li>selected_action: ffuf target=http://localhost:3001</li>
+</ul>
+<h3 id="actions">Actions</h3>
+<ul>
+<li>ffuf target=http://localhost:3001 profile=compliance_soc2: success</li>
+<li>Rationale: SOC 2 evidence goal: demonstrate ongoing vulnerability assessment and exposure management by validating whether previously identified sensitive areas (e.g., /config/, /README.md, /robots.txt) extend to additional undiscovered unauthenticated endpoints on the primary app. A focused content discovery run on the main web app can uncover admin panels, backups, or configuration artifacts that materially change risk posture and remediation scope.</li>
+</ul>
+<h2 id="findings-overview">Findings Overview</h2>
+<h3 id="summary-llm">Summary (LLM)</h3>
+<table>
+<thead>
+<tr>
+<th>Severity</th>
+<th style="text-align: right;">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CRITICAL</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>HIGH</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td>MEDIUM</td>
+<td style="text-align: right;">4</td>
+</tr>
+<tr>
+<td>LOW</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+<h3 id="detailed-tools">Detailed (Tools)</h3>
+<table>
+<thead>
+<tr>
+<th>Severity</th>
+<th style="text-align: right;">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CRITICAL</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>HIGH</td>
+<td style="text-align: right;">5</td>
+</tr>
+<tr>
+<td>MEDIUM</td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td>LOW</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td style="text-align: right;">43</td>
+</tr>
+</tbody>
+</table>
+<h3 id="risk-normalization">Risk Normalization</h3>
+<ul>
+<li>Reduced in summary risk synthesis: HIGH-2, MEDIUM-4, INFO-43</li>
+<li>Basis: LLM summary may aggregate multiple low-signal findings into higher-level operational risk statements.</li>
+</ul>
+<h4 id="normalization-details">Normalization Details</h4>
+<ul>
+<li>CRITICAL Supabase service role key exposed (credential/secrets leakage)</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 4001, 5670, 8080, 9090, 9417, 19090, 44427)</li>
+<li>HIGH Prometheus accessible without authentication (config exposure)</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 4001, 5670, 8080, 9090, 9417, 19090, 44427)</li>
+<li>HIGH Supabase REST API accessible without authentication / potential missing RLS</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 4001, 5670, 8080, 9090, 9417, 19090, 44427)</li>
+<li>HIGH Unauthenticated Supabase RPC allows user enumeration</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 4001, 5670, 8080, 9090, 9417, 19090, 44427)</li>
+<li>MEDIUM Unauthenticated metrics endpoints exposed</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 4001, 5670, 8080, 9090, 9417, 19090, 44427)</li>
+<li>MEDIUM Sensitive services listening on wildcard interfaces (increased exposure)</li>
+<li>Derived via: rule:llm_risk_synthesis (aggregated from 59 tool findings)</li>
+<li>MEDIUM Directory listing / sensitive configuration path detected</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 4001, 5670, 8080, 9090, 9417, 19090, 44427)</li>
+<li>LOW Go pprof debug endpoint exposed</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 4001, 5670, 8080, 9090, 9417, 19090, 44427)</li>
+</ul>
+<h2 id="findings-detailed">Findings (Detailed)</h2>
+<p><em>Note: 34 repeated INFO findings were deduplicated for readability.</em></p>
+<h3 id="correlated-signals">Correlated Signals</h3>
+<ul>
+<li><strong>MEDIUM</strong> Prometheus Metrics - Detect: 2 correlated observations across 2 distinct evidence entries; tools=nuclei.</li>
+<li><strong>MEDIUM</strong> Unauthenticated metrics endpoint accessible: 2 correlated observations across 2 distinct evidence entries; tools=readiness_probe.</li>
+<li><strong>INFO</strong> Allowed Options Method: 2 correlated observations across 2 distinct evidence entries; tools=nuclei.</li>
+<li><strong>INFO</strong> FingerprintHub Technology Fingerprint: 2 correlated observations across 2 distinct evidence entries; tools=nuclei.</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers: 3 correlated observations across 3 distinct evidence entries; tools=nuclei.</li>
+<li><strong>INFO</strong> Missing Cookie SameSite Strict: 2 correlated observations across 2 distinct evidence entries; tools=nuclei.</li>
+<li><strong>INFO</strong> Tech stack detected: 5 correlated observations across 5 distinct evidence entries; tools=whatweb.</li>
+<li>
+<p><strong>INFO</strong> Wappalyzer Technology Detection: 3 correlated observations across 3 distinct evidence entries; tools=nuclei.</p>
+</li>
+<li>
+<p><strong>INFO</strong> Open port 3000/tcp (nmap)</p>
+</li>
+<li>Evidence: ppp</li>
+<li><strong>INFO</strong> Open port 3001/tcp (nmap)</li>
+<li>Evidence: http Apache httpd 2.4.25</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 3002/tcp (nmap)</li>
+<li>Evidence: exlm-agent</li>
+<li><strong>INFO</strong> Open port 4000/tcp (nmap)</li>
+<li>Evidence: tcpwrapped</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 4001/tcp (nmap)</li>
+<li>Evidence: http nginx 1.29.4</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 5050/tcp (nmap)</li>
+<li>Evidence: mmcc</li>
+<li><strong>INFO</strong> Open port 5432/tcp (nmap)</li>
+<li>Evidence: postgresql PostgreSQL DB 9.6.0 or later</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Open port 5670/tcp (nmap)</li>
+<li>Evidence: http Node.js Express framework</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 6379/tcp (nmap)</li>
+<li>Evidence: redis Redis key-value store 6.2.11</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Open port 8080/tcp (nmap)</li>
+<li>Evidence: http-proxy</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 9090/tcp (nmap)</li>
+<li>Evidence: http Golang net/http server</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 9100/tcp (nmap)</li>
+<li>Evidence: jetdirect</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 9417/tcp (nmap)</li>
+<li>Evidence: http Node.js Express framework</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 19090/tcp (nmap)</li>
+<li>Evidence: http Golang net/http server</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 34547/tcp (nmap)</li>
+<li>Evidence: unknown</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 44427/tcp (nmap)</li>
+<li>Evidence: http Node.js Express framework</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 44717/tcp (nmap)</li>
+<li>Evidence: http Node.js Express framework</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 51414/tcp (nmap)</li>
+<li>Evidence: unknown</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Apache, Cookies, Country, HTTPServer, IP, RedirectLocation</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Apache, Cookies, Country, DVWA, HTTPServer, IP, PasswordField, Title</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Country, IP</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Country, IP, RedirectLocation</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Bootstrap, Country, HTML5, IP, JQuery, Script, Title</li>
+<li><strong>INFO</strong> FingerprintHub Technology Fingerprint (nuclei)</li>
+<li>Evidence: http://localhost:3001/login.php</li>
+<li><strong>INFO</strong> Missing Cookie SameSite Strict (nuclei)</li>
+<li>Evidence: http://localhost:3001/login.php</li>
+<li><strong>INFO</strong> Wappalyzer Technology Detection (nuclei)</li>
+<li>Evidence: http://localhost:3001/login.php</li>
+<li><strong>INFO</strong> Missing Cookie SameSite Strict (nuclei)</li>
+<li>Evidence: http://localhost:3001</li>
+<li><strong>INFO</strong> Wappalyzer Technology Detection (nuclei)</li>
+<li>Evidence: http://localhost:3001</li>
+<li><strong>INFO</strong> Gitignore Config - Detect (nuclei)</li>
+<li>Evidence: http://localhost:3001/.gitignore</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:3001/login.php</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> CAA Record (nuclei)</li>
+<li>Evidence: localhost</li>
+<li><strong>INFO</strong> README.md file disclosure (nuclei)</li>
+<li>Evidence: http://localhost:3001/README.md</li>
+<li><strong>INFO</strong> WAF Detection (nuclei)</li>
+<li>Evidence: http://localhost:3001/</li>
+<li><strong>INFO</strong> robots.txt endpoint prober (nuclei)</li>
+<li>Evidence: http://localhost:3001/robots.txt</li>
+<li><strong>MEDIUM</strong> Sensitive Configuration Files Listing - Detect (nuclei)</li>
+<li>Evidence: http://localhost:3001/config/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> robots.txt file (nuclei)</li>
+<li>Evidence: http://localhost:3001/robots.txt</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Prometheus Metrics - Detect (nuclei)</li>
+<li>Evidence: http://localhost:8080/metrics</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high)</li>
+<li><strong>INFO</strong> Allowed Options Method (nuclei)</li>
+<li>Evidence: http://localhost:8080</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Wappalyzer Technology Detection (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> FingerprintHub Technology Fingerprint (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li><strong>INFO</strong> HTTP Missing Security Headers (nuclei)</li>
+<li>Evidence: http://localhost:9090/classic/graph</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Allowed Options Method (nuclei)</li>
+<li>Evidence: http://localhost:9090</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Prometheus Monitoring System - Unauthenticated (nuclei)</li>
+<li>Evidence: http://localhost:9090/api/v1/status/config</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>INFO</strong> Prometheus flags API endpoint (nuclei)</li>
+<li>Evidence: http://localhost:9090/api/v1/status/flags</li>
+<li><strong>LOW</strong> Go pprof Debug Page (nuclei)</li>
+<li>Evidence: http://localhost:9090/debug/pprof/heap?debug=1</li>
+<li><strong>MEDIUM</strong> Prometheus Metrics - Detect (nuclei)</li>
+<li>Evidence: http://localhost:9090/metrics</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high)</li>
+<li><strong>INFO</strong> Discovered path (gobuster)</li>
+<li>Evidence: [2K/robots.txt           (Status: 200) [Size: 26]</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>LOW</strong> Supabase anon key exposed in client content (supabase_audit)</li>
+<li>Evidence: key=eyJhbG….sig, source=http://localhost:4001</li>
+<li>Recommendation: Verify RLS policies and limit anon key usage to least privilege.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>CRITICAL</strong> Supabase service role key exposed (supabase_audit)</li>
+<li>Evidence: key=eyJhbG….sig, source=http://localhost:4001</li>
+<li>Recommendation: Rotate the service role key immediately and remove it from client-side code.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high)</li>
+<li><strong>HIGH</strong> Supabase REST API accessible without authentication (supabase_audit)</li>
+<li>Evidence: http://localhost:4001/rest/v1/ (HTTP 200)</li>
+<li>Recommendation: Enforce RLS and require API keys/auth for REST endpoints.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Supabase RPC endpoint exposed without authentication (supabase_audit)</li>
+<li>Evidence: http://localhost:4001/rest/v1/rpc/ (HTTP 200)</li>
+<li>Recommendation: Restrict RPC access with policies and authentication.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Supabase RLS may be disabled (supabase_audit)</li>
+<li>Evidence: http://localhost:4001/rest/v1/ (HTTP 200)</li>
+<li>Recommendation: Enable RLS and verify policies for affected tables/views.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Supabase RPC 'list_users' callable without authentication (supabase_audit)</li>
+<li>Evidence: http://localhost:4001/rest/v1/rpc/list_users (HTTP 200)</li>
+<li>Recommendation: Require authentication for RPCs and enforce RLS or role checks.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Sensitive services listening on wildcard interfaces (readiness_probe)</li>
+<li>Evidence: ss -lnt shows wildcard listeners on ports: 5432, 6379, 8080, 9090, 9100</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Unauthenticated metrics endpoint accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:8080/metrics (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Unauthenticated metrics endpoint accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:9090/metrics (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Prometheus config endpoint accessible without authentication (readiness_probe)</li>
+<li>Evidence: http://localhost:9090/api/v1/status/config (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Redis reachable without authentication (readiness_probe)</li>
+<li>Evidence: redis-cli PING returned PONG for localhost:6379</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+</ul>
+<h2 id="recommended-next-actions">Recommended Next Actions</h2>
+<ol>
+<li>Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported.</li>
+<li>Reduce attack surface by closing unused listeners and rebinding critical services from wildcard interfaces to least-privilege network zones.</li>
+<li>Limit PostgreSQL exposure to required application hosts and enforce strong auth/TLS policies for database connectivity.</li>
+<li>Harden Redis: require authentication/ACLs, bind to localhost or private interfaces, and block untrusted network access at the firewall.</li>
+<li>Collect SOC 2 control-operation evidence not assessable by scanning (JML/access reviews, change approvals, incident response drills, and policy governance records).</li>
+<li>After remediation, rerun the readiness assessment and compare deltas in findings severity, exposed services, and evidence artifacts.</li>
+</ol>
+<h2 id="tools-run">Tools Run</h2>
+<table class="tools-run-table">
+<thead>
+<tr>
+<th>Tool</th>
+<th>Status</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>nmap</td>
+<td>success</td>
+<td><code>nmap localhost -oX - -sV --script ssl-enum-ciphers -p-</code></td>
+</tr>
+<tr>
+<td>httpx</td>
+<td>success</td>
+<td><code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cnlo8rqf/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></td>
+</tr>
+<tr>
+<td>whatweb</td>
+<td>success</td>
+<td><code>whatweb http://localhost:3001 --log-json -</code></td>
+</tr>
+<tr>
+<td>whatweb</td>
+<td>success</td>
+<td><code>whatweb http://localhost:8080 --log-json -</code></td>
+</tr>
+<tr>
+<td>whatweb</td>
+<td>success</td>
+<td><code>whatweb http://localhost:9090 --log-json -</code></td>
+</tr>
+<tr>
+<td>wpscan</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>wpscan</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>wpscan</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>success</td>
+<td><code>nuclei -u http://localhost:3001 -jsonl -rate-limit 300</code></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>success</td>
+<td><code>nuclei -u http://localhost:8080 -jsonl -rate-limit 300</code></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>success</td>
+<td><code>nuclei -u http://localhost:9090 -jsonl -rate-limit 300</code></td>
+</tr>
+<tr>
+<td>gobuster</td>
+<td>success</td>
+<td><code>gobuster dir -u http://localhost:3001 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></td>
+</tr>
+<tr>
+<td>gobuster</td>
+<td>success</td>
+<td><code>gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></td>
+</tr>
+<tr>
+<td>gobuster</td>
+<td>failed</td>
+<td><code>gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></td>
+</tr>
+<tr>
+<td>ffuf</td>
+<td>success</td>
+<td><code>ffuf -u http://localhost:3001/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac</code></td>
+</tr>
+<tr>
+<td>ffuf</td>
+<td>success</td>
+<td><code>ffuf -u http://localhost:8080/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac</code></td>
+</tr>
+<tr>
+<td>katana</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>katana</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>katana</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>dnsenum</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>sslscan</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>enum4linux-ng</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>sqlmap</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>searchsploit</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>supabase_audit</td>
+<td>success</td>
+<td><code>supabase_audit</code></td>
+</tr>
+<tr>
+<td>readiness_probe</td>
+<td>success</td>
+<td><code>internal readiness probes</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="tool-notes">Tool Notes</h3>
+<ul>
+<li><strong>wpscan</strong>: SKIPPED - WordPress not detected by whatweb (x3)</li>
+<li><strong>gobuster</strong>: FAILED - Error: the server returns a status code that matches the provided options for non existing urls. http://localhost:8080/50e1cf62-9c8a-430d-868e-76a414dee544 =&gt; 501 (Length: 191). To continue please exclude the status code or the length</li>
+<li><strong>katana</strong>: SKIPPED - Disabled by config (tools.<name>.enabled=false) (x3)</li>
+<li><strong>dnsenum</strong>: SKIPPED - Localhost/loopback target (DNS enumeration N/A)</li>
+<li><strong>sslscan</strong>: SKIPPED - No TLS candidate ports detected from discovery</li>
+<li><strong>enum4linux-ng</strong>: SKIPPED - No SMB ports detected (139/445)</li>
+<li><strong>sqlmap</strong>: SKIPPED - No parameterized URL provided (include '?' in target URL)</li>
+<li><strong>searchsploit</strong>: SKIPPED - Disabled by config (tools.<name>.enabled=false)</li>
+</ul>
+<h2 id="commands-executed">Commands Executed</h2>
+<ul>
+<li><strong>nmap</strong>: <code>nmap localhost -oX - -sV --script ssl-enum-ciphers -p-</code></li>
+<li><strong>httpx</strong>: <code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cnlo8rqf/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></li>
+<li><strong>whatweb</strong>: <code>whatweb http://localhost:3001 --log-json -</code></li>
+<li><strong>whatweb</strong>: <code>whatweb http://localhost:8080 --log-json -</code></li>
+<li><strong>whatweb</strong>: <code>whatweb http://localhost:9090 --log-json -</code></li>
+<li><strong>nuclei</strong>: <code>nuclei -u http://localhost:3001 -jsonl -rate-limit 300</code></li>
+<li><strong>nuclei</strong>: <code>nuclei -u http://localhost:8080 -jsonl -rate-limit 300</code></li>
+<li><strong>nuclei</strong>: <code>nuclei -u http://localhost:9090 -jsonl -rate-limit 300</code></li>
+<li><strong>gobuster</strong>: <code>gobuster dir -u http://localhost:3001 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></li>
+<li><strong>gobuster</strong>: <code>gobuster dir -u http://localhost:9090 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></li>
+<li><strong>gobuster</strong>: <code>gobuster dir -u http://localhost:8080 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></li>
+<li><strong>ffuf</strong>: <code>ffuf -u http://localhost:3001/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac</code></li>
+<li><strong>ffuf</strong>: <code>ffuf -u http://localhost:8080/FUZZ -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -of json -o - -mc 200,204,301,302,307,401,403 -ac</code></li>
+<li><strong>supabase_audit</strong>: <code>supabase_audit</code></li>
+<li><strong>readiness_probe</strong>: <code>internal readiness probes</code></li>
+</ul>
+</body>
+</html>

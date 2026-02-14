@@ -1,7 +1,7 @@
 {
   "tool": "wpscan",
   "status": "skipped",
-  "target": "http://localhost:4876",
+  "target": "http://localhost:3001",
   "command": null,
   "phase": "baseline",
   "reason": "WordPress not detected by whatweb",
