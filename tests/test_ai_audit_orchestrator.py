@@ -219,6 +219,61 @@ class FakeLLMStopWithAction:
         )
 
 
+class FakeLLMReplanOnCovered:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "httpx",
+                                    "arguments": {"profile": "standard", "target": "http://localhost:8080"},
+                                    "reasoning": "Re-run httpx on primary target.",
+                                    "priority": 5,
+                                }
+                            ],
+                            "stop": False,
+                            "notes": "First candidate may already be covered.",
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 9}},
+            )
+        return (
+            [
+                {
+                    "name": "propose_actions",
+                    "arguments": {
+                        "actions": [
+                            {
+                                "tool_name": "whatweb",
+                                "arguments": {"profile": "standard", "target": "http://localhost:19090"},
+                                "reasoning": "Pivot to uncovered target after exclusion hint.",
+                                "priority": 6,
+                            }
+                        ],
+                        "stop": False,
+                        "notes": "Second plan after exclusion list.",
+                    },
+                }
+            ],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 7}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 9}},
+        )
+
+
 def _build_scanners():
     return {
         "nmap": FakeNmapScanner(),
@@ -326,6 +381,28 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             self.assertTrue(trace[0].get("decision", {}).get("stop_after_execution"))
 
         self.assertEqual(llm.plan_calls, 1)
+
+    def test_replan_once_when_all_candidates_are_already_covered(self):
+        llm = FakeLLMReplanOnCovered()
+        orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=llm)
+        output = artifact_path("ai_audit_replan_on_covered.json")
+        report = orchestrator.run("localhost", output, llm_plan=True, max_actions=1, use_llm=True)
+
+        ai = report.get("ai_audit", {})
+        actions = ai.get("actions", [])
+        self.assertEqual(len(actions), 1)
+        if actions:
+            self.assertEqual(actions[0].get("tool"), "whatweb")
+            self.assertEqual(actions[0].get("target"), "http://localhost:19090")
+
+        trace = ai.get("decision_trace", [])
+        self.assertEqual(len(trace), 1)
+        if trace:
+            self.assertIn("replan", trace[0])
+            self.assertTrue(trace[0].get("replan", {}).get("attempted"))
+            self.assertEqual(trace[0].get("decision", {}).get("result"), "executed")
+
+        self.assertEqual(llm.plan_calls, 2)
 
 
 if __name__ == "__main__":

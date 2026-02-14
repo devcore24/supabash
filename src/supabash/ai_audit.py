@@ -623,7 +623,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 actions.append(spec)
                     return {"actions": actions, "notes": notes, "stop": stop}
 
-                def plan_actions(remaining: int) -> Dict[str, Any]:
+                def plan_actions(remaining: int, excluded_actions: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
                     results_summary = []
                     for r in agg.get("results", []) or []:
                         if not isinstance(r, dict):
@@ -667,6 +667,20 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             }
                         )
 
+                    excluded = []
+                    for item in excluded_actions or []:
+                        if not isinstance(item, dict):
+                            continue
+                        args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+                        excluded.append(
+                            {
+                                "tool": item.get("tool"),
+                                "target": args.get("target"),
+                                "profile": item.get("profile"),
+                                "reason": "already_covered_by_baseline_or_agentic",
+                            }
+                        )
+
                     context_obj = {
                         "target": target,
                         "mode": mode,
@@ -691,6 +705,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "trivy_requires_container": bool(container_image),
                             "tls_ports_detected": tls_ports,
                             "smb_ports_detected": bool(smb_ports),
+                            "excluded_actions": excluded[:12],
                         },
                     }
 
@@ -1065,72 +1080,108 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "remaining_actions_before": int(remaining),
                         "started_at": time.time(),
                     }
-                    try:
-                        plan = plan_actions(remaining)
-                    except ToolCallingNotSupported as e:
-                        msg = f"Tool calling not supported; skipping agentic phase. ({e})"
-                        ai_obj["planner"]["warning"] = msg
-                        ai_obj["agentic_skipped"] = True
-                        note("llm_error", "planner", msg, agg=agg)
-                        trace_item["planner_error"] = msg
-                        trace_item["decision"] = {"result": "stop", "reason": "planner_not_supported"}
-                        trace_item["finished_at"] = time.time()
-                        ai_obj.setdefault("decision_trace", []).append(trace_item)
-                        break
-                    except (ToolCallingError, Exception) as e:
-                        msg = f"Tool calling failed; skipping agentic phase. ({e})"
-                        ai_obj["planner"]["warning"] = msg
-                        ai_obj["agentic_skipped"] = True
-                        note("llm_error", "planner", msg, agg=agg)
-                        trace_item["planner_error"] = msg
-                        trace_item["decision"] = {"result": "stop", "reason": "planner_failure"}
-                        trace_item["finished_at"] = time.time()
-                        ai_obj.setdefault("decision_trace", []).append(trace_item)
-                        break
+                    action: Optional[Dict[str, Any]] = None
+                    stop_requested = False
+                    replan_attempted = False
+                    excluded_actions_for_replan: List[Dict[str, Any]] = []
 
-                    plan_actions_list = [a for a in (plan.get("actions", []) or []) if isinstance(a, dict)]
-                    sorted_candidates = sorted(plan_actions_list, key=_candidate_sort_key)
-                    ai_obj["planner"]["plans"].append(
-                        {"actions": plan_actions_list, "notes": plan.get("notes", ""), "stop": plan.get("stop", False)}
-                    )
-                    trace_item["planner"] = {
-                        "stop": bool(plan.get("stop")),
-                        "notes": plan.get("notes", ""),
-                        "candidate_count": len(plan_actions_list),
-                        "candidates": [_action_trace_view(a) for a in sorted_candidates[:8]],
-                    }
-                    if sorted_candidates:
-                        top = "; ".join(_summarize_action_for_log(a) for a in sorted_candidates[:3])
-                    else:
-                        top = "none"
-                    note(
-                        "llm_plan",
-                        "planner",
-                        f"iteration={trace_item['iteration']} candidates={len(sorted_candidates)} top={top}",
-                        agg=agg,
-                    )
-                    if plan.get("notes"):
-                        ai_obj["notes"] = plan.get("notes")
-                    stop_requested = bool(plan.get("stop"))
-                    if not sorted_candidates:
-                        trace_item["decision"] = {
-                            "result": "stop",
-                            "reason": "planner_stop" if stop_requested else "no_actions",
+                    while True:
+                        try:
+                            plan = plan_actions(remaining, excluded_actions=excluded_actions_for_replan)
+                        except ToolCallingNotSupported as e:
+                            msg = f"Tool calling not supported; skipping agentic phase. ({e})"
+                            ai_obj["planner"]["warning"] = msg
+                            ai_obj["agentic_skipped"] = True
+                            note("llm_error", "planner", msg, agg=agg)
+                            trace_item["planner_error"] = msg
+                            trace_item["decision"] = {"result": "stop", "reason": "planner_not_supported"}
+                            trace_item["finished_at"] = time.time()
+                            ai_obj.setdefault("decision_trace", []).append(trace_item)
+                            action = None
+                            break
+                        except (ToolCallingError, Exception) as e:
+                            msg = f"Tool calling failed; skipping agentic phase. ({e})"
+                            ai_obj["planner"]["warning"] = msg
+                            ai_obj["agentic_skipped"] = True
+                            note("llm_error", "planner", msg, agg=agg)
+                            trace_item["planner_error"] = msg
+                            trace_item["decision"] = {"result": "stop", "reason": "planner_failure"}
+                            trace_item["finished_at"] = time.time()
+                            ai_obj.setdefault("decision_trace", []).append(trace_item)
+                            action = None
+                            break
+
+                        plan_actions_list = [a for a in (plan.get("actions", []) or []) if isinstance(a, dict)]
+                        sorted_candidates = sorted(plan_actions_list, key=_candidate_sort_key)
+                        ai_obj["planner"]["plans"].append(
+                            {"actions": plan_actions_list, "notes": plan.get("notes", ""), "stop": plan.get("stop", False)}
+                        )
+                        planner_view = {
+                            "stop": bool(plan.get("stop")),
+                            "notes": plan.get("notes", ""),
+                            "candidate_count": len(plan_actions_list),
+                            "candidates": [_action_trace_view(a) for a in sorted_candidates[:8]],
                         }
-                        trace_item["finished_at"] = time.time()
-                        ai_obj.setdefault("decision_trace", []).append(trace_item)
-                        break
+                        if not replan_attempted:
+                            trace_item["planner"] = planner_view
+                        else:
+                            trace_item.setdefault("planner_replans", []).append(planner_view)
 
-                    actionable = [a for a in sorted_candidates if not _baseline_would_skip(a)]
-                    if not actionable:
+                        if sorted_candidates:
+                            top = "; ".join(_summarize_action_for_log(a) for a in sorted_candidates[:3])
+                        else:
+                            top = "none"
+                        plan_msg = f"iteration={trace_item['iteration']} candidates={len(sorted_candidates)} top={top}"
+                        if replan_attempted:
+                            plan_msg = f"{plan_msg} replan=1"
+                        note("llm_plan", "planner", plan_msg, agg=agg)
+
+                        if plan.get("notes"):
+                            ai_obj["notes"] = plan.get("notes")
+                        stop_requested = stop_requested or bool(plan.get("stop"))
+                        if not sorted_candidates:
+                            trace_item["decision"] = {
+                                "result": "stop",
+                                "reason": "planner_stop" if stop_requested else "no_actions",
+                            }
+                            trace_item["finished_at"] = time.time()
+                            ai_obj.setdefault("decision_trace", []).append(trace_item)
+                            action = None
+                            break
+
+                        actionable = [a for a in sorted_candidates if not _baseline_would_skip(a)]
+                        if actionable:
+                            action = actionable[0]
+                            break
+
+                        if not replan_attempted:
+                            replan_attempted = True
+                            excluded_actions_for_replan = sorted_candidates[:8]
+                            trace_item["replan"] = {
+                                "attempted": True,
+                                "reason": "all_candidates_already_covered",
+                                "excluded_count": len(excluded_actions_for_replan),
+                                "excluded": [_action_trace_view(a) for a in excluded_actions_for_replan],
+                            }
+                            note(
+                                "llm_decision",
+                                "planner",
+                                "all candidates already covered; replanning once with exclusions",
+                                agg=agg,
+                            )
+                            continue
+
                         if actions_executed == 0 and not ai_obj.get("actions"):
                             ai_obj["notes"] = "Planner proposed only baseline-completed web actions; stopping agentic loop."
                         trace_item["decision"] = {"result": "stop", "reason": "all_candidates_already_covered"}
                         trace_item["finished_at"] = time.time()
                         ai_obj.setdefault("decision_trace", []).append(trace_item)
+                        action = None
                         break
 
-                    action = actionable[0]
+                    if action is None:
+                        break
+
                     trace_item["selected_action"] = _action_trace_view(action)
                     rationale = _short_text(action.get("reasoning"))
                     hypothesis = _short_text(action.get("hypothesis"))

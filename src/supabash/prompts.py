@@ -44,6 +44,7 @@ Rules:
 - Set priority (1-100) where lower means higher urgency/value.
 - If a compliance profile is requested, use that profile consistently across actions.
 - Avoid repeating actions already completed unless new evidence justifies rerun.
+- Respect constraints.excluded_actions and do not propose those exact tool/target pairs again in the same iteration.
 """
 
 REMEDIATOR_PROMPT = """You are a security remediation assistant. Given a vulnerability finding, produce a concise fix.
