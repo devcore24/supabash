@@ -243,6 +243,31 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             self.assertEqual(action.get("hypothesis"), "")
             self.assertEqual(action.get("expected_evidence"), "")
 
+    def test_progress_callback_includes_live_planner_decision_and_critique(self):
+        orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=FakeLLMIterative())
+        output = artifact_path("ai_audit_progress_stream.json")
+        events = []
+
+        def progress_cb(event, tool, message, agg):
+            events.append((str(event), str(tool), str(message)))
+
+        orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=5,
+            use_llm=True,
+            progress_cb=progress_cb,
+        )
+
+        event_names = [e[0] for e in events]
+        self.assertIn("llm_start", event_names)
+        self.assertIn("llm_plan", event_names)
+        self.assertIn("llm_decision", event_names)
+        self.assertIn("llm_critique", event_names)
+        decision_msgs = [m for e, _, m in events if e == "llm_decision"]
+        self.assertTrue(any("selected=whatweb" in m for m in decision_msgs))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1035,6 +1035,27 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     tool = str(action.get("tool") or "")
                     return (skip_penalty, priority, tool, target)
 
+                def _summarize_action_for_log(action: Dict[str, Any]) -> str:
+                    if not isinstance(action, dict):
+                        return "unknown"
+                    tool = str(action.get("tool") or "unknown").strip() or "unknown"
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    target = str(args.get("target") or "").strip()
+                    priority = clamp_int(action.get("priority"), default=50, minimum=1, maximum=100)
+                    hint = f"{tool} p{priority}"
+                    if target:
+                        hint = f"{hint} @{target}"
+                    return hint
+
+                def _short_text(value: Any, max_len: int = 180) -> str:
+                    text = str(value or "").strip()
+                    if not text:
+                        return ""
+                    text = " ".join(text.split())
+                    if len(text) <= max_len:
+                        return text
+                    return text[: max_len - 3].rstrip() + "..."
+
                 while actions_executed < int(max_actions):
                     if canceled():
                         break
@@ -1078,6 +1099,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "candidate_count": len(plan_actions_list),
                         "candidates": [_action_trace_view(a) for a in sorted_candidates[:8]],
                     }
+                    if sorted_candidates:
+                        top = "; ".join(_summarize_action_for_log(a) for a in sorted_candidates[:3])
+                    else:
+                        top = "none"
+                    note(
+                        "llm_plan",
+                        "planner",
+                        f"iteration={trace_item['iteration']} candidates={len(sorted_candidates)} top={top}",
+                        agg=agg,
+                    )
                     if plan.get("notes"):
                         ai_obj["notes"] = plan.get("notes")
                     if plan.get("stop") or not sorted_candidates:
@@ -1100,6 +1131,17 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                     action = actionable[0]
                     trace_item["selected_action"] = _action_trace_view(action)
+                    rationale = _short_text(action.get("reasoning"))
+                    hypothesis = _short_text(action.get("hypothesis"))
+                    expected = _short_text(action.get("expected_evidence"))
+                    decision_parts = [f"selected={_summarize_action_for_log(action)}"]
+                    if rationale:
+                        decision_parts.append(f"rationale={rationale}")
+                    if hypothesis:
+                        decision_parts.append(f"hypothesis={hypothesis}")
+                    if expected:
+                        decision_parts.append(f"expect={expected}")
+                    note("llm_decision", action.get("tool", "planner"), " | ".join(decision_parts), agg=agg)
 
                     pre_findings_count = _findings_count_now()
                     pre_web_target_count = len(set(allowed_web_targets))
@@ -1205,6 +1247,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "signal": signal,
                         "summary": signal_note,
                     }
+                    note(
+                        "llm_critique",
+                        action.get("tool", "planner"),
+                        (
+                            f"signal={signal}; status={status}; findings_delta={int(findings_delta)}; "
+                            f"web_targets_delta={int(web_target_delta)}; extra_results={int(extra_added)}"
+                        ),
+                        agg=agg,
+                    )
                     trace_item["decision"] = {"result": "executed"}
                     trace_item["finished_at"] = time.time()
                     ai_obj.setdefault("decision_trace", []).append(trace_item)

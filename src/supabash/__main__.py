@@ -581,7 +581,7 @@ def audit(
                     label = "SKIP"
                 elif event in ("phase_start", "phase_end"):
                     label = "PHASE"
-                elif event in ("llm_start", "llm_error"):
+                elif event in ("llm_start", "llm_error", "llm_plan", "llm_decision", "llm_critique"):
                     label = "LLM"
 
                 display_message = message
@@ -599,6 +599,12 @@ def audit(
                     display_message = f"Analyst reasoning: {message}" if message else "Analyst reasoning started"
                 elif event == "llm_error":
                     display_message = f"Analyst reasoning error: {message}" if message else "Analyst reasoning error"
+                elif event == "llm_plan":
+                    display_message = f"Planner update: {message}" if message else "Planner update"
+                elif event == "llm_decision":
+                    display_message = f"Decision: {message}" if message else "Planner decision"
+                elif event == "llm_critique":
+                    display_message = f"Critique: {message}" if message else "Planner critique"
 
                 tool_txt = f" {tool}" if tool else ""
                 msg_txt = f": {display_message}" if display_message else ""
