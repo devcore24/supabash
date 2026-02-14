@@ -1111,10 +1111,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     )
                     if plan.get("notes"):
                         ai_obj["notes"] = plan.get("notes")
-                    if plan.get("stop") or not sorted_candidates:
+                    stop_requested = bool(plan.get("stop"))
+                    if not sorted_candidates:
                         trace_item["decision"] = {
                             "result": "stop",
-                            "reason": "planner_stop" if bool(plan.get("stop")) else "no_actions",
+                            "reason": "planner_stop" if stop_requested else "no_actions",
                         }
                         trace_item["finished_at"] = time.time()
                         ai_obj.setdefault("decision_trace", []).append(trace_item)
@@ -1257,8 +1258,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         agg=agg,
                     )
                     trace_item["decision"] = {"result": "executed"}
+                    if stop_requested:
+                        trace_item["decision"]["stop_after_execution"] = True
                     trace_item["finished_at"] = time.time()
                     ai_obj.setdefault("decision_trace", []).append(trace_item)
+                    if stop_requested:
+                        break
 
         # Recompute summary/findings on the combined results.
         agg["finished_at"] = time.time()

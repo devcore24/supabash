@@ -180,6 +180,45 @@ class FakeLLMNormalization:
         )
 
 
+class FakeLLMStopWithAction:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "whatweb",
+                                    "arguments": {"profile": "standard", "target": "http://localhost:19090"},
+                                    "reasoning": "Collect one final stack signal, then stop.",
+                                    "priority": 5,
+                                }
+                            ],
+                            "stop": True,
+                            "notes": "Execute one action then stop.",
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 7}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 3}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 7}},
+        )
+
+
 def _build_scanners():
     return {
         "nmap": FakeNmapScanner(),
@@ -267,6 +306,26 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertIn("llm_critique", event_names)
         decision_msgs = [m for e, _, m in events if e == "llm_decision"]
         self.assertTrue(any("selected=whatweb" in m for m in decision_msgs))
+
+    def test_stop_true_with_candidates_executes_one_action_then_stops(self):
+        llm = FakeLLMStopWithAction()
+        orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=llm)
+        output = artifact_path("ai_audit_stop_with_action.json")
+        report = orchestrator.run("localhost", output, llm_plan=True, max_actions=5, use_llm=True)
+
+        ai = report.get("ai_audit", {})
+        actions = ai.get("actions", [])
+        self.assertEqual(len(actions), 1)
+        if actions:
+            self.assertEqual(actions[0].get("tool"), "whatweb")
+
+        trace = ai.get("decision_trace", [])
+        self.assertEqual(len(trace), 1)
+        if trace:
+            self.assertEqual(trace[0].get("decision", {}).get("result"), "executed")
+            self.assertTrue(trace[0].get("decision", {}).get("stop_after_execution"))
+
+        self.assertEqual(llm.plan_calls, 1)
 
 
 if __name__ == "__main__":
