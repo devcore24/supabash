@@ -1368,6 +1368,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                 agentic_success: set[tuple] = set()
                 actions_executed = 0
+                low_signal_streak = 0
+                agentic_tool_counts: Dict[str, int] = {}
+                agentic_target_counts: Dict[str, int] = {}
 
                 def _baseline_would_skip(action: Dict[str, Any]) -> bool:
                     tool = action.get("tool")
@@ -1457,6 +1460,27 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     target = str(args.get("target") or "")
                     tool = str(action.get("tool") or "")
                     return (skip_penalty, priority, tool, target)
+
+                def _action_novelty(action: Dict[str, Any]) -> int:
+                    """
+                    Generic novelty score to avoid repetitive low-value loops.
+                    Higher is better.
+                    """
+                    if not isinstance(action, dict):
+                        return 0
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    tool = str(action.get("tool") or "").strip().lower()
+                    target = str(args.get("target") or "").strip()
+                    score = 0
+                    if target and target not in agentic_target_counts:
+                        score += 2
+                    if tool and tool not in agentic_tool_counts:
+                        score += 1
+                    if target and agentic_target_counts.get(target, 0) >= 2:
+                        score -= 1
+                    if tool and agentic_tool_counts.get(tool, 0) >= 3:
+                        score -= 1
+                    return score
 
                 def _summarize_action_for_log(action: Dict[str, Any]) -> str:
                     if not isinstance(action, dict):
@@ -1561,6 +1585,40 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                         actionable = [a for a in sorted_candidates if not _baseline_would_skip(a)]
                         if actionable:
+                            actionable.sort(
+                                key=lambda a: (
+                                    -_action_novelty(a),
+                                    _candidate_sort_key(a),
+                                )
+                            )
+                            best_novelty = _action_novelty(actionable[0])
+                            trace_item["candidate_novelty"] = {
+                                "best": int(best_novelty),
+                                "top": [
+                                    {
+                                        "tool": _action_trace_view(a).get("tool"),
+                                        "target": _action_trace_view(a).get("target"),
+                                        "priority": _action_trace_view(a).get("priority"),
+                                        "novelty": int(_action_novelty(a)),
+                                    }
+                                    for a in actionable[:5]
+                                ],
+                            }
+                            if low_signal_streak >= 2 and best_novelty <= 0:
+                                note(
+                                    "llm_decision",
+                                    "planner",
+                                    "diminishing returns: low recent signal and low novelty candidates; stopping",
+                                    agg=agg,
+                                )
+                                trace_item["decision"] = {
+                                    "result": "stop",
+                                    "reason": "diminishing_returns_low_signal_low_novelty",
+                                }
+                                trace_item["finished_at"] = time.time()
+                                ai_obj.setdefault("decision_trace", []).append(trace_item)
+                                action = None
+                                break
                             action = actionable[0]
                             break
 
@@ -1693,6 +1751,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         signal = "low"
                         signal_note = "Action was skipped due to coverage/scope constraints."
 
+                    # Track per-tool/target execution pressure and recent signal trend.
+                    chosen_tool = str(action.get("tool") or "").strip().lower()
+                    chosen_target = str(entry.get("target") or "").strip()
+                    if chosen_tool:
+                        agentic_tool_counts[chosen_tool] = int(agentic_tool_counts.get(chosen_tool, 0)) + 1
+                    if chosen_target:
+                        agentic_target_counts[chosen_target] = int(agentic_target_counts.get(chosen_target, 0)) + 1
+                    if findings_delta > 0 or web_target_delta > 0 or extra_added > 0:
+                        low_signal_streak = 0
+                    else:
+                        low_signal_streak = int(low_signal_streak) + 1
+
                     trace_item["outcome"] = {
                         "status": status,
                         "tool_result_reason": entry.get("reason"),
@@ -1704,6 +1774,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "web_target_count_before": int(pre_web_target_count),
                         "web_target_count_after": int(post_web_target_count),
                         "web_target_count_delta": int(web_target_delta),
+                        "low_signal_streak_after": int(low_signal_streak),
+                        "tool_usage_count": int(agentic_tool_counts.get(chosen_tool, 0)),
+                        "target_usage_count": int(agentic_target_counts.get(chosen_target, 0)),
                     }
                     trace_item["critique"] = {
                         "signal": signal,
