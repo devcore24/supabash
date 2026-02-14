@@ -36,9 +36,14 @@ Rules:
 - Only choose tool_name values from the provided allowed tools list.
 - Use targets strictly from the provided allowed targets list.
 - Include a profile for every action: fast|standard|aggressive or compliance_*.
-- Prefer 1-3 actions per step; avoid brute-force/exploitation.
+- Prefer exactly 1 highest-value next action per step.
+- Use additional actions only when they are strictly required as a tight pair (max 2).
 - The reasoning field must explain the audit rationale (e.g., control objective or evidence trigger).
+- Populate hypothesis with what you are trying to verify/falsify.
+- Populate expected_evidence with what concrete signal would confirm value.
+- Set priority (1-100) where lower means higher urgency/value.
 - If a compliance profile is requested, use that profile consistently across actions.
+- Avoid repeating actions already completed unless new evidence justifies rerun.
 """
 
 REMEDIATOR_PROMPT = """You are a security remediation assistant. Given a vulnerability finding, produce a concise fix.

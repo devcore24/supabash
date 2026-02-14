@@ -562,6 +562,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("Compliance Coverage Matrix", "#compliance-coverage-matrix") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
         ("Not Assessable Automatically", "#not-assessable-automatically") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
         ("Evidence Pack", "#evidence-pack") if isinstance(report.get("evidence_pack"), dict) else None,
+        ("Reproducibility Trace", "#reproducibility-trace") if isinstance(report.get("replay_trace"), dict) else None,
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Findings Overview", "#findings-overview"),
         ("Findings (Detailed)", "#findings-detailed") if has_findings else None,
@@ -990,6 +991,19 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     if version:
                         lines.append(f"- `{tool_name}`: {version}")
 
+    replay_trace = report.get("replay_trace")
+    if isinstance(replay_trace, dict):
+        lines.append("\n## Reproducibility Trace")
+        replay_file = replay_trace.get("file")
+        replay_steps = replay_trace.get("step_count")
+        replay_ver = replay_trace.get("version")
+        if isinstance(replay_file, str) and replay_file.strip():
+            lines.append(f"- file: `{replay_file.strip()}`")
+        if isinstance(replay_steps, int):
+            lines.append(f"- step_count: {replay_steps}")
+        if isinstance(replay_ver, int):
+            lines.append(f"- version: {replay_ver}")
+
     # Agentic expansion details (if present)
     ai = report.get("ai_audit")
     if isinstance(ai, dict):
@@ -1006,6 +1020,9 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         notes = ai.get("notes")
         if isinstance(notes, str) and notes.strip():
             lines.append(f"- notes: {notes.strip()}")
+        decision_trace = ai.get("decision_trace")
+        if isinstance(decision_trace, list):
+            lines.append(f"- decision_steps: {len(decision_trace)}")
         planner = ai.get("planner")
         if isinstance(planner, dict):
             ptype = planner.get("type")

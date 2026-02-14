@@ -34,6 +34,44 @@ class AIAuditOrchestrator(AuditOrchestrator):
         super().__init__(scanners=scanners, llm_client=llm_client)
         self.planner = planner or MethodologyPlanner()
 
+    def _write_replay_trace(self, agg: Dict[str, Any], output: Optional[Path]) -> Optional[Dict[str, Any]]:
+        if output is None:
+            return None
+        try:
+            report_root = output.parent
+            replay_path = report_root / f"{output.stem}-replay.json"
+            ai = agg.get("ai_audit")
+            decision_trace = ai.get("decision_trace") if isinstance(ai, dict) else []
+            if not isinstance(decision_trace, list):
+                decision_trace = []
+            payload = {
+                "version": 1,
+                "generated_at": time.time(),
+                "generated_at_utc": self._fmt_unix_utc(time.time()),
+                "report_file": str(output.name),
+                "report_kind": agg.get("report_kind"),
+                "target": agg.get("target"),
+                "scan_host": agg.get("scan_host"),
+                "compliance_profile": agg.get("compliance_profile"),
+                "compliance_framework": agg.get("compliance_framework"),
+                "planner_type": ai.get("planner", {}).get("type") if isinstance(ai, dict) else None,
+                "planner_mode": ai.get("planner_mode") if isinstance(ai, dict) else None,
+                "max_actions": ai.get("max_actions") if isinstance(ai, dict) else None,
+                "actions": ai.get("actions") if isinstance(ai, dict) else [],
+                "decision_trace": decision_trace,
+                "commands": [
+                    {"tool": r.get("tool"), "command": r.get("command"), "target": r.get("target"), "phase": r.get("phase")}
+                    for r in (agg.get("results", []) or [])
+                    if isinstance(r, dict) and isinstance(r.get("command"), str) and str(r.get("command")).strip()
+                ],
+            }
+            replay_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            rel = str(replay_path.relative_to(report_root))
+            return {"file": rel, "step_count": len(decision_trace), "version": 1}
+        except Exception as e:
+            agg["replay_trace_error"] = str(e)
+            return None
+
     def run(
         self,
         target: str,
@@ -208,6 +246,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 pass
             if output is not None:
                 self._write_evidence_pack(baseline, output)
+                replay_meta = self._write_replay_trace(baseline, output)
+                if isinstance(replay_meta, dict):
+                    baseline["replay_trace"] = replay_meta
                 try:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     output.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
@@ -234,6 +275,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     "error": None,
                     "warning": None,
                 },
+                "planner_mode": "iterative",
+                "decision_trace_version": 1,
+                "decision_trace": [],
                 "max_actions": int(max_actions),
                 "actions": [],
                 "notes": "",
@@ -253,6 +297,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     ai_obj["notes"] = f"{ai_obj['notes']} | {compliance_note}"
             else:
                 ai_obj["notes"] = compliance_note
+        ai_obj.setdefault("planner_mode", "iterative")
+        ai_obj.setdefault("decision_trace_version", 1)
+        if not isinstance(ai_obj.get("decision_trace"), list):
+            ai_obj["decision_trace"] = []
 
         # Mark baseline results for visibility.
         for entry in agg.get("results", []) or []:
@@ -459,6 +507,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                                     "additionalProperties": False,
                                                 },
                                                 "reasoning": {"type": "string"},
+                                                "hypothesis": {"type": "string"},
+                                                "expected_evidence": {"type": "string"},
+                                                "priority": {"type": "integer", "minimum": 1, "maximum": 100},
                                             },
                                             "required": ["tool_name", "arguments", "reasoning"],
                                             "additionalProperties": False,
@@ -522,11 +573,17 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     filtered = {k: v for k, v in args.items() if k in allowed_argument_keys}
                     filtered["profile"] = profile
                     reasoning = str(item.get("reasoning") or "").strip()
+                    hypothesis = str(item.get("hypothesis") or "").strip()
+                    expected_evidence = str(item.get("expected_evidence") or "").strip()
+                    priority = clamp_int(item.get("priority"), default=50, minimum=1, maximum=100)
                     return {
                         "tool": tool,
                         "arguments": filtered,
                         "profile": profile,
                         "reasoning": reasoning,
+                        "hypothesis": hypothesis,
+                        "expected_evidence": expected_evidence,
+                        "priority": priority,
                     }
 
                 def resolve_wordlist(value: Optional[str]) -> Optional[str]:
@@ -937,10 +994,56 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                 agentic_success: set[tuple] = set()
                 actions_executed = 0
+
+                def _baseline_would_skip(action: Dict[str, Any]) -> bool:
+                    tool = action.get("tool")
+                    spec = tool_specs.get(tool, {})
+                    if spec.get("target_kind") != "web":
+                        return False
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    target = args.get("target") if isinstance(args.get("target"), str) else None
+                    if not target:
+                        return True
+                    if target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
+                        return True
+                    return (tool, target) in baseline_success
+
+                def _action_trace_view(action: Dict[str, Any]) -> Dict[str, Any]:
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    return {
+                        "tool": action.get("tool"),
+                        "target": args.get("target"),
+                        "profile": action.get("profile"),
+                        "priority": action.get("priority"),
+                        "reasoning": action.get("reasoning"),
+                        "hypothesis": action.get("hypothesis"),
+                        "expected_evidence": action.get("expected_evidence"),
+                    }
+
+                def _findings_count_now() -> int:
+                    try:
+                        items = self._collect_findings(agg)
+                        return len(items) if isinstance(items, list) else 0
+                    except Exception:
+                        return 0
+
+                def _candidate_sort_key(action: Dict[str, Any]) -> Tuple[int, int, str, str]:
+                    skip_penalty = 1 if _baseline_would_skip(action) else 0
+                    priority = clamp_int(action.get("priority"), default=50, minimum=1, maximum=100)
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    target = str(args.get("target") or "")
+                    tool = str(action.get("tool") or "")
+                    return (skip_penalty, priority, tool, target)
+
                 while actions_executed < int(max_actions):
                     if canceled():
                         break
                     remaining = int(max_actions) - actions_executed
+                    trace_item: Dict[str, Any] = {
+                        "iteration": int(actions_executed) + 1,
+                        "remaining_actions_before": int(remaining),
+                        "started_at": time.time(),
+                    }
                     try:
                         plan = plan_actions(remaining)
                     except ToolCallingNotSupported as e:
@@ -948,103 +1051,163 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         ai_obj["planner"]["warning"] = msg
                         ai_obj["agentic_skipped"] = True
                         note("llm_error", "planner", msg, agg=agg)
+                        trace_item["planner_error"] = msg
+                        trace_item["decision"] = {"result": "stop", "reason": "planner_not_supported"}
+                        trace_item["finished_at"] = time.time()
+                        ai_obj.setdefault("decision_trace", []).append(trace_item)
                         break
                     except (ToolCallingError, Exception) as e:
                         msg = f"Tool calling failed; skipping agentic phase. ({e})"
                         ai_obj["planner"]["warning"] = msg
                         ai_obj["agentic_skipped"] = True
                         note("llm_error", "planner", msg, agg=agg)
+                        trace_item["planner_error"] = msg
+                        trace_item["decision"] = {"result": "stop", "reason": "planner_failure"}
+                        trace_item["finished_at"] = time.time()
+                        ai_obj.setdefault("decision_trace", []).append(trace_item)
                         break
 
-                    plan_actions_list = plan.get("actions", [])
+                    plan_actions_list = [a for a in (plan.get("actions", []) or []) if isinstance(a, dict)]
+                    sorted_candidates = sorted(plan_actions_list, key=_candidate_sort_key)
                     ai_obj["planner"]["plans"].append(
                         {"actions": plan_actions_list, "notes": plan.get("notes", ""), "stop": plan.get("stop", False)}
                     )
+                    trace_item["planner"] = {
+                        "stop": bool(plan.get("stop")),
+                        "notes": plan.get("notes", ""),
+                        "candidate_count": len(plan_actions_list),
+                        "candidates": [_action_trace_view(a) for a in sorted_candidates[:8]],
+                    }
                     if plan.get("notes"):
                         ai_obj["notes"] = plan.get("notes")
-                    if plan.get("stop") or not plan_actions_list:
+                    if plan.get("stop") or not sorted_candidates:
+                        trace_item["decision"] = {
+                            "result": "stop",
+                            "reason": "planner_stop" if bool(plan.get("stop")) else "no_actions",
+                        }
+                        trace_item["finished_at"] = time.time()
+                        ai_obj.setdefault("decision_trace", []).append(trace_item)
                         break
 
-                    def _baseline_would_skip(action: Dict[str, Any]) -> bool:
-                        tool = action.get("tool")
-                        spec = tool_specs.get(tool, {})
-                        if spec.get("target_kind") != "web":
-                            return False
-                        args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
-                        target = args.get("target") if isinstance(args.get("target"), str) else None
-                        if not target:
-                            return True
-                        if target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
-                            return True
-                        return (tool, target) in baseline_success
-
-                    if plan_actions_list and all(_baseline_would_skip(a) for a in plan_actions_list if isinstance(a, dict)):
+                    actionable = [a for a in sorted_candidates if not _baseline_would_skip(a)]
+                    if not actionable:
                         if actions_executed == 0 and not ai_obj.get("actions"):
                             ai_obj["notes"] = "Planner proposed only baseline-completed web actions; stopping agentic loop."
+                        trace_item["decision"] = {"result": "stop", "reason": "all_candidates_already_covered"}
+                        trace_item["finished_at"] = time.time()
+                        ai_obj.setdefault("decision_trace", []).append(trace_item)
                         break
 
-                    for action in plan_actions_list:
-                        if actions_executed >= int(max_actions) or canceled():
-                            break
-                        note("tool_start", action["tool"], f"Running {action['tool']} (agentic)", agg=agg)
-                        started_at = time.time()
-                        entry = run_agentic_action(action)
-                        finished_at = time.time()
-                        note("tool_end", action["tool"], f"Finished {action['tool']} (agentic)", agg=agg)
+                    action = actionable[0]
+                    trace_item["selected_action"] = _action_trace_view(action)
 
-                        extra_results = entry.pop("_extra_results", None)
-                        agg.setdefault("results", []).append(entry)
-                        ai_obj["actions"].append(
-                            {
-                                "tool": action["tool"],
-                                "target": entry.get("target"),
-                                "profile": action.get("profile"),
-                                "reasoning": action.get("reasoning"),
-                                "phase": "agentic",
-                                "success": bool(entry.get("success")) if not entry.get("skipped") else False,
-                                "skipped": bool(entry.get("skipped")),
-                                "error": entry.get("error") or entry.get("reason"),
-                                "reason": entry.get("reason"),
-                                "started_at": started_at,
-                                "finished_at": finished_at,
-                            }
-                        )
-                        if isinstance(extra_results, list):
-                            for extra in extra_results:
-                                if not isinstance(extra, dict):
-                                    continue
-                                agg.setdefault("results", []).append(extra)
-                                ai_obj["actions"].append(
-                                    {
-                                        "tool": extra.get("tool"),
-                                        "target": extra.get("target"),
-                                        "profile": extra.get("profile") or action.get("profile"),
-                                        "reasoning": extra.get("reason") or "Fallback after gobuster failure",
-                                        "phase": "agentic",
-                                        "success": bool(extra.get("success")) if not extra.get("skipped") else False,
-                                        "skipped": bool(extra.get("skipped")),
-                                        "error": extra.get("error") or extra.get("reason"),
-                                        "reason": extra.get("reason"),
-                                        "started_at": extra.get("started_at", started_at),
-                                        "finished_at": extra.get("finished_at", finished_at),
-                                    }
-                                )
-                        actions_executed += 1
-                        if action["tool"] == "httpx" and entry.get("success"):
-                            alive = entry.get("data", {}).get("alive")
-                            if isinstance(alive, list) and alive:
-                                allowed_web_targets = [str(x) for x in alive if str(x).strip()]
-                                web_targets = allowed_web_targets
-                                agg["web_targets"] = web_targets
-                        if action["tool"] == "subfinder" and entry.get("success"):
-                            hosts = entry.get("data", {}).get("hosts")
-                            if isinstance(hosts, list) and hosts:
-                                for h in [str(x).strip() for x in hosts[:50] if str(x).strip()]:
-                                    for u in (f"http://{h}", f"https://{h}"):
-                                        if u not in allowed_web_targets:
-                                            allowed_web_targets.append(u)
-                                            web_targets.append(u)
-                                agg["web_targets"] = web_targets
+                    pre_findings_count = _findings_count_now()
+                    pre_web_target_count = len(set(allowed_web_targets))
+
+                    note("tool_start", action["tool"], f"Running {action['tool']} (agentic)", agg=agg)
+                    started_at = time.time()
+                    entry = run_agentic_action(action)
+                    finished_at = time.time()
+                    note("tool_end", action["tool"], f"Finished {action['tool']} (agentic)", agg=agg)
+
+                    extra_results = entry.pop("_extra_results", None)
+                    agg.setdefault("results", []).append(entry)
+                    ai_obj["actions"].append(
+                        {
+                            "tool": action["tool"],
+                            "target": entry.get("target"),
+                            "profile": action.get("profile"),
+                            "priority": action.get("priority"),
+                            "reasoning": action.get("reasoning"),
+                            "hypothesis": action.get("hypothesis"),
+                            "expected_evidence": action.get("expected_evidence"),
+                            "phase": "agentic",
+                            "success": bool(entry.get("success")) if not entry.get("skipped") else False,
+                            "skipped": bool(entry.get("skipped")),
+                            "error": entry.get("error") or entry.get("reason"),
+                            "reason": entry.get("reason"),
+                            "started_at": started_at,
+                            "finished_at": finished_at,
+                        }
+                    )
+
+                    extra_added = 0
+                    if isinstance(extra_results, list):
+                        for extra in extra_results:
+                            if not isinstance(extra, dict):
+                                continue
+                            agg.setdefault("results", []).append(extra)
+                            ai_obj["actions"].append(
+                                {
+                                    "tool": extra.get("tool"),
+                                    "target": extra.get("target"),
+                                    "profile": extra.get("profile") or action.get("profile"),
+                                    "reasoning": extra.get("reason") or "Fallback after gobuster failure",
+                                    "phase": "agentic",
+                                    "success": bool(extra.get("success")) if not extra.get("skipped") else False,
+                                    "skipped": bool(extra.get("skipped")),
+                                    "error": extra.get("error") or extra.get("reason"),
+                                    "reason": extra.get("reason"),
+                                    "started_at": extra.get("started_at", started_at),
+                                    "finished_at": extra.get("finished_at", finished_at),
+                                }
+                            )
+                            extra_added += 1
+
+                    actions_executed += 1
+                    if action["tool"] == "httpx" and entry.get("success"):
+                        alive = entry.get("data", {}).get("alive")
+                        if isinstance(alive, list) and alive:
+                            allowed_web_targets = [str(x) for x in alive if str(x).strip()]
+                            web_targets = allowed_web_targets
+                            agg["web_targets"] = web_targets
+                    if action["tool"] == "subfinder" and entry.get("success"):
+                        hosts = entry.get("data", {}).get("hosts")
+                        if isinstance(hosts, list) and hosts:
+                            for h in [str(x).strip() for x in hosts[:50] if str(x).strip()]:
+                                for u in (f"http://{h}", f"https://{h}"):
+                                    if u not in allowed_web_targets:
+                                        allowed_web_targets.append(u)
+                                        web_targets.append(u)
+                            agg["web_targets"] = web_targets
+
+                    post_findings_count = _findings_count_now()
+                    post_web_target_count = len(set(allowed_web_targets))
+                    findings_delta = max(0, post_findings_count - pre_findings_count)
+                    web_target_delta = max(0, post_web_target_count - pre_web_target_count)
+                    status = "skipped" if entry.get("skipped") else ("success" if entry.get("success") else "failed")
+                    if status == "success" and (findings_delta > 0 or web_target_delta > 0 or extra_added > 0):
+                        signal = "high"
+                        signal_note = "Action produced new evidence or expanded target coverage."
+                    elif status == "success":
+                        signal = "medium"
+                        signal_note = "Action succeeded but added limited net-new signal."
+                    elif status == "failed":
+                        signal = "low"
+                        signal_note = "Action failed; planner should pivot based on error context."
+                    else:
+                        signal = "low"
+                        signal_note = "Action was skipped due to coverage/scope constraints."
+
+                    trace_item["outcome"] = {
+                        "status": status,
+                        "tool_result_reason": entry.get("reason"),
+                        "tool_result_error": entry.get("error"),
+                        "extra_results_added": int(extra_added),
+                        "findings_count_before": int(pre_findings_count),
+                        "findings_count_after": int(post_findings_count),
+                        "findings_count_delta": int(findings_delta),
+                        "web_target_count_before": int(pre_web_target_count),
+                        "web_target_count_after": int(post_web_target_count),
+                        "web_target_count_delta": int(web_target_delta),
+                    }
+                    trace_item["critique"] = {
+                        "signal": signal,
+                        "summary": signal_note,
+                    }
+                    trace_item["decision"] = {"result": "executed"}
+                    trace_item["finished_at"] = time.time()
+                    ai_obj.setdefault("decision_trace", []).append(trace_item)
 
         # Recompute summary/findings on the combined results.
         agg["finished_at"] = time.time()
@@ -1127,6 +1290,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
         if output is not None:
             self._write_evidence_pack(agg, output)
+            replay_meta = self._write_replay_trace(agg, output)
+            if isinstance(replay_meta, dict):
+                agg["replay_trace"] = replay_meta
+                ai_meta = agg.get("ai_audit")
+                if isinstance(ai_meta, dict):
+                    ai_meta["replay_trace_file"] = replay_meta.get("file")
+                    ai_meta["replay_trace_version"] = replay_meta.get("version")
             try:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with open(output, "w") as f:

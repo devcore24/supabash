@@ -4,6 +4,35 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 
 ---
 
+## 🎯 Phase 11: Autonomous Agentic Audit Kernel (Current)
+*Goal: make `ai-audit` behave like a true iterative security analyst loop (observe → reason → act → reassess), prioritizing adaptive autonomy over fixed list execution.*
+
+- [x] **Iterative best-next-action loop (single-step planning)**
+    - [x] Change planner behavior to select one highest-value next action per cycle (instead of broad batches).
+    - [x] Re-plan after each action using newly collected evidence.
+    - [x] Prevent repetitive low-yield actions with explicit duplicate/saturation guards.
+- [x] **Hypothesis-driven action schema**
+    - [x] Extend planner action schema with `hypothesis`, `expected_evidence`, and `priority`.
+    - [x] Capture these fields in stored agentic actions for audit reasoning transparency.
+    - [x] Add parsing/validation fallbacks so older planner responses continue to work.
+- [x] **Decision Trace + Replay JSON artifact**
+    - [x] Persist an `ai_audit.decision_trace` in report JSON (planner candidates, chosen action, outcome signal, critique).
+    - [x] Emit sidecar replay file per run (`<slug>-replay.json`) with ordered steps and run context.
+    - [x] Link replay artifact in report output for easy rerun/reconstruction.
+- [x] **Autonomous post-action critique**
+    - [x] Add deterministic post-action signal extraction (new findings count, target expansion, skip/failure reason class).
+    - [x] Feed critique summary back into next planning cycle.
+    - [x] Stop early when evidence gain saturates or planner explicitly signals stop.
+- [ ] **Shared runtime path for `ai-audit` and chat `/audit`**
+    - [ ] Ensure both entry points use the same iterative agent loop implementation.
+    - [ ] Keep status events/progress messaging aligned across CLI and chat.
+- [ ] **Regression tests for autonomous loop**
+    - [ ] Unit tests for action normalization with new schema fields.
+    - [x] Tests for replay artifact creation and markdown visibility.
+    - [ ] Tests for iteration behavior (one primary action per cycle + replan).
+
+---
+
 ## 🎯 Phase 9: Readiness Report Clarity Sprint (Current)
 *Goal: make Supabash readiness reports clearer and more auditor-usable than manual experimental reports while staying deterministic.*
 

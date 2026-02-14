@@ -196,6 +196,22 @@ class TestReport(unittest.TestCase):
         self.assertIn("### Runtime Metadata", md)
         self.assertIn("### Tool Versions", md)
 
+    def test_generate_markdown_includes_reproducibility_trace_section(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "replay_trace": {
+                "file": "ai-audit-soc2-20260210-101010-replay.json",
+                "step_count": 5,
+                "version": 1,
+            },
+        }
+        md = generate_markdown(report)
+        self.assertIn("## Reproducibility Trace", md)
+        self.assertIn("file:", md)
+        self.assertIn("step_count: 5", md)
+        self.assertIn("version: 1", md)
+
     def test_risk_normalization_details_include_rule_hints(self):
         report = {
             "target": "localhost",

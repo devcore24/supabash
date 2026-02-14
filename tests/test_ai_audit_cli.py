@@ -21,6 +21,7 @@ class FakeAIAuditOrchestrator:
             "findings": [],
             "report_kind": "ai_audit",
             "ai_audit": {"phase": "baseline+agentic", "actions": []},
+            "replay_trace": {"file": "ai-audit-test-replay.json", "step_count": 1, "version": 1},
             "saved_to": str(out_path),
         }
 
@@ -39,6 +40,9 @@ class TestAIAuditCLI(unittest.TestCase):
                 md_reports = list(Path("reports").glob("ai-audit-*/*.md"))
                 self.assertTrue(json_reports)
                 self.assertTrue(md_reports)
+                if md_reports:
+                    md_text = md_reports[0].read_text(encoding="utf-8")
+                    self.assertIn("## Reproducibility Trace", md_text)
         finally:
             core["report_exports"] = exports_prev
 
