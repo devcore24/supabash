@@ -93,6 +93,11 @@ class FakeGobusterScanner:
         return {"success": True, "command": f"gobuster dir -u {target} ...", "findings": []}
 
 
+class FakeFfufScanner:
+    def scan(self, target, **kwargs):
+        return {"success": True, "command": f"ffuf -u {target}/FUZZ ...", "findings": []}
+
+
 class FakeLLMIterative:
     def __init__(self):
         self.plan_calls = 0
@@ -274,6 +279,47 @@ class FakeLLMReplanOnCovered:
         )
 
 
+class FakeLLMSelectFfuf:
+    def __init__(self):
+        self.plan_calls = 0
+        self.summary_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "ffuf",
+                                    "arguments": {"profile": "standard", "target": "http://localhost:19090"},
+                                    "reasoning": "Content discovery for uncovered paths.",
+                                    "priority": 5,
+                                }
+                            ],
+                            "stop": False,
+                            "notes": "Run ffuf once.",
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 9}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True, "notes": "Done."}}],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        self.summary_calls += 1
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
 def _build_scanners():
     return {
         "nmap": FakeNmapScanner(),
@@ -422,6 +468,21 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             self.assertEqual(trace[0].get("decision", {}).get("result"), "executed")
 
         self.assertEqual(llm.plan_calls, 2)
+
+    def test_ffuf_summary_note_does_not_break_llm_summary(self):
+        scanners = _build_scanners()
+        scanners["ffuf"] = FakeFfufScanner()
+        llm = FakeLLMSelectFfuf()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=llm)
+        # ffuf has enabled_default=False in tool specs; force-enable in this test.
+        orchestrator._tool_enabled = lambda _tool, default=True: True
+        output = artifact_path("ai_audit_ffuf_summary_note.json")
+        report = orchestrator.run("localhost", output, llm_plan=True, max_actions=2, use_llm=True)
+
+        self.assertIsInstance(report.get("summary"), dict)
+        self.assertGreaterEqual(llm.summary_calls, 1)
+        notes = report.get("summary_notes", [])
+        self.assertTrue(any("agentic ffuf action(s) ran and found" in str(n) for n in notes))
 
 
 if __name__ == "__main__":

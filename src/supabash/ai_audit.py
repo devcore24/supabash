@@ -1745,21 +1745,21 @@ class AIAuditOrchestrator(AuditOrchestrator):
             targets = ", ".join(f"{t} ({n})" for t, n in ffuf_fallback_hits[:3])
             if len(ffuf_fallback_hits) > 3:
                 targets = f"{targets}, ..."
-            note = (
+            summary_note = (
                 "ffuf fallback (after gobuster failure) ran and found "
                 f"{total} paths across {len(ffuf_fallback_hits)} target(s): {targets}."
             )
-            agg.setdefault("summary_notes", []).append(note)
+            agg.setdefault("summary_notes", []).append(summary_note)
         if ffuf_agentic_hits:
             total = sum(n for _, n in ffuf_agentic_hits)
             targets = ", ".join(f"{t} ({n})" for t, n in ffuf_agentic_hits[:3])
             if len(ffuf_agentic_hits) > 3:
                 targets = f"{targets}, ..."
-            note = (
+            summary_note = (
                 "agentic ffuf action(s) ran and found "
                 f"{total} paths across {len(ffuf_agentic_hits)} target(s): {targets}."
             )
-            agg.setdefault("summary_notes", []).append(note)
+            agg.setdefault("summary_notes", []).append(summary_note)
 
         # Label LLM status for visibility
         if not llm_enabled:
