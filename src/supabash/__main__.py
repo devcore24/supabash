@@ -1402,6 +1402,11 @@ def chat():
 
             target = None
             mode = "normal"
+            agentic = False
+            compliance = None
+            llm_plan = True
+            max_actions = 10
+            no_llm = False
             nuclei_rate = 0
             gobuster_threads = 10
             gobuster_wordlist = None
@@ -1423,6 +1428,30 @@ def chat():
                 if token == "--mode" and i + 1 < len(parts):
                     mode = parts[i + 1]
                     i += 2
+                    continue
+                if token == "--agentic":
+                    agentic = True
+                    i += 1
+                    continue
+                if token == "--compliance" and i + 1 < len(parts):
+                    compliance = parts[i + 1]
+                    i += 2
+                    continue
+                if token == "--llm-plan":
+                    llm_plan = True
+                    i += 1
+                    continue
+                if token == "--no-llm-plan":
+                    llm_plan = False
+                    i += 1
+                    continue
+                if token == "--max-actions" and i + 1 < len(parts):
+                    max_actions = int(parts[i + 1])
+                    i += 2
+                    continue
+                if token == "--no-llm":
+                    no_llm = True
+                    i += 1
                     continue
                 if token == "--nuclei-rate" and i + 1 < len(parts):
                     nuclei_rate = int(parts[i + 1])
@@ -1489,6 +1518,7 @@ def chat():
             if not target:
                 console.print(
                     "[red]Usage:[/red] /audit <target> [--mode normal|stealth|aggressive] "
+                    "[--agentic] [--compliance PROFILE] [--llm-plan|--no-llm-plan] [--max-actions N] [--no-llm] "
                     "[--nuclei-rate N] [--gobuster-threads N] [--gobuster-wordlist PATH] "
                     "[--parallel-web] [--max-workers N] "
                     "[--container-image IMG] [--nikto] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
@@ -1496,18 +1526,32 @@ def chat():
                 )
                 continue
 
-            out_path, md_path = build_report_paths(output, markdown)
+            default_base = "ai-audit" if agentic and not output else "report"
+            if agentic and not output and compliance:
+                compliance_slug = _compliance_slug_token(compliance)
+                if compliance_slug:
+                    default_base = f"ai-audit-{compliance_slug}"
+            out_path, md_path = build_report_paths(output, markdown, default_basename=default_base)
             formats_note = _report_formats_note(config_manager.config)
             console.print(f"[dim]Results will be saved to {out_path}{formats_note}[/dim]")
 
             if bg:
                 try:
                     try:
-                        session.add_tool_event("audit", "job_start", f"mode={mode} target={target}")
+                        session.add_tool_event(
+                            "audit",
+                            "job_start",
+                            f"mode={mode} target={target} agentic={agentic} compliance={compliance or 'none'}",
+                        )
                     except Exception:
                         pass
                     job = session.start_audit_job(
                         target,
+                        agentic=agentic,
+                        llm_plan=llm_plan,
+                        max_actions=max_actions,
+                        no_llm=no_llm,
+                        compliance_profile=compliance,
                         mode=mode,
                         nuclei_rate_limit=nuclei_rate,
                         gobuster_threads=gobuster_threads,
@@ -1527,21 +1571,31 @@ def chat():
                     try:
                         session.add_message(
                             "assistant",
-                            f"Audit job started: mode={mode} target={target} (id={job.job_id})",
+                            f"Audit job started: mode={mode} target={target} agentic={agentic} compliance={compliance or 'none'} (id={job.job_id})",
                         )
                     except Exception:
                         pass
                 except Exception as e:
                     console.print(f"[red]Failed to start job:[/red] {e}")
             else:
-                console.print(f"[cyan]Starting audit ({mode}) against {target}...[/cyan]")
+                label = "ai-audit" if agentic else "audit"
+                console.print(f"[cyan]Starting {label} ({mode}) against {target}...[/cyan]")
                 try:
-                    session.add_tool_event("audit", "start", f"mode={mode} target={target}")
+                    session.add_tool_event(
+                        "audit",
+                        "start",
+                        f"mode={mode} target={target} agentic={agentic} compliance={compliance or 'none'}",
+                    )
                 except Exception:
                     pass
                 with console.status("[green]Running audit...[/green]"):
                     rep = session.run_audit(
                         target,
+                        agentic=agentic,
+                        llm_plan=llm_plan,
+                        max_actions=max_actions,
+                        no_llm=no_llm,
+                        compliance_profile=compliance,
                         mode=mode,
                         nuclei_rate_limit=nuclei_rate,
                         gobuster_threads=gobuster_threads,

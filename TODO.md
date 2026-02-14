@@ -23,13 +23,13 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Add deterministic post-action signal extraction (new findings count, target expansion, skip/failure reason class).
     - [x] Feed critique summary back into next planning cycle.
     - [x] Stop early when evidence gain saturates or planner explicitly signals stop.
-- [ ] **Shared runtime path for `ai-audit` and chat `/audit`**
-    - [ ] Ensure both entry points use the same iterative agent loop implementation.
-    - [ ] Keep status events/progress messaging aligned across CLI and chat.
-- [ ] **Regression tests for autonomous loop**
-    - [ ] Unit tests for action normalization with new schema fields.
+- [x] **Shared runtime path for `ai-audit` and chat `/audit`**
+    - [x] Ensure both entry points use the same iterative agent loop implementation.
+    - [x] Keep status events/progress messaging aligned across CLI and chat.
+- [x] **Regression tests for autonomous loop**
+    - [x] Unit tests for action normalization with new schema fields.
     - [x] Tests for replay artifact creation and markdown visibility.
-    - [ ] Tests for iteration behavior (one primary action per cycle + replan).
+    - [x] Tests for iteration behavior (one primary action per cycle + replan).
 
 ---
 

@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from supabash.chat import ChatSession
 from tests.test_artifacts import artifact_path, cleanup_artifact
@@ -68,6 +69,28 @@ class TestChatAudit(unittest.TestCase):
         report = session.run_audit("10.0.0.2", output=out)
         self.assertEqual(report.get("saved_to"), str(out))
         cleanup_artifact(out)
+
+    def test_run_audit_agentic_uses_ai_audit_orchestrator(self):
+        fake = FakeAuditOrchestrator()
+        session = ChatSession(scanners={}, llm=None, config_manager=DummyConfigManager())
+
+        with patch("supabash.chat.AIAuditOrchestrator", return_value=fake):
+            report = session.run_audit(
+                "10.0.0.4",
+                agentic=True,
+                llm_plan=False,
+                max_actions=2,
+                no_llm=True,
+                compliance_profile="soc2",
+            )
+
+        self.assertEqual(report.get("target"), "10.0.0.4")
+        self.assertTrue(fake.calls)
+        kwargs = fake.calls[0][2]
+        self.assertEqual(kwargs.get("llm_plan"), False)
+        self.assertEqual(kwargs.get("max_actions"), 2)
+        self.assertEqual(kwargs.get("use_llm"), False)
+        self.assertEqual(kwargs.get("compliance_profile"), "soc2")
 
 
 if __name__ == "__main__":

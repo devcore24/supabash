@@ -14,6 +14,7 @@ from supabash.tools import (
     RustscanScanner,
 )
 from supabash.audit import AuditOrchestrator
+from supabash.ai_audit import AIAuditOrchestrator
 from supabash.llm import LLMClient
 from supabash import prompts
 from supabash.agent import AgentState, MethodologyPlanner
@@ -427,6 +428,11 @@ class ChatSession:
         self,
         target: str,
         *,
+        agentic: bool = False,
+        llm_plan: bool = True,
+        max_actions: int = 10,
+        no_llm: bool = False,
+        compliance_profile: Optional[str] = None,
         container_image: Optional[str] = None,
         mode: str = "normal",
         nuclei_rate_limit: int = 0,
@@ -462,23 +468,36 @@ class ChatSession:
         if not ensure_consent(self.config_manager):
             return {"success": False, "error": "Consent not confirmed"}
 
-        orchestrator = self.audit_orchestrator_factory() if callable(self.audit_orchestrator_factory) else AuditOrchestrator()
+        orchestrator = (
+            self.audit_orchestrator_factory()
+            if callable(self.audit_orchestrator_factory)
+            else (AIAuditOrchestrator() if agentic else AuditOrchestrator())
+        )
+        run_kwargs = {
+            "container_image": container_image,
+            "mode": mode,
+            "compliance_profile": compliance_profile,
+            "nuclei_rate_limit": nuclei_rate_limit,
+            "gobuster_threads": gobuster_threads,
+            "gobuster_wordlist": gobuster_wordlist,
+            "parallel_web": parallel_web,
+            "max_workers": max_workers,
+            "run_nikto": run_nikto,
+            "remediate": remediate,
+            "max_remediations": max_remediations,
+            "min_remediation_severity": min_remediation_severity,
+            "cancel_event": cancel_event,
+            "progress_cb": progress_cb,
+            "use_llm": not bool(no_llm),
+        }
+        if agentic:
+            run_kwargs["llm_plan"] = bool(llm_plan)
+            run_kwargs["max_actions"] = int(max_actions)
+
         report = orchestrator.run(
             target,
             output,
-            container_image=container_image,
-            mode=mode,
-            nuclei_rate_limit=nuclei_rate_limit,
-            gobuster_threads=gobuster_threads,
-            gobuster_wordlist=gobuster_wordlist,
-            parallel_web=parallel_web,
-            max_workers=max_workers,
-            run_nikto=run_nikto,
-            remediate=remediate,
-            max_remediations=max_remediations,
-            min_remediation_severity=min_remediation_severity,
-            cancel_event=cancel_event,
-            progress_cb=progress_cb,
+            **run_kwargs,
         )
         self.last_audit_report = report
         self.last_result_kind = "audit"
@@ -522,6 +541,11 @@ class ChatSession:
         self,
         target: str,
         *,
+        agentic: bool = False,
+        llm_plan: bool = True,
+        max_actions: int = 10,
+        no_llm: bool = False,
+        compliance_profile: Optional[str] = None,
         container_image: Optional[str] = None,
         mode: str = "normal",
         nuclei_rate_limit: int = 0,
@@ -561,6 +585,11 @@ class ChatSession:
             cancel_event = job.cancel_event if job else None
             return self.run_audit(
                 target,
+                agentic=agentic,
+                llm_plan=llm_plan,
+                max_actions=max_actions,
+                no_llm=no_llm,
+                compliance_profile=compliance_profile,
                 container_image=container_image,
                 mode=mode,
                 nuclei_rate_limit=nuclei_rate_limit,
