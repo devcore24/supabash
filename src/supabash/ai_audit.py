@@ -40,14 +40,24 @@ class AIAuditOrchestrator(AuditOrchestrator):
         try:
             report_root = output.parent
             replay_path = report_root / f"{output.stem}-replay.json"
+            replay_md_path = report_root / f"{output.stem}-replay.md"
             ai = agg.get("ai_audit")
             decision_trace = ai.get("decision_trace") if isinstance(ai, dict) else []
             if not isinstance(decision_trace, list):
                 decision_trace = []
+            actions = ai.get("actions") if isinstance(ai, dict) else []
+            if not isinstance(actions, list):
+                actions = []
+            commands = [
+                {"tool": r.get("tool"), "command": r.get("command"), "target": r.get("target"), "phase": r.get("phase")}
+                for r in (agg.get("results", []) or [])
+                if isinstance(r, dict) and isinstance(r.get("command"), str) and str(r.get("command")).strip()
+            ]
+            generated_at = time.time()
             payload = {
                 "version": 1,
-                "generated_at": time.time(),
-                "generated_at_utc": self._fmt_unix_utc(time.time()),
+                "generated_at": generated_at,
+                "generated_at_utc": self._fmt_unix_utc(generated_at),
                 "report_file": str(output.name),
                 "report_kind": agg.get("report_kind"),
                 "target": agg.get("target"),
@@ -57,19 +67,343 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 "planner_type": ai.get("planner", {}).get("type") if isinstance(ai, dict) else None,
                 "planner_mode": ai.get("planner_mode") if isinstance(ai, dict) else None,
                 "max_actions": ai.get("max_actions") if isinstance(ai, dict) else None,
-                "actions": ai.get("actions") if isinstance(ai, dict) else [],
+                "actions": actions,
                 "decision_trace": decision_trace,
-                "commands": [
-                    {"tool": r.get("tool"), "command": r.get("command"), "target": r.get("target"), "phase": r.get("phase")}
-                    for r in (agg.get("results", []) or [])
-                    if isinstance(r, dict) and isinstance(r.get("command"), str) and str(r.get("command")).strip()
-                ],
+                "commands": commands,
             }
             replay_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+            def _fmt_ts(ts: Any) -> str:
+                try:
+                    if ts is None:
+                        return ""
+                    return self._fmt_unix_utc(float(ts))
+                except Exception:
+                    return ""
+
+            def _short(value: Any, limit: int = 220) -> str:
+                text = str(value or "").strip()
+                if len(text) <= limit:
+                    return text
+                return text[: limit - 3].rstrip() + "..."
+
+            md_lines: List[str] = []
+            md_lines.append("# Audit Replay Trace")
+            md_lines.append("")
+            md_lines.append(
+                "This replay summarizes the recorded action sequence and command execution so a reviewer can understand the run flow quickly."
+            )
+            md_lines.append("")
+            md_lines.append("## Metadata")
+            md_lines.append(f"- report_file: `{output.name}`")
+            md_lines.append(f"- generated_at: {_fmt_ts(generated_at)}")
+            if isinstance(agg.get("compliance_framework"), str) and str(agg.get("compliance_framework")).strip():
+                md_lines.append(f"- compliance_framework: {str(agg.get('compliance_framework')).strip()}")
+            elif isinstance(agg.get("compliance_profile"), str) and str(agg.get("compliance_profile")).strip():
+                md_lines.append(f"- compliance_profile: {str(agg.get('compliance_profile')).strip()}")
+            md_lines.append(f"- decision_steps: {len(decision_trace)}")
+            md_lines.append(f"- action_records: {len(actions)}")
+            md_lines.append(f"- command_records: {len(commands)}")
+
+            if decision_trace:
+                md_lines.append("\n## Decision Steps")
+                for step in decision_trace[:80]:
+                    if not isinstance(step, dict):
+                        continue
+                    step_no = step.get("iteration")
+                    started = _fmt_ts(step.get("started_at")) or "-"
+                    finished = _fmt_ts(step.get("finished_at")) or "-"
+                    decision = step.get("decision") if isinstance(step.get("decision"), dict) else {}
+                    d_result = _short(decision.get("result"), 60) or "unknown"
+                    d_reason = _short(decision.get("reason"), 180)
+                    line = f"- Step {step_no}: {d_result}"
+                    if d_reason:
+                        line = f"{line} ({d_reason})"
+                    line = f"{line} start={started} end={finished}"
+                    md_lines.append(line)
+
+                    planner = step.get("planner") if isinstance(step.get("planner"), dict) else {}
+                    if planner:
+                        candidate_count = planner.get("candidate_count")
+                        notes = _short(planner.get("notes"), 220)
+                        md_lines.append(f"  - Planner candidates: {candidate_count}")
+                        if notes:
+                            md_lines.append(f"  - Planner notes: {notes}")
+                    replan = step.get("replan") if isinstance(step.get("replan"), dict) else {}
+                    if replan:
+                        attempted = bool(replan.get("attempted"))
+                        reason = _short(replan.get("reason"), 160)
+                        excluded = replan.get("excluded_count")
+                        md_lines.append(
+                            f"  - Replan: attempted={str(attempted).lower()} reason={reason or '-'} excluded={excluded}"
+                        )
+                    selected = step.get("selected_action") if isinstance(step.get("selected_action"), dict) else {}
+                    if selected:
+                        tool = _short(selected.get("tool"), 40) or "-"
+                        target = _short(selected.get("target"), 120)
+                        priority = selected.get("priority")
+                        sel_line = f"tool={tool}"
+                        if target:
+                            sel_line = f"{sel_line} target={target}"
+                        if priority is not None:
+                            sel_line = f"{sel_line} priority={priority}"
+                        md_lines.append(f"  - Selected: {sel_line}")
+                    outcome = step.get("outcome") if isinstance(step.get("outcome"), dict) else {}
+                    if outcome:
+                        status = _short(outcome.get("status"), 40)
+                        delta = outcome.get("findings_count_delta")
+                        web_delta = outcome.get("web_target_count_delta")
+                        out_line = f"status={status or '-'}"
+                        if isinstance(delta, int):
+                            out_line = f"{out_line} findings_delta={delta}"
+                        if isinstance(web_delta, int):
+                            out_line = f"{out_line} web_targets_delta={web_delta}"
+                        md_lines.append(f"  - Outcome: {out_line}")
+
+            if actions:
+                md_lines.append("\n## Executed Actions")
+                for idx, action in enumerate(actions[:120], start=1):
+                    if not isinstance(action, dict):
+                        continue
+                    tool = _short(action.get("tool"), 40) or "-"
+                    target = _short(action.get("target"), 120)
+                    profile = _short(action.get("profile"), 60)
+                    status = "skipped" if action.get("skipped") else ("success" if action.get("success") else "failed")
+                    line = f"- {idx}. {tool} status={status}"
+                    if target:
+                        line = f"{line} target={target}"
+                    if profile:
+                        line = f"{line} profile={profile}"
+                    md_lines.append(line)
+                    reason = _short(action.get("reason"), 220)
+                    if reason:
+                        md_lines.append(f"  - reason: {reason}")
+
+            if commands:
+                md_lines.append("\n## Commands")
+                for idx, cmd in enumerate(commands[:200], start=1):
+                    if not isinstance(cmd, dict):
+                        continue
+                    tool = _short(cmd.get("tool"), 40) or "-"
+                    phase = _short(cmd.get("phase"), 40)
+                    target = _short(cmd.get("target"), 120)
+                    command = _short(cmd.get("command"), 260) or "-"
+                    line = f"- {idx}. {tool}"
+                    if phase:
+                        line = f"{line} phase={phase}"
+                    if target:
+                        line = f"{line} target={target}"
+                    md_lines.append(line)
+                    md_lines.append(f"  - command: `{command}`")
+
+            replay_md_path.write_text("\n".join(md_lines).rstrip() + "\n", encoding="utf-8")
+
             rel = str(replay_path.relative_to(report_root))
-            return {"file": rel, "step_count": len(decision_trace), "version": 1}
+            rel_md = str(replay_md_path.relative_to(report_root))
+            return {"file": rel, "markdown_file": rel_md, "step_count": len(decision_trace), "version": 1}
         except Exception as e:
             agg["replay_trace_error"] = str(e)
+            return None
+
+    def _write_llm_reasoning_trace(self, agg: Dict[str, Any], output: Optional[Path]) -> Optional[Dict[str, Any]]:
+        if output is None:
+            return None
+        try:
+            report_root = output.parent
+            trace_json_path = report_root / f"{output.stem}-llm-trace.json"
+            trace_md_path = report_root / f"{output.stem}-llm-trace.md"
+
+            ai = agg.get("ai_audit")
+            decision_trace = ai.get("decision_trace") if isinstance(ai, dict) else []
+            if not isinstance(decision_trace, list):
+                decision_trace = []
+            actions = ai.get("actions") if isinstance(ai, dict) else []
+            if not isinstance(actions, list):
+                actions = []
+
+            llm_obj = agg.get("llm")
+            llm_calls = llm_obj.get("calls") if isinstance(llm_obj, dict) else []
+            if not isinstance(llm_calls, list):
+                llm_calls = []
+            planner_calls = [c for c in llm_calls if isinstance(c, dict) and str(c.get("call_type") or "").strip().lower() == "plan"]
+            summary_calls = [c for c in llm_calls if isinstance(c, dict) and str(c.get("call_type") or "").strip().lower() == "summary"]
+
+            thinking_events = agg.get("llm_thinking_events")
+            if not isinstance(thinking_events, list):
+                thinking_events = []
+
+            if not thinking_events and not decision_trace and not llm_calls:
+                return None
+
+            generated_at = time.time()
+            payload = {
+                "version": 1,
+                "generated_at": generated_at,
+                "generated_at_utc": self._fmt_unix_utc(generated_at),
+                "report_file": str(output.name),
+                "report_kind": agg.get("report_kind"),
+                "target": agg.get("target"),
+                "scan_host": agg.get("scan_host"),
+                "compliance_profile": agg.get("compliance_profile"),
+                "compliance_framework": agg.get("compliance_framework"),
+                "note": (
+                    "This trace includes explicit planner rationale/messages and tool-selection decisions. "
+                    "It does not include hidden model internals."
+                ),
+                "llm_events": thinking_events,
+                "llm_calls": llm_calls,
+                "planner_calls": planner_calls,
+                "summary_calls": summary_calls,
+                "decision_trace": decision_trace,
+                "actions": actions,
+            }
+            trace_json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+            def _fmt_ts(ts: Any) -> str:
+                try:
+                    if ts is None:
+                        return ""
+                    return self._fmt_unix_utc(float(ts))
+                except Exception:
+                    return ""
+
+            def _short(value: Any, limit: int = 220) -> str:
+                text = str(value or "").strip()
+                if len(text) <= limit:
+                    return text
+                return text[: limit - 3].rstrip() + "..."
+
+            md_lines: List[str] = []
+            md_lines.append("# LLM Reasoning Trace")
+            md_lines.append("")
+            md_lines.append(
+                "This trace captures explicit planner rationale/messages and decision points recorded during execution. "
+                "It does not include hidden model internals."
+            )
+            md_lines.append("")
+            md_lines.append("## Metadata")
+            md_lines.append(f"- report_file: `{output.name}`")
+            if isinstance(agg.get("compliance_framework"), str) and str(agg.get("compliance_framework")).strip():
+                md_lines.append(f"- compliance_framework: {str(agg.get('compliance_framework')).strip()}")
+            elif isinstance(agg.get("compliance_profile"), str) and str(agg.get("compliance_profile")).strip():
+                md_lines.append(f"- compliance_profile: {str(agg.get('compliance_profile')).strip()}")
+            md_lines.append(f"- generated_at: {_fmt_ts(generated_at)}")
+            md_lines.append(f"- llm_event_count: {len(thinking_events)}")
+            md_lines.append(f"- decision_steps: {len(decision_trace)}")
+            md_lines.append(f"- llm_calls: {len(llm_calls)}")
+            md_lines.append(f"- planner_calls: {len(planner_calls)}")
+            md_lines.append(f"- summary_calls: {len(summary_calls)}")
+
+            if thinking_events:
+                md_lines.append("\n## Event Stream")
+                for idx, event in enumerate(thinking_events[:200], start=1):
+                    if not isinstance(event, dict):
+                        continue
+                    when = _fmt_ts(event.get("timestamp")) or "-"
+                    etype = _short(event.get("event"), 60) or "llm_event"
+                    tool = _short(event.get("tool"), 60) or "-"
+                    msg = _short(event.get("message"), 300) or "-"
+                    md_lines.append(f"- {idx}. [{when}] {etype} tool={tool} :: {msg}")
+
+            if decision_trace:
+                md_lines.append("\n## Decision Steps")
+                for step in decision_trace[:60]:
+                    if not isinstance(step, dict):
+                        continue
+                    step_no = step.get("iteration")
+                    started = _fmt_ts(step.get("started_at")) or "-"
+                    finished = _fmt_ts(step.get("finished_at")) or "-"
+                    decision = step.get("decision") if isinstance(step.get("decision"), dict) else {}
+                    decision_result = _short(decision.get("result"), 60) or "unknown"
+                    decision_reason = _short(decision.get("reason"), 160)
+                    line = f"- Step {step_no}: {decision_result}"
+                    if decision_reason:
+                        line = f"{line} ({decision_reason})"
+                    line = f"{line} start={started} end={finished}"
+                    md_lines.append(line)
+
+                    planner = step.get("planner") if isinstance(step.get("planner"), dict) else {}
+                    if planner:
+                        cand_count = planner.get("candidate_count")
+                        notes = _short(planner.get("notes"), 200)
+                        stop_flag = bool(planner.get("stop"))
+                        md_lines.append(f"  - Planner: candidates={cand_count} stop={str(stop_flag).lower()}")
+                        if notes:
+                            md_lines.append(f"  - Planner notes: {notes}")
+                        candidates = planner.get("candidates")
+                        if isinstance(candidates, list) and candidates:
+                            top = candidates[0] if isinstance(candidates[0], dict) else {}
+                            if isinstance(top, dict):
+                                tool = _short(top.get("tool"), 40)
+                                target = _short(top.get("target"), 120)
+                                priority = top.get("priority")
+                                md_lines.append(f"  - Top candidate: tool={tool} target={target} priority={priority}")
+
+                    replan = step.get("replan") if isinstance(step.get("replan"), dict) else {}
+                    if replan:
+                        attempted = bool(replan.get("attempted"))
+                        reason = _short(replan.get("reason"), 180)
+                        excluded_count = replan.get("excluded_count")
+                        md_lines.append(
+                            f"  - Replan: attempted={str(attempted).lower()} reason={reason or '-'} excluded={excluded_count}"
+                        )
+
+                    replans = step.get("planner_replans")
+                    if isinstance(replans, list) and replans:
+                        first = replans[0] if isinstance(replans[0], dict) else {}
+                        if isinstance(first, dict):
+                            cand_count = first.get("candidate_count")
+                            notes = _short(first.get("notes"), 180)
+                            md_lines.append(f"  - Replan planner: candidates={cand_count}")
+                            if notes:
+                                md_lines.append(f"  - Replan notes: {notes}")
+
+                    selected = step.get("selected_action") if isinstance(step.get("selected_action"), dict) else {}
+                    if selected:
+                        tool = _short(selected.get("tool"), 40)
+                        target = _short(selected.get("target"), 120)
+                        priority = selected.get("priority")
+                        md_lines.append(f"  - Selected action: tool={tool} target={target} priority={priority}")
+
+                    critique = step.get("critique") if isinstance(step.get("critique"), dict) else {}
+                    if critique:
+                        signal = _short(critique.get("signal"), 40)
+                        summary = _short(critique.get("summary"), 240)
+                        md_lines.append(f"  - Critique: signal={signal} summary={summary}")
+
+            if llm_calls:
+                md_lines.append("\n## LLM Calls")
+                for idx, call in enumerate(llm_calls[:100], start=1):
+                    if not isinstance(call, dict):
+                        continue
+                    provider = _short(call.get("provider"), 40) or "-"
+                    model = _short(call.get("model"), 80) or "-"
+                    call_type = _short(call.get("call_type"), 40) or "unknown"
+                    stage = _short(call.get("stage"), 80)
+                    usage = call.get("usage") if isinstance(call.get("usage"), dict) else {}
+                    total_tokens = usage.get("total_tokens")
+                    cost = call.get("cost_usd")
+                    parts = [f"{idx}. type={call_type}", f"provider={provider}", f"model={model}"]
+                    if stage:
+                        parts.append(f"stage={stage}")
+                    if isinstance(total_tokens, (int, float)):
+                        parts.append(f"tokens={int(total_tokens)}")
+                    if isinstance(cost, (int, float)):
+                        parts.append(f"cost_usd={float(cost):.6f}")
+                    md_lines.append(f"- {' | '.join(parts)}")
+
+            trace_md_path.write_text("\n".join(md_lines).rstrip() + "\n", encoding="utf-8")
+
+            return {
+                "version": 1,
+                "json_file": str(trace_json_path.relative_to(report_root)),
+                "markdown_file": str(trace_md_path.relative_to(report_root)),
+                "event_count": len(thinking_events),
+                "decision_steps": len(decision_trace),
+                "llm_calls": len(llm_calls),
+            }
+        except Exception as e:
+            agg["llm_reasoning_trace_error"] = str(e)
             return None
 
     def run(
@@ -157,6 +491,20 @@ class AIAuditOrchestrator(AuditOrchestrator):
             return bool(cancel_event and cancel_event.is_set())
 
         def note(event: str, tool: str = "", message: str = "", agg: Optional[Dict[str, Any]] = None) -> None:
+            if isinstance(agg, dict) and isinstance(event, str) and event.startswith("llm_"):
+                try:
+                    events = agg.setdefault("llm_thinking_events", [])
+                    if isinstance(events, list):
+                        events.append(
+                            {
+                                "timestamp": time.time(),
+                                "event": str(event),
+                                "tool": str(tool or ""),
+                                "message": str(message or ""),
+                            }
+                        )
+                except Exception:
+                    pass
             if callable(progress_cb):
                 try:
                     progress_cb(event=event, tool=tool, message=message, agg=agg or {})
@@ -249,6 +597,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 replay_meta = self._write_replay_trace(baseline, output)
                 if isinstance(replay_meta, dict):
                     baseline["replay_trace"] = replay_meta
+                llm_trace_meta = self._write_llm_reasoning_trace(baseline, output)
+                if isinstance(llm_trace_meta, dict):
+                    baseline["llm_reasoning_trace"] = llm_trace_meta
                 try:
                     output.parent.mkdir(parents=True, exist_ok=True)
                     output.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
@@ -1404,6 +1755,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 if isinstance(ai_meta, dict):
                     ai_meta["replay_trace_file"] = replay_meta.get("file")
                     ai_meta["replay_trace_version"] = replay_meta.get("version")
+            llm_trace_meta = self._write_llm_reasoning_trace(agg, output)
+            if isinstance(llm_trace_meta, dict):
+                agg["llm_reasoning_trace"] = llm_trace_meta
+                ai_meta = agg.get("ai_audit")
+                if isinstance(ai_meta, dict):
+                    ai_meta["llm_reasoning_json_file"] = llm_trace_meta.get("json_file")
+                    ai_meta["llm_reasoning_markdown_file"] = llm_trace_meta.get("markdown_file")
             try:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 with open(output, "w") as f:

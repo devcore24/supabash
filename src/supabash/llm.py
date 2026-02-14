@@ -189,6 +189,51 @@ class LLMClient:
             pass
         return {"raw": str(usage)}
 
+    def _is_temperature_unsupported_error(self, exc: Exception) -> bool:
+        """
+        Best-effort detection for provider/model errors that reject `temperature`.
+        """
+        name = exc.__class__.__name__.lower()
+        text = str(exc).lower()
+        unsupported_hint = any(
+            token in name or token in text
+            for token in (
+                "unsupportedparam",
+                "unsupported",
+                "invalidparam",
+                "badrequest",
+                "invalid_request_error",
+            )
+        )
+        return unsupported_hint and "temperature" in text
+
+    def _completion_with_temperature_fallback(self, kwargs: Dict[str, Any], *, op_name: str) -> Dict[str, Any]:
+        """
+        Call litellm.completion with one automatic retry without `temperature`
+        when the provider/model rejects that parameter.
+        """
+        try:
+            return litellm.completion(**kwargs)
+        except Exception as e:
+            if self._is_temperature_unsupported_error(e) and "temperature" in kwargs:
+                retry_kwargs = dict(kwargs)
+                retry_kwargs.pop("temperature", None)
+                logger.warning(
+                    "LLM %s rejected temperature for model=%s; retrying without temperature.",
+                    op_name,
+                    retry_kwargs.get("model"),
+                )
+                try:
+                    resp = litellm.completion(**retry_kwargs)
+                    if isinstance(resp, dict):
+                        resp["_temperature_fallback"] = True
+                    return resp
+                except Exception as retry_error:
+                    logger.error(f"LLM {op_name} retry without temperature failed: {retry_error}")
+                    raise
+            logger.error(f"LLM {op_name} failed: {e}")
+            raise
+
     def completion(self, messages: List[Dict[str, str]], temperature: float = 0.2) -> Dict[str, Any]:
         """
         Send a completion request to the configured LLM and return the raw response.
@@ -228,7 +273,7 @@ class LLMClient:
 
         logger.debug(f"Dispatching chat to model={settings['model']} provider={settings['provider']}")
         try:
-            resp = litellm.completion(**kwargs)
+            resp = self._completion_with_temperature_fallback(kwargs, op_name="completion")
             if cache is not None and cache.settings.enabled and cache_key:
                 try:
                     content = resp["choices"][0]["message"]["content"]
@@ -284,7 +329,7 @@ class LLMClient:
 
         logger.debug(f"Dispatching tool-call to model={settings['model']} provider={settings['provider']}")
         try:
-            return litellm.completion(**kwargs)
+            return self._completion_with_temperature_fallback(kwargs, op_name="tool-call")
         except Exception as e:
             logger.error(f"LLM tool-call failed: {e}")
             raise

@@ -312,13 +312,32 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         replay = report.get("replay_trace", {})
         self.assertIsInstance(replay, dict)
         replay_file = replay.get("file")
+        replay_md_file = replay.get("markdown_file")
         self.assertIsInstance(replay_file, str)
+        self.assertIsInstance(replay_md_file, str)
         if isinstance(replay_file, str):
             replay_path = Path(output).parent / replay_file
             self.assertTrue(replay_path.exists())
             replay_payload = json.loads(replay_path.read_text(encoding="utf-8"))
             self.assertIsInstance(replay_payload.get("decision_trace"), list)
             self.assertEqual(len(replay_payload.get("decision_trace", [])), len(trace))
+        if isinstance(replay_md_file, str):
+            replay_md_path = Path(output).parent / replay_md_file
+            self.assertTrue(replay_md_path.exists())
+            replay_md = replay_md_path.read_text(encoding="utf-8")
+            self.assertIn("# Audit Replay Trace", replay_md)
+            self.assertIn("## Decision Steps", replay_md)
+
+        llm_trace = report.get("llm_reasoning_trace", {})
+        self.assertIsInstance(llm_trace, dict)
+        trace_json = llm_trace.get("json_file")
+        trace_md = llm_trace.get("markdown_file")
+        self.assertIsInstance(trace_json, str)
+        self.assertIsInstance(trace_md, str)
+        if isinstance(trace_json, str):
+            self.assertTrue((Path(output).parent / trace_json).exists())
+        if isinstance(trace_md, str):
+            self.assertTrue((Path(output).parent / trace_md).exists())
 
     def test_action_normalization_clamps_priority_and_defaults_optional_fields(self):
         orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=FakeLLMNormalization())

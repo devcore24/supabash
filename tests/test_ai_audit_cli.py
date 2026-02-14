@@ -21,7 +21,12 @@ class FakeAIAuditOrchestrator:
             "findings": [],
             "report_kind": "ai_audit",
             "ai_audit": {"phase": "baseline+agentic", "actions": []},
-            "replay_trace": {"file": "ai-audit-test-replay.json", "step_count": 1, "version": 1},
+            "replay_trace": {
+                "file": "ai-audit-test-replay.json",
+                "markdown_file": "ai-audit-test-replay.md",
+                "step_count": 1,
+                "version": 1,
+            },
             "saved_to": str(out_path),
         }
 

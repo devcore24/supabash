@@ -202,6 +202,7 @@ class TestReport(unittest.TestCase):
             "results": [],
             "replay_trace": {
                 "file": "ai-audit-soc2-20260210-101010-replay.json",
+                "markdown_file": "ai-audit-soc2-20260210-101010-replay.md",
                 "step_count": 5,
                 "version": 1,
             },
@@ -209,8 +210,73 @@ class TestReport(unittest.TestCase):
         md = generate_markdown(report)
         self.assertIn("## Reproducibility Trace", md)
         self.assertIn("file:", md)
+        self.assertIn("markdown_file:", md)
         self.assertIn("step_count: 5", md)
         self.assertIn("version: 1", md)
+
+    def test_generate_markdown_includes_llm_reasoning_trace_section(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "llm_reasoning_trace": {
+                "json_file": "ai-audit-soc2-20260214-000000-llm-trace.json",
+                "markdown_file": "ai-audit-soc2-20260214-000000-llm-trace.md",
+                "event_count": 6,
+                "decision_steps": 2,
+                "llm_calls": 3,
+                "version": 1,
+            },
+        }
+        md = generate_markdown(report)
+        self.assertIn("## LLM Reasoning Trace", md)
+        self.assertIn("json_file:", md)
+        self.assertIn("markdown_file:", md)
+        self.assertIn("llm_event_count: 6", md)
+        self.assertIn("decision_steps: 2", md)
+        self.assertIn("llm_calls: 3", md)
+        self.assertIn("note: captures explicit planner rationale/messages and decisions", md)
+
+    def test_agentic_expansion_includes_replan_decision_trace_highlights(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "ai_audit": {
+                "phase": "baseline+agentic",
+                "max_actions": 10,
+                "notes": "Planner proposed only baseline-completed web actions; stopping agentic loop.",
+                "decision_trace": [
+                    {
+                        "iteration": 1,
+                        "planner": {
+                            "candidates": [
+                                {"tool": "httpx", "target": "http://localhost:3001", "priority": 5},
+                            ]
+                        },
+                        "replan": {
+                            "attempted": True,
+                            "reason": "all_candidates_already_covered",
+                            "excluded_count": 1,
+                        },
+                        "planner_replans": [
+                            {
+                                "candidates": [
+                                    {"tool": "nuclei", "target": "http://localhost:3001", "priority": 5},
+                                ]
+                            }
+                        ],
+                        "decision": {"result": "stop", "reason": "all_candidates_already_covered"},
+                    }
+                ],
+                "planner": {"type": "tool_calling"},
+                "actions": [],
+            },
+        }
+        md = generate_markdown(report)
+        self.assertIn("### Decision Trace Highlights", md)
+        self.assertIn("step 1: stop (all_candidates_already_covered)", md)
+        self.assertIn("initial_candidate: tool=httpx target=http://localhost:3001 priority=5", md)
+        self.assertIn("replan: attempted=true reason=all_candidates_already_covered excluded=1", md)
+        self.assertIn("replan_candidate: tool=nuclei target=http://localhost:3001 priority=5", md)
 
     def test_risk_normalization_details_include_rule_hints(self):
         report = {

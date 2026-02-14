@@ -563,6 +563,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("Not Assessable Automatically", "#not-assessable-automatically") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
         ("Evidence Pack", "#evidence-pack") if isinstance(report.get("evidence_pack"), dict) else None,
         ("Reproducibility Trace", "#reproducibility-trace") if isinstance(report.get("replay_trace"), dict) else None,
+        ("LLM Reasoning Trace", "#llm-reasoning-trace") if isinstance(report.get("llm_reasoning_trace"), dict) else None,
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Findings Overview", "#findings-overview"),
         ("Findings (Detailed)", "#findings-detailed") if has_findings else None,
@@ -995,14 +996,42 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     if isinstance(replay_trace, dict):
         lines.append("\n## Reproducibility Trace")
         replay_file = replay_trace.get("file")
+        replay_md_file = replay_trace.get("markdown_file")
         replay_steps = replay_trace.get("step_count")
         replay_ver = replay_trace.get("version")
         if isinstance(replay_file, str) and replay_file.strip():
             lines.append(f"- file: `{replay_file.strip()}`")
+        if isinstance(replay_md_file, str) and replay_md_file.strip():
+            lines.append(f"- markdown_file: `{replay_md_file.strip()}`")
         if isinstance(replay_steps, int):
             lines.append(f"- step_count: {replay_steps}")
         if isinstance(replay_ver, int):
             lines.append(f"- version: {replay_ver}")
+
+    llm_reasoning_trace = report.get("llm_reasoning_trace")
+    if isinstance(llm_reasoning_trace, dict):
+        lines.append("\n## LLM Reasoning Trace")
+        trace_json = llm_reasoning_trace.get("json_file")
+        trace_md = llm_reasoning_trace.get("markdown_file")
+        trace_events = llm_reasoning_trace.get("event_count")
+        trace_steps = llm_reasoning_trace.get("decision_steps")
+        trace_calls = llm_reasoning_trace.get("llm_calls")
+        trace_ver = llm_reasoning_trace.get("version")
+        if isinstance(trace_json, str) and trace_json.strip():
+            lines.append(f"- json_file: `{trace_json.strip()}`")
+        if isinstance(trace_md, str) and trace_md.strip():
+            lines.append(f"- markdown_file: `{trace_md.strip()}`")
+        if isinstance(trace_events, int):
+            lines.append(f"- llm_event_count: {trace_events}")
+        if isinstance(trace_steps, int):
+            lines.append(f"- decision_steps: {trace_steps}")
+        if isinstance(trace_calls, int):
+            lines.append(f"- llm_calls: {trace_calls}")
+        if isinstance(trace_ver, int):
+            lines.append(f"- version: {trace_ver}")
+        lines.append(
+            "- note: captures explicit planner rationale/messages and decisions; hidden model internals are not included."
+        )
 
     # Agentic expansion details (if present)
     ai = report.get("ai_audit")
@@ -1034,6 +1063,64 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             perr = planner.get("error")
             if isinstance(perr, str) and perr.strip():
                 lines.append(f"- planner_error: {perr.strip()}")
+        if isinstance(decision_trace, list) and decision_trace:
+            lines.append("\n### Decision Trace Highlights")
+            for step in decision_trace[:20]:
+                if not isinstance(step, dict):
+                    continue
+                step_no = step.get("iteration")
+                decision = step.get("decision") if isinstance(step.get("decision"), dict) else {}
+                decision_result = str(decision.get("result") or "unknown").strip() or "unknown"
+                decision_reason = str(decision.get("reason") or "").strip()
+                line = f"- step {step_no}: {decision_result}"
+                if decision_reason:
+                    line = f"{line} ({decision_reason})"
+                lines.append(line)
+                planner_view = step.get("planner") if isinstance(step.get("planner"), dict) else {}
+                if planner_view:
+                    candidates = planner_view.get("candidates")
+                    if isinstance(candidates, list) and candidates:
+                        top = candidates[0] if isinstance(candidates[0], dict) else {}
+                        if isinstance(top, dict):
+                            tool = str(top.get("tool") or "").strip()
+                            target = str(top.get("target") or "").strip()
+                            priority = top.get("priority")
+                            top_line = f"tool={tool or '-'}"
+                            if target:
+                                top_line = f"{top_line} target={target}"
+                            if priority is not None:
+                                top_line = f"{top_line} priority={priority}"
+                            lines.append(f"  - initial_candidate: {top_line}")
+                replan = step.get("replan") if isinstance(step.get("replan"), dict) else {}
+                if replan:
+                    attempted = bool(replan.get("attempted"))
+                    reason = str(replan.get("reason") or "").strip()
+                    excluded_count = replan.get("excluded_count")
+                    lines.append(
+                        f"  - replan: attempted={str(attempted).lower()} reason={reason or '-'} excluded={excluded_count}"
+                    )
+                replans = step.get("planner_replans")
+                if isinstance(replans, list) and replans:
+                    first_replan = replans[0] if isinstance(replans[0], dict) else {}
+                    if isinstance(first_replan, dict):
+                        candidates = first_replan.get("candidates")
+                        if isinstance(candidates, list) and candidates:
+                            top = candidates[0] if isinstance(candidates[0], dict) else {}
+                            if isinstance(top, dict):
+                                tool = str(top.get("tool") or "").strip()
+                                target = str(top.get("target") or "").strip()
+                                priority = top.get("priority")
+                                replan_line = f"tool={tool or '-'}"
+                                if target:
+                                    replan_line = f"{replan_line} target={target}"
+                                if priority is not None:
+                                    replan_line = f"{replan_line} priority={priority}"
+                                lines.append(f"  - replan_candidate: {replan_line}")
+                selected = step.get("selected_action") if isinstance(step.get("selected_action"), dict) else {}
+                if selected:
+                    tool = str(selected.get("tool") or "").strip()
+                    target = str(selected.get("target") or "").strip()
+                    lines.append(f"  - selected_action: {tool or '-'}{f' target={target}' if target else ''}")
         actions = ai.get("actions")
         if isinstance(actions, list) and actions:
             lines.append("\n### Actions")

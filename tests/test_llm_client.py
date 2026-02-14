@@ -116,6 +116,58 @@ class TestLLMClient(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.chat([{"role": "user", "content": "hi"}])
 
+    def test_chat_retries_without_temperature_when_model_rejects_it(self):
+        cfg = DummyConfig()
+        client = LLMClient(config=cfg)
+        messages = [{"role": "user", "content": "hello"}]
+
+        with patch("supabash.llm.litellm.completion") as mock_completion:
+            mock_completion.side_effect = [
+                RuntimeError("UnsupportedParamsError: temperature is not supported for this model"),
+                {"choices": [{"message": {"content": "hi"}}]},
+            ]
+            content = client.chat(messages)
+
+            self.assertEqual(content, "hi")
+            self.assertEqual(mock_completion.call_count, 2)
+            first_kwargs = mock_completion.call_args_list[0].kwargs
+            second_kwargs = mock_completion.call_args_list[1].kwargs
+            self.assertIn("temperature", first_kwargs)
+            self.assertNotIn("temperature", second_kwargs)
+
+    def test_completion_with_tools_retries_without_temperature_when_model_rejects_it(self):
+        cfg = DummyConfig()
+        client = LLMClient(config=cfg)
+        messages = [{"role": "user", "content": "hello"}]
+        tools = [{"type": "function", "function": {"name": "ping", "parameters": {"type": "object"}}}]
+
+        with patch("supabash.llm.litellm.completion") as mock_completion:
+            mock_completion.side_effect = [
+                RuntimeError("UnsupportedParamsError: temperature not supported"),
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "function": {"name": "ping", "arguments": "{}"},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            ]
+            resp = client.completion_with_tools(messages, tools=tools)
+
+            self.assertIn("choices", resp)
+            self.assertEqual(mock_completion.call_count, 2)
+            first_kwargs = mock_completion.call_args_list[0].kwargs
+            second_kwargs = mock_completion.call_args_list[1].kwargs
+            self.assertIn("temperature", first_kwargs)
+            self.assertNotIn("temperature", second_kwargs)
+
 
 if __name__ == "__main__":
     unittest.main()

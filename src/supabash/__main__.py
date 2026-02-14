@@ -1184,17 +1184,37 @@ def chat():
         replay = report.get("replay_trace")
         if isinstance(replay, dict):
             replay_file = replay.get("file")
+            replay_md_file = replay.get("markdown_file")
             replay_steps = replay.get("step_count")
             replay_version = replay.get("version")
             parts = []
             if isinstance(replay_file, str) and replay_file.strip():
                 parts.append(replay_file.strip())
+            if isinstance(replay_md_file, str) and replay_md_file.strip():
+                parts.append(replay_md_file.strip())
             if isinstance(replay_steps, int):
                 parts.append(f"steps={replay_steps}")
             if isinstance(replay_version, int):
                 parts.append(f"v{replay_version}")
             if parts:
                 console.print(f"[cyan]Replay Trace:[/cyan] {' | '.join(parts)}")
+        llm_trace = report.get("llm_reasoning_trace")
+        if isinstance(llm_trace, dict):
+            parts = []
+            trace_json = llm_trace.get("json_file")
+            trace_md = llm_trace.get("markdown_file")
+            trace_steps = llm_trace.get("decision_steps")
+            trace_events = llm_trace.get("event_count")
+            if isinstance(trace_json, str) and trace_json.strip():
+                parts.append(trace_json.strip())
+            if isinstance(trace_md, str) and trace_md.strip():
+                parts.append(trace_md.strip())
+            if isinstance(trace_steps, int):
+                parts.append(f"steps={trace_steps}")
+            if isinstance(trace_events, int):
+                parts.append(f"events={trace_events}")
+            if parts:
+                console.print(f"[cyan]LLM Trace:[/cyan] {' | '.join(parts)}")
         ai_meta = report.get("ai_audit")
         if isinstance(ai_meta, dict):
             trace = ai_meta.get("decision_trace")
