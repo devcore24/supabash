@@ -1181,6 +1181,25 @@ def chat():
         )
         if report.get("saved_to"):
             console.print(f"[green]Saved JSON:[/green] {report.get('saved_to')}")
+        replay = report.get("replay_trace")
+        if isinstance(replay, dict):
+            replay_file = replay.get("file")
+            replay_steps = replay.get("step_count")
+            replay_version = replay.get("version")
+            parts = []
+            if isinstance(replay_file, str) and replay_file.strip():
+                parts.append(replay_file.strip())
+            if isinstance(replay_steps, int):
+                parts.append(f"steps={replay_steps}")
+            if isinstance(replay_version, int):
+                parts.append(f"v{replay_version}")
+            if parts:
+                console.print(f"[cyan]Replay Trace:[/cyan] {' | '.join(parts)}")
+        ai_meta = report.get("ai_audit")
+        if isinstance(ai_meta, dict):
+            trace = ai_meta.get("decision_trace")
+            if isinstance(trace, list):
+                console.print(f"[cyan]Agent Decisions:[/cyan] {len(trace)} step(s)")
         chat_meta = report.get("_chat", {}) if isinstance(report.get("_chat"), dict) else {}
         if chat_meta.get("markdown_saved_to"):
             console.print(f"[green]Saved Markdown:[/green] {chat_meta.get('markdown_saved_to')}")
@@ -1307,6 +1326,20 @@ def chat():
                     )
                     if status.message:
                         console.print(f"[dim]{status.message}[/dim]")
+                    latest_decision = None
+                    latest_critique = None
+                    for ev in reversed(list(getattr(status, "events", []) or [])):
+                        l = str(ev).lower()
+                        if latest_decision is None and "llm_decision" in l:
+                            latest_decision = str(ev)
+                        if latest_critique is None and "llm_critique" in l:
+                            latest_critique = str(ev)
+                        if latest_decision and latest_critique:
+                            break
+                    if latest_decision:
+                        console.print(f"[dim]Latest planner decision: {latest_decision}[/dim]")
+                    if latest_critique:
+                        console.print(f"[dim]Latest planner critique: {latest_critique}[/dim]")
                     if verbose and getattr(status, "events", None):
                         events = list(status.events)[-8:]
                         if events:
