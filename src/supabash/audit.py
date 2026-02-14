@@ -2065,6 +2065,10 @@ class AuditOrchestrator:
                     conf = "medium" if severity in ("INFO", "LOW", "MEDIUM") else "high"
                     add_mapping(finding, "access_control", conf)
                     add_mapping(finding, "secure_config", "medium")
+                if has_any(title, ("s3-compatible bucket listing", "bucket listing")):
+                    add_mapping(finding, "access_control", "high")
+                    add_mapping(finding, "data_protection", "high")
+                    add_mapping(finding, "secure_config", "high")
                 if has_any(title, ("redis reachable without authentication",)):
                     add_mapping(finding, "access_control", "high")
                 if has_any(title, ("wildcard interfaces",)):
@@ -2099,34 +2103,148 @@ class AuditOrchestrator:
         return {"scan_host": host, "base_url": base, "sqlmap_url": sqlmap_url}
 
     def _web_targets_from_nmap(self, scan_host: str, nmap_data: Dict[str, Any]) -> List[str]:
+        """
+        Build candidate HTTP(S) targets from nmap discovery.
+
+        Design goals:
+          - Be robust to nmap service mis-identification on high ports (e.g., HTTP running on a port labeled "unknown").
+          - Avoid obviously non-web services when httpx isn't available (so we don't feed DB ports into web scanners).
+          - Prefer confirmation via httpx later in the pipeline to filter false positives.
+        """
+
         urls: List[str] = []
         prefer_host = scan_host if "/" not in scan_host else None
-        for host in nmap_data.get("hosts", []):
+
+        # Conservative denylist for "very likely non-web" ports/services.
+        # Keep this small; unknown/high ports are often HTTP in real environments.
+        deny_ports = {
+            20,
+            21,
+            22,
+            23,
+            25,
+            53,
+            67,
+            68,
+            69,
+            110,
+            111,
+            123,
+            135,
+            137,
+            138,
+            139,
+            143,
+            161,
+            389,
+            445,
+            465,
+            514,
+            587,
+            636,
+            873,
+            993,
+            995,
+            1433,
+            1521,
+            2049,
+            3306,
+            3389,
+            5432,
+            5900,
+            6379,
+            11211,
+            27017,
+        }
+        deny_service_tokens = {
+            "ssh",
+            "smtp",
+            "domain",
+            "dns",
+            "ntp",
+            "snmp",
+            "rpcbind",
+            "msrpc",
+            "netbios",
+            "microsoft-ds",
+            "smb",
+            "ldap",
+            "kerberos",
+            "mysql",
+            "mssql",
+            "postgres",
+            "postgresql",
+            "redis",
+            "mongodb",
+            "amqp",
+            "mqtt",
+            "memcached",
+            "jetdirect",
+        }
+        common_tls_ports = {443, 8443, 9443, 10443, 4443, 6443}
+
+        max_ports = 200  # guard against pathological open-port lists
+
+        for host in (nmap_data or {}).get("hosts", []) or []:
             host_id = prefer_host or host.get("ip")
             if not host_id:
                 continue
-            for p in host.get("ports", []):
-                port = p.get("port")
-                state = p.get("state")
-                service = str(p.get("service") or "").lower()
-                if state != "open":
-                    continue
-                if port is None:
-                    continue
 
-                is_http = "http" in service
-                if not is_http and port not in (80, 443, 8080, 8443):
+            open_ports: List[Dict[str, Any]] = []
+            for p in host.get("ports", []) or []:
+                try:
+                    if str(p.get("state", "")).lower() != "open":
+                        continue
+                    if str(p.get("protocol", "tcp")).lower() != "tcp":
+                        continue
+                    port = int(p.get("port"))
+                except Exception:
                     continue
+                open_ports.append(p)
 
-                scheme = "http"
-                if "https" in service or "ssl" in service or port in (443, 8443):
-                    scheme = "https"
-                if port in (80, 443):
-                    urls.append(f"{scheme}://{host_id}")
+            # Stable ordering + cap
+            open_ports = sorted(open_ports, key=lambda x: int(x.get("port") or 0))[:max_ports]
+
+            for p in open_ports:
+                try:
+                    port = int(p.get("port"))
+                except Exception:
+                    continue
+                service = str(p.get("service") or "").strip().lower()
+                tunnel = str(p.get("tunnel") or "").strip().lower()
+                hint = f"{service} {tunnel}".strip()
+                has_http_hint = "http" in hint
+                has_tls_hint = any(token in hint for token in ("https", "ssl", "tls"))
+
+                # Skip ports that are almost certainly not HTTP unless nmap explicitly indicates HTTP.
+                if not has_http_hint:
+                    if port in deny_ports:
+                        continue
+                    if any(tok in hint for tok in deny_service_tokens):
+                        continue
+
+                schemes: List[str] = []
+                if port == 80:
+                    schemes = ["http"]
+                elif port == 443:
+                    schemes = ["https"]
                 else:
-                    urls.append(f"{scheme}://{host_id}:{port}")
+                    # Be robust: try both schemes; httpx will confirm reachability.
+                    # Prefer https on known TLS ports/hints to reduce retries/redirect churn.
+                    if has_tls_hint or port in common_tls_ports:
+                        schemes = ["https", "http"]
+                    else:
+                        schemes = ["http", "https"]
+
+                for scheme in dict.fromkeys(schemes):
+                    if port in (80, 443) and ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+                        urls.append(f"{scheme}://{host_id}")
+                    else:
+                        urls.append(f"{scheme}://{host_id}:{port}")
+
             if prefer_host:
                 break
+
         # Prefer https first
         urls = sorted(set(urls), key=lambda u: (not u.startswith("https://"), u))
         return urls
@@ -2146,17 +2264,35 @@ class AuditOrchestrator:
             seen.add(target)
             ordered.append(target)
 
+        # Avoid scanning the same host:port twice when both http:// and https:// are reachable.
+        ordered = self._dedupe_web_targets_prefer_https(ordered)
+
         if max_targets <= 0:
             return ordered
 
+        # Prioritize common "admin/dev/metrics" surfaces where exposure tends to matter most.
         risk_ports = {
             80,
             443,
+            3000,
+            3001,
+            3002,
+            4000,
+            5000,
+            5050,
+            5173,
+            5601,
+            8000,
+            8001,
             8080,
+            8081,
             8443,
+            8888,
             9000,
+            9001,
             9090,
             9100,
+            9200,
             9443,
             10443,
             4443,
@@ -2182,6 +2318,40 @@ class AuditOrchestrator:
 
         ranked = sorted(ordered, key=sort_key)
         return ranked[:max_targets]
+
+    def _dedupe_web_targets_prefer_https(self, urls: Sequence[str]) -> List[str]:
+        """
+        Deduplicate web targets by (host, port) and prefer https:// when both exist.
+        Keeps first-seen ordering stable to avoid surprising target churn.
+        """
+        best: Dict[Tuple[str, int], str] = {}
+        order: List[Tuple[str, int]] = []
+
+        for item in urls or []:
+            u = str(item or "").strip()
+            if not u:
+                continue
+            try:
+                parsed = urlparse(u)
+                scheme = (parsed.scheme or "").lower()
+                host = (parsed.hostname or "").strip().lower()
+                if not host:
+                    continue
+                port = int(parsed.port or (443 if scheme == "https" else 80))
+            except Exception:
+                continue
+
+            key = (host, port)
+            if key not in best:
+                best[key] = u
+                order.append(key)
+                continue
+
+            current = best.get(key) or ""
+            if current.startswith("http://") and u.startswith("https://"):
+                best[key] = u
+
+        return [best[k] for k in order if k in best]
 
     def _http_probe_status(self, url: str, timeout_seconds: int = 3) -> Tuple[Optional[int], Optional[str], Optional[str]]:
         request = Request(url, headers={"User-Agent": "supabash-readiness-probe/1.0"})
@@ -2213,59 +2383,82 @@ class AuditOrchestrator:
         checks: List[Dict[str, Any]] = []
         commands: List[str] = []
 
-        # 1) Listener scope check (localhost can still expose wildcard listeners).
-        ss_cmd = ["ss", "-lnt"]
-        commands.append(" ".join(ss_cmd))
-        try:
-            ss_out = subprocess.run(ss_cmd, capture_output=True, text=True, timeout=5, check=False)
-            ss_text = (ss_out.stdout or "").strip()
-            wildcard_ports: List[int] = []
-            if ss_out.returncode == 0 and ss_text:
-                for line in ss_text.splitlines()[1:]:
-                    cols = line.split()
-                    if len(cols) < 4:
-                        continue
-                    local_addr = cols[3].strip()
-                    if not (
-                        local_addr.startswith("0.0.0.0:")
-                        or local_addr.startswith("[::]:")
-                        or local_addr.startswith("*:")
-                    ):
-                        continue
-                    try:
-                        port = int(local_addr.rsplit(":", 1)[-1].strip("[]"))
-                        wildcard_ports.append(port)
-                    except Exception:
-                        continue
+        # 1) Listener scope check (local-only; remote targets cannot be validated from here).
+        is_local = False
+        host_val = (scan_host or "").strip().lower()
+        if host_val in ("localhost", "localhost.localdomain", "localdomain") or host_val.endswith(".localhost"):
+            is_local = True
+        else:
+            try:
+                ip = ipaddress.ip_address(host_val)
+                is_local = bool(getattr(ip, "is_loopback", False))
+            except Exception:
+                is_local = False
+
+        if not is_local:
             checks.append(
                 {
                     "name": "listener_scope",
-                    "success": bool(ss_out.returncode == 0),
-                    "wildcard_ports": sorted(set(wildcard_ports)),
-                    "error": (ss_out.stderr or "").strip() or None,
+                    "success": None,
+                    "skipped": True,
+                    "reason": "Remote target (listener scope check is N/A)",
                 }
             )
-            if wildcard_ports:
-                risky = sorted(
-                    set(wildcard_ports).intersection({5432, 6379, 3306, 27017, 8080, 9090, 9100}).intersection(
-                        set(int(p) for p in (open_ports or []))
-                    )
+        else:
+            ss_cmd = ["ss", "-lnt"]
+            commands.append(" ".join(ss_cmd))
+            try:
+                ss_out = subprocess.run(ss_cmd, capture_output=True, text=True, timeout=5, check=False)
+                ss_text = (ss_out.stdout or "").strip()
+                wildcard_ports: List[int] = []
+                if ss_out.returncode == 0 and ss_text:
+                    for line in ss_text.splitlines()[1:]:
+                        cols = line.split()
+                        if len(cols) < 4:
+                            continue
+                        local_addr = cols[3].strip()
+                        if not (
+                            local_addr.startswith("0.0.0.0:")
+                            or local_addr.startswith("[::]:")
+                            or local_addr.startswith("*:")
+                        ):
+                            continue
+                        try:
+                            port = int(local_addr.rsplit(":", 1)[-1].strip("[]"))
+                            wildcard_ports.append(port)
+                        except Exception:
+                            continue
+                checks.append(
+                    {
+                        "name": "listener_scope",
+                        "success": bool(ss_out.returncode == 0),
+                        "wildcard_ports": sorted(set(wildcard_ports)),
+                        "error": (ss_out.stderr or "").strip() or None,
+                    }
                 )
-                if risky:
-                    findings.append(
-                        {
-                            "severity": "MEDIUM",
-                            "title": "Sensitive services listening on wildcard interfaces",
-                            "evidence": f"ss -lnt shows wildcard listeners on ports: {', '.join(str(p) for p in risky)}",
-                            "type": "listener_exposure",
-                        }
+                if wildcard_ports:
+                    risky = sorted(
+                        set(wildcard_ports).intersection({5432, 6379, 3306, 27017, 8080, 9090, 9100}).intersection(
+                            set(int(p) for p in (open_ports or []))
+                        )
                     )
-        except Exception as e:
-            checks.append({"name": "listener_scope", "success": False, "error": str(e)})
+                    if risky:
+                        findings.append(
+                            {
+                                "severity": "MEDIUM",
+                                "title": "Sensitive services listening on wildcard interfaces",
+                                "evidence": f"ss -lnt shows wildcard listeners on ports: {', '.join(str(p) for p in risky)}",
+                                "type": "listener_exposure",
+                            }
+                        )
+            except Exception as e:
+                checks.append({"name": "listener_scope", "success": False, "error": str(e)})
 
         # 2) Unauthenticated endpoint probes on discovered web targets.
-        probe_targets = self._prioritize_web_targets_for_deep_scan(web_targets, max_targets=5)
+        # Keep this slightly broader than deep-scan targets: these are lightweight probes with tight timeouts.
+        probe_targets = self._prioritize_web_targets_for_deep_scan(web_targets, max_targets=10)
         probe_paths = (
+            ("/debug/pprof/", "Go pprof debug endpoint accessible without authentication", "LOW", "pprof_exposure"),
             ("/metrics", "Unauthenticated metrics endpoint accessible", "MEDIUM", "metrics_exposure"),
             ("/api/v1/status/config", "Prometheus config endpoint accessible without authentication", "HIGH", "prometheus_config_exposure"),
             ("/debug/vars", "Debug endpoint accessible without authentication", "LOW", "debug_endpoint_exposure"),
@@ -2275,12 +2468,37 @@ class AuditOrchestrator:
             base_url = str(base or "").rstrip("/")
             if not base_url:
                 continue
+
+            # Root probe: detect S3-compatible anonymous list-buckets (e.g., MinIO) without hardcoding ports/products.
+            if base_url not in seen_urls:
+                seen_urls.add(base_url)
+                status, body, error = self._http_probe_status(base_url, timeout_seconds=3)
+                checks.append(
+                    {
+                        "name": "http_probe_root",
+                        "url": base_url,
+                        "status": status,
+                        "error": error,
+                    }
+                )
+                if status is not None and 200 <= status < 300 and isinstance(body, str) and body:
+                    body_l = body.lower()
+                    if "listallmybucketsresult" in body_l or "listbucketresult" in body_l:
+                        findings.append(
+                            {
+                                "severity": "HIGH",
+                                "title": "Anonymous S3-compatible bucket listing accessible",
+                                "evidence": f"{base_url}/ (HTTP {status})",
+                                "type": "s3_bucket_listing",
+                            }
+                        )
+
             for path, title, severity, finding_type in probe_paths:
                 probe_url = f"{base_url}{path}"
                 if probe_url in seen_urls:
                     continue
                 seen_urls.add(probe_url)
-                status, _body, error = self._http_probe_status(probe_url, timeout_seconds=3)
+                status, body, error = self._http_probe_status(probe_url, timeout_seconds=3)
                 checks.append(
                     {
                         "name": "http_probe",
@@ -2290,6 +2508,10 @@ class AuditOrchestrator:
                     }
                 )
                 if status is not None and 200 <= status < 400:
+                    if finding_type == "pprof_exposure":
+                        body_l = (body or "").lower() if isinstance(body, str) else ""
+                        if "pprof" not in body_l:
+                            continue
                     findings.append(
                         {
                             "severity": severity,
@@ -3016,7 +3238,7 @@ class AuditOrchestrator:
             if not parallel_web:
                 # Sequential (default)
                 results: List[Dict[str, Any]] = []
-                note("tool_start", "whatweb", "Running whatweb")
+                note("tool_start", "whatweb", f"Running whatweb on {web_target}")
                 whatweb_entry = self._run_tool_if_enabled(
                     "whatweb",
                     lambda: self.scanners["whatweb"].scan(
@@ -3025,7 +3247,7 @@ class AuditOrchestrator:
                         timeout_seconds=self._tool_timeout_seconds("whatweb"),
                     ),
                 )
-                note("tool_end", "whatweb", "Finished whatweb")
+                note("tool_end", "whatweb", f"Finished whatweb on {web_target}")
                 results.append(tag(whatweb_entry))
                 if canceled() or (isinstance(whatweb_entry.get("data"), dict) and whatweb_entry["data"].get("canceled")):
                     return results
@@ -3033,7 +3255,7 @@ class AuditOrchestrator:
                 if include_content_discovery and self._has_scanner("wpscan"):
                     if self._whatweb_detects_wordpress(whatweb_entry):
                         wpscan_args = self._wpscan_args()
-                        note("tool_start", "wpscan", "Running wpscan (WordPress detected)")
+                        note("tool_start", "wpscan", f"Running wpscan on {web_target} (WordPress detected)")
                         wpscan_entry = self._run_tool_if_enabled(
                             "wpscan",
                             lambda: self.scanners["wpscan"].scan(
@@ -3045,7 +3267,7 @@ class AuditOrchestrator:
                                 timeout_seconds=self._tool_timeout_seconds("wpscan"),
                             ),
                         )
-                        note("tool_end", "wpscan", "Finished wpscan")
+                        note("tool_end", "wpscan", f"Finished wpscan on {web_target}")
                     else:
                         wpscan_entry = self._skip_tool("wpscan", "WordPress not detected by whatweb")
                 elif include_content_discovery:
@@ -3054,7 +3276,7 @@ class AuditOrchestrator:
                     if canceled() or (isinstance(wpscan_entry.get("data"), dict) and wpscan_entry["data"].get("canceled")):
                         return results
 
-                note("tool_start", "nuclei", "Running nuclei")
+                note("tool_start", "nuclei", f"Running nuclei on {web_target}")
                 nuclei_entry = self._run_tool_if_enabled(
                     "nuclei",
                     lambda: self.scanners["nuclei"].scan(
@@ -3067,13 +3289,13 @@ class AuditOrchestrator:
                         timeout_seconds=self._tool_timeout_seconds("nuclei"),
                     ),
                 )
-                note("tool_end", "nuclei", "Finished nuclei")
+                note("tool_end", "nuclei", f"Finished nuclei on {web_target}")
                 results.append(tag(nuclei_entry))
                 if canceled() or (isinstance(nuclei_entry.get("data"), dict) and nuclei_entry["data"].get("canceled")):
                     return results
 
                 if include_content_discovery:
-                    note("tool_start", "gobuster", "Running gobuster")
+                    note("tool_start", "gobuster", f"Running gobuster on {web_target}")
                     if gobuster_wordlist:
                         gobuster_entry = self._run_tool_if_enabled(
                             "gobuster",
@@ -3095,7 +3317,7 @@ class AuditOrchestrator:
                                 timeout_seconds=self._tool_timeout_seconds("gobuster"),
                             ),
                         )
-                    note("tool_end", "gobuster", "Finished gobuster")
+                    note("tool_end", "gobuster", f"Finished gobuster on {web_target}")
                     results.append(tag(gobuster_entry))
 
                     # Optional fallback: ffuf (-ac) can handle wildcard/soft-404 responses
@@ -3105,7 +3327,7 @@ class AuditOrchestrator:
                         and self._has_scanner("ffuf")
                         and self._tool_enabled("ffuf", default=False)
                     ):
-                        note("tool_start", "ffuf", "Running ffuf (fallback for content discovery)")
+                        note("tool_start", "ffuf", f"Running ffuf on {web_target} (fallback for content discovery)")
                         ffuf_entry = self._run_tool(
                             "ffuf",
                             lambda: self.scanners["ffuf"].scan(
@@ -3118,11 +3340,11 @@ class AuditOrchestrator:
                         )
                         ffuf_entry["fallback_for"] = "gobuster"
                         ffuf_entry["reason"] = "Fallback after gobuster failure"
-                        note("tool_end", "ffuf", "Finished ffuf")
+                        note("tool_end", "ffuf", f"Finished ffuf on {web_target}")
                         results.append(tag(ffuf_entry))
 
                     if self._has_scanner("katana"):
-                        note("tool_start", "katana", "Running katana (crawl)")
+                        note("tool_start", "katana", f"Running katana on {web_target} (crawl)")
                         katana_entry = self._run_tool_if_enabled(
                             "katana",
                             lambda: self.scanners["katana"].crawl(
@@ -3134,7 +3356,7 @@ class AuditOrchestrator:
                             ),
                         )
                         results.append(tag(katana_entry))
-                        note("tool_end", "katana", "Finished katana")
+                        note("tool_end", "katana", f"Finished katana on {web_target}")
                 return results
 
             # Parallel web tooling
@@ -3142,7 +3364,7 @@ class AuditOrchestrator:
             results: List[Dict[str, Any]] = []
             max_w = max(1, min(int(max_workers), 8))
             with ThreadPoolExecutor(max_workers=max_w) as ex:
-                note("tool_start", "whatweb", "Running whatweb")
+                note("tool_start", "whatweb", f"Running whatweb on {web_target}")
                 if self._tool_enabled("whatweb", default=True):
                     futures[
                         ex.submit(
@@ -3157,7 +3379,7 @@ class AuditOrchestrator:
                     ] = "whatweb"
                 else:
                     results.append(tag(self._skip_disabled("whatweb")))
-                note("tool_start", "nuclei", "Running nuclei")
+                note("tool_start", "nuclei", f"Running nuclei on {web_target}")
                 if self._tool_enabled("nuclei", default=True):
                     futures[
                         ex.submit(
@@ -3176,7 +3398,7 @@ class AuditOrchestrator:
                 else:
                     results.append(tag(self._skip_disabled("nuclei")))
                 if include_content_discovery:
-                    note("tool_start", "gobuster", "Running gobuster")
+                    note("tool_start", "gobuster", f"Running gobuster on {web_target}")
                     if gobuster_wordlist:
                         if self._tool_enabled("gobuster", default=True):
                             futures[
@@ -3218,7 +3440,7 @@ class AuditOrchestrator:
                     except Exception as e:
                         entry = {"tool": tool, "success": False, "error": str(e)}
                     results.append(tag(entry))
-                    note("tool_end", tool, f"Finished {tool}")
+                    note("tool_end", tool, f"Finished {tool} on {web_target}")
             whatweb_entry = None
             for entry in results:
                 if isinstance(entry, dict) and entry.get("tool") == "whatweb":
@@ -3492,7 +3714,9 @@ class AuditOrchestrator:
                 if httpx_entry.get("success"):
                     alive = httpx_entry.get("data", {}).get("alive")
                     if isinstance(alive, list) and alive:
-                        web_targets = [str(x) for x in alive if str(x).strip()]
+                        # Keep both http:// and https:// variants if they are truly reachable;
+                        # deep-scan selection will de-duplicate by host:port to avoid double work.
+                        web_targets = [str(x).strip() for x in alive if isinstance(x, str) and str(x).strip()]
                         agg["web_targets"] = web_targets
 
             # Post-recon conditional modules

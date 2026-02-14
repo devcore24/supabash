@@ -108,6 +108,29 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertIn("http://localhost:6000", urls)
         self.assertNotIn("http://localhost:9100", urls)
 
+    def test_web_targets_include_http_candidates_when_service_fingerprinting_is_wrong(self):
+        """
+        nmap service detection can mislabel common web ports (e.g. :3000, :5050).
+        We still want to feed those ports into httpx for confirmation so we don't miss web apps.
+        """
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        urls = orch._web_targets_from_nmap(
+            "localhost",
+            {
+                "hosts": [
+                    {
+                        "ip": "127.0.0.1",
+                        "ports": [
+                            {"port": 3000, "protocol": "tcp", "service": "ppp", "state": "open"},
+                            {"port": 5050, "protocol": "tcp", "service": "mmcc", "state": "open"},
+                        ],
+                    }
+                ]
+            },
+        )
+        self.assertIn("http://localhost:3000", urls)
+        self.assertIn("http://localhost:5050", urls)
+
     def test_tls_candidate_ports_include_nonstandard_tls_ports(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
         ports = orch._tls_candidate_ports_from_nmap(
@@ -146,8 +169,8 @@ class TestAuditOrchestrator(unittest.TestCase):
             ranked,
             [
                 "https://localhost:8443",
+                "http://localhost:3000",
                 "http://localhost:8080",
-                "http://localhost:9090",
             ],
         )
 
