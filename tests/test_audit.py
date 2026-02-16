@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import os
 from unittest.mock import patch
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
@@ -280,6 +281,46 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertEqual(dnsenum_entry.get("reason"), "Localhost/loopback target (DNS enumeration N/A)")
         self.assertFalse(dnsenum_scanner.called)
         cleanup_artifact(output)
+
+    def test_promote_subfinder_hosts_filters_scope_and_resolved_only(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        orch.llm = SimpleNamespace(
+            config=SimpleNamespace(
+                config={
+                    "tools": {
+                        "subfinder": {
+                            "max_candidates": 20,
+                            "max_promoted_hosts": 5,
+                            "resolve_validation": True,
+                        }
+                    }
+                }
+            )
+        )
+
+        def fake_resolve(host, max_ips=4):
+            mapping = {
+                "api.example.com": ["203.0.113.10"],
+                "example.com": ["203.0.113.11"],
+            }
+            return mapping.get(str(host), [])
+
+        orch._resolve_host_ips = fake_resolve  # type: ignore[assignment]
+        promoted = orch._promote_subfinder_hosts(
+            "api.example.com",
+            ["api.example.com", "www.example.com", "evil.attacker.net", "example.com"],
+        )
+        self.assertIsInstance(promoted, dict)
+        urls = promoted.get("urls") if isinstance(promoted, dict) else []
+        self.assertIn("http://api.example.com", urls)
+        self.assertIn("https://api.example.com", urls)
+        self.assertIn("http://example.com", urls)
+        self.assertNotIn("http://evil.attacker.net", urls)
+        stats = promoted.get("stats", {}) if isinstance(promoted, dict) else {}
+        self.assertEqual(int(stats.get("discovered", 0)), 4)
+        self.assertEqual(int(stats.get("in_scope", 0)), 3)
+        self.assertEqual(int(stats.get("resolved", 0)), 2)
+        self.assertEqual(int(stats.get("promoted_hosts", 0)), 2)
 
     def test_fast_port_discovery_scopes_nmap_ports(self):
         class CaptureNmapScanner:

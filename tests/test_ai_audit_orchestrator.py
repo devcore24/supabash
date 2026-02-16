@@ -68,6 +68,31 @@ class FakeNmapScanner:
         }
 
 
+class FakeNmapScannerWithTLS:
+    def scan(self, target, arguments=None, **kwargs):
+        return {
+            "success": True,
+            "command": f"nmap {target} -oX - -sV --script ssl-enum-ciphers -p-",
+            "scan_data": {
+                "hosts": [
+                    {
+                        "ip": "127.0.0.1",
+                        "ports": [
+                            {
+                                "port": 443,
+                                "protocol": "tcp",
+                                "state": "open",
+                                "service": "https",
+                                "product": "nginx",
+                                "version": "1.0",
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+
+
 class FakeHttpxScanner:
     def scan(self, targets, **kwargs):
         alive = [str(x) for x in (targets or [])]
@@ -324,6 +349,49 @@ class FakeLLMSelectFfuf:
         )
 
 
+class FakeSslscanScanner:
+    def __init__(self):
+        self.calls = []
+
+    def scan(self, target, port=None, **kwargs):
+        self.calls.append((str(target), int(port or 0)))
+        return {"success": True, "command": f"sslscan {target}:{int(port or 0)}", "scan_data": {}}
+
+
+class FakeLLMRepeatSslscan:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        return (
+            [
+                {
+                    "name": "propose_actions",
+                    "arguments": {
+                        "actions": [
+                            {
+                                "tool_name": "sslscan",
+                                "arguments": {"profile": "standard", "target": "localhost", "port": 443},
+                                "reasoning": "Re-check TLS quickly.",
+                                "priority": 5,
+                            }
+                        ],
+                        "stop": False,
+                        "notes": "Keep checking TLS.",
+                    },
+                }
+            ],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 7}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
 def _build_scanners():
     return {
         "nmap": FakeNmapScanner(),
@@ -512,6 +580,37 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertTrue(agentic_nuclei)
         command = str(agentic_nuclei[0].get("command") or "")
         self.assertIn("-rate-limit 10000", command)
+
+    def test_repeat_policy_caps_low_signal_sslscan_repeats(self):
+        scanners = _build_scanners()
+        sslscan = FakeSslscanScanner()
+        scanners["nmap"] = FakeNmapScannerWithTLS()
+        scanners["sslscan"] = sslscan
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMRepeatSslscan())
+        output = artifact_path("ai_audit_repeat_policy_sslscan.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=3,
+            use_llm=True,
+            compliance_profile="pci",
+        )
+
+        self.assertGreaterEqual(len(sslscan.calls), 1)
+        agentic_sslscan_actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "sslscan" and a.get("phase") == "agentic"
+        ]
+        self.assertEqual(len(agentic_sslscan_actions), 1)
+        trace = report.get("ai_audit", {}).get("decision_trace", [])
+        self.assertIsInstance(trace, list)
+        self.assertGreaterEqual(len(trace), 2)
+        if isinstance(trace, list) and len(trace) >= 2:
+            second = trace[1]
+            self.assertEqual(second.get("decision", {}).get("reason"), "all_candidates_blocked_repeat_policy")
+            self.assertIn("repeat_filtered", second)
 
 
 if __name__ == "__main__":

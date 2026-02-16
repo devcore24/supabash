@@ -333,6 +333,21 @@ def build_recommended_next_actions(
     tool_items: List[Dict[str, Any]],
     profile: Any,
 ) -> List[str]:
+    def severity_rank(value: Any) -> int:
+        sev = str(value or "").strip().upper()
+        mapping = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+        return int(mapping.get(sev, 0))
+
+    explicit_recommendations: List[str] = []
+    for item in (summary_items or []) + (tool_items or []):
+        if not isinstance(item, dict):
+            continue
+        if severity_rank(item.get("severity")) < 4:
+            continue
+        recommendation = str(item.get("recommendation") or "").strip()
+        if recommendation:
+            explicit_recommendations.append(recommendation)
+
     source = summary_items if summary_items else tool_items
     signals: Set[str] = set()
     for item in source:
@@ -455,30 +470,32 @@ def build_recommended_next_actions(
     ordered_keys = ordered_keys_by_profile.get(profile_key, default_order)
 
     actions: List[str] = []
+    actions.extend(explicit_recommendations[:4])
     for k in ordered_keys:
         if k in triggered:
             actions.append(action_text[k])
 
     if profile_key == "compliance_pci":
-        actions.append(
+        manual_action = (
             "Collect manual evidence for PCI readiness boundaries not automatable here (CDE scoping, CHD/SAD handling, key lifecycle, and formal control operation records)."
         )
     elif profile_key == "compliance_soc2":
-        actions.append(
+        manual_action = (
             "Collect SOC 2 control-operation evidence not assessable by scanning (JML/access reviews, change approvals, incident response drills, and policy governance records)."
         )
     elif profile_key:
-        actions.append(
+        manual_action = (
             "Collect manual control-operation evidence for governance/process controls not assessable by automated scanning (for readiness review)."
         )
     else:
-        actions.append(
+        manual_action = (
             "Collect manual operational evidence for controls not assessable by technical scanning (governance/process readiness)."
         )
-
-    actions.append(
+    rerun_action = (
         "After remediation, rerun the readiness assessment and compare deltas in findings severity, exposed services, and evidence artifacts."
     )
+    actions.append(manual_action)
+    actions.append(rerun_action)
 
     deduped: List[str] = []
     seen: Set[str] = set()
@@ -491,7 +508,14 @@ def build_recommended_next_actions(
             continue
         seen.add(key)
         deduped.append(text)
-    return deduped[:8]
+
+    max_actions = 8
+    keep_keys = {manual_action.lower(), rerun_action.lower()}
+    keep_items = [item for item in deduped if item.lower() in keep_keys]
+    pre_items = [item for item in deduped if item.lower() not in keep_keys]
+    slots = max(0, max_actions - len(keep_items))
+    final_actions = pre_items[:slots] + keep_items
+    return final_actions[:max_actions]
 
 def generate_markdown(report: Dict[str, Any]) -> str:
     lines = []

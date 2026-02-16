@@ -68,7 +68,14 @@ DEFAULT_CONFIG = {
         "masscan": {"enabled": True, "timeout_seconds": 600, "rate": 1000, "ports": "1-65535"},
         "rustscan": {"enabled": True, "timeout_seconds": 600, "batch": 2000, "ports": "1-65535"},
         # Subdomain discovery (domain targets only; many sources require API keys)
-        "subfinder": {"enabled": False, "timeout_seconds": 600},
+        "subfinder": {
+            "enabled": False,
+            "timeout_seconds": 600,
+            # Bound and validate discovered hosts before promoting to web probing.
+            "max_candidates": 200,
+            "max_promoted_hosts": 40,
+            "resolve_validation": True,
+        },
         "httpx": {"enabled": True, "timeout_seconds": 300},
         "whatweb": {"enabled": True, "timeout_seconds": 300},
         "nuclei": {

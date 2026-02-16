@@ -1327,6 +1327,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     timeout_seconds=self._tool_timeout_seconds("sslscan"),
                                 ),
                             )
+                            if isinstance(entry, dict):
+                                entry["port"] = int(port)
                     elif tool == "enum4linux-ng":
                         action_target = scan_host
                         action_key = (tool, action_target or "")
@@ -1382,6 +1384,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 low_signal_streak = 0
                 agentic_tool_counts: Dict[str, int] = {}
                 agentic_target_counts: Dict[str, int] = {}
+                agentic_action_counts: Dict[Tuple[str, str], int] = {}
+                agentic_low_signal_tool_counts: Dict[str, int] = {}
 
                 def _baseline_would_skip(action: Dict[str, Any]) -> bool:
                     tool = action.get("tool")
@@ -1402,25 +1406,35 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     (baseline + earlier agentic executions), not just the immediate top candidate.
                     """
                     out: List[Dict[str, Any]] = []
-                    seen: Set[Tuple[str, str, str]] = set()
+                    seen: Set[Tuple[str, str, str, str]] = set()
                     default_profile = requested_compliance or "standard"
 
-                    def _add(tool: str, target: str, profile: str = default_profile) -> None:
+                    def _add(
+                        tool: str,
+                        target: str,
+                        profile: str = default_profile,
+                        port: Optional[Any] = None,
+                    ) -> None:
                         t = str(tool or "").strip().lower()
                         u = str(target or "").strip()
                         p = str(profile or default_profile).strip().lower() or default_profile
+                        port_txt = str(port).strip() if port is not None else ""
                         if not t or not u:
                             return
-                        if tool_specs.get(t, {}).get("target_kind") != "web":
-                            return
-                        key = (t, u, p)
+                        key = (t, u, p, port_txt)
                         if key in seen:
                             return
                         seen.add(key)
+                        args: Dict[str, Any] = {"profile": p, "target": u}
+                        if port_txt:
+                            try:
+                                args["port"] = int(port_txt)
+                            except Exception:
+                                args["port"] = port_txt
                         out.append(
                             {
                                 "tool": t,
-                                "arguments": {"profile": p, "target": u},
+                                "arguments": args,
                                 "profile": p,
                                 "priority": 50,
                                 "reasoning": "",
@@ -1432,7 +1446,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     for item in sorted(baseline_success | agentic_success):
                         if not isinstance(item, tuple) or len(item) < 2:
                             continue
-                        _add(str(item[0]), str(item[1]))
+                        maybe_port = item[2] if len(item) >= 3 and str(item[0]).strip().lower() == "sslscan" else None
+                        _add(str(item[0]), str(item[1]), port=maybe_port)
 
                     for action in extra_actions or []:
                         if not isinstance(action, dict):
@@ -1442,6 +1457,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             str(action.get("tool") or ""),
                             str(args.get("target") or ""),
                             str(action.get("profile") or default_profile),
+                            args.get("port"),
                         )
                     return out
 
@@ -1450,6 +1466,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     return {
                         "tool": action.get("tool"),
                         "target": args.get("target"),
+                        "port": args.get("port"),
                         "profile": action.get("profile"),
                         "priority": action.get("priority"),
                         "reasoning": action.get("reasoning"),
@@ -1492,6 +1509,77 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if tool and agentic_tool_counts.get(tool, 0) >= 3:
                         score -= 1
                     return score
+
+                def _action_repeat_key(action: Dict[str, Any], result_entry: Optional[Dict[str, Any]] = None) -> Optional[Tuple[str, str]]:
+                    if not isinstance(action, dict):
+                        return None
+                    tool = str(action.get("tool") or "").strip().lower()
+                    if not tool:
+                        return None
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    target_kind = str(tool_specs.get(tool, {}).get("target_kind") or "").strip().lower()
+                    target = str(args.get("target") or "").strip()
+
+                    if tool == "sslscan":
+                        port_val: Any = None
+                        if isinstance(result_entry, dict) and result_entry.get("port") is not None:
+                            port_val = result_entry.get("port")
+                        if port_val is None:
+                            port_val = args.get("port")
+                        try:
+                            port_txt = str(int(port_val))
+                        except Exception:
+                            port_txt = "auto"
+                        return (tool, f"{scan_host}:{port_txt}")
+
+                    if target_kind == "web":
+                        return (tool, target or "__missing_target__")
+                    if target_kind in ("host", "host_port"):
+                        return (tool, str(scan_host or "").strip() or "__host__")
+                    if target_kind == "container":
+                        return (tool, str(container_image or "").strip() or "__container__")
+                    return (tool, target or "__global__")
+
+                def _repeat_limits_for_tool(tool: str) -> Dict[str, int]:
+                    t = str(tool or "").strip().lower()
+                    if t == "sslscan":
+                        tls_count = len(tls_ports) if isinstance(tls_ports, list) else 0
+                        return {
+                            "max_per_pair": 1,
+                            "max_total": max(1, min(2, tls_count or 1)),
+                            "max_low_signal": 1,
+                        }
+                    if t == "nuclei":
+                        web_count = len(allowed_web_targets) if isinstance(allowed_web_targets, list) else 0
+                        dynamic_total = max(2, min(6, max(2, web_count // 2))) if web_count else 4
+                        return {
+                            "max_per_pair": 2,
+                            "max_total": dynamic_total,
+                            "max_low_signal": 2,
+                        }
+                    if t in ("whatweb", "gobuster", "ffuf", "katana"):
+                        return {"max_per_pair": 1, "max_total": 3, "max_low_signal": 2}
+                    return {"max_per_pair": 2, "max_total": 5, "max_low_signal": 3}
+
+                def _repeat_block_reason(action: Dict[str, Any]) -> Optional[str]:
+                    key = _action_repeat_key(action)
+                    if not key:
+                        return None
+                    tool = key[0]
+                    limits = _repeat_limits_for_tool(tool)
+                    pair_count = int(agentic_action_counts.get(key, 0))
+                    tool_count = int(agentic_tool_counts.get(tool, 0))
+                    low_signal_count = int(agentic_low_signal_tool_counts.get(tool, 0))
+                    novelty = int(_action_novelty(action))
+                    if pair_count >= int(limits.get("max_per_pair", 1)):
+                        return "tool_target_repeat_cap"
+                    if tool_count >= int(limits.get("max_total", 1)) and novelty <= 1:
+                        return "tool_repeat_cap"
+                    if tool == "sslscan" and low_signal_count >= int(limits.get("max_low_signal", 1)):
+                        return "tool_low_signal_repeat_cap"
+                    if low_signal_count >= int(limits.get("max_low_signal", 1)) and novelty <= 1:
+                        return "tool_low_signal_repeat_cap"
+                    return None
 
                 def _summarize_action_for_log(action: Dict[str, Any]) -> str:
                     if not isinstance(action, dict):
@@ -1594,7 +1682,42 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             action = None
                             break
 
-                        actionable = [a for a in sorted_candidates if not _baseline_would_skip(a)]
+                        actionable_after_coverage = [a for a in sorted_candidates if not _baseline_would_skip(a)]
+                        repeat_blocked: List[Dict[str, Any]] = []
+                        repeat_blocked_reasons: Dict[Tuple[str, str], str] = {}
+                        actionable: List[Dict[str, Any]] = []
+                        for cand in actionable_after_coverage:
+                            block_reason = _repeat_block_reason(cand)
+                            if block_reason:
+                                repeat_blocked.append(cand)
+                                repeat_key = _action_repeat_key(cand)
+                                if repeat_key:
+                                    repeat_blocked_reasons[repeat_key] = block_reason
+                                continue
+                            actionable.append(cand)
+
+                        if repeat_blocked:
+                            blocked_preview = [
+                                {
+                                    "tool": _action_trace_view(a).get("tool"),
+                                    "target": _action_trace_view(a).get("target"),
+                                    "port": _action_trace_view(a).get("port"),
+                                    "priority": _action_trace_view(a).get("priority"),
+                                    "reason": repeat_blocked_reasons.get(_action_repeat_key(a) or ("", ""), "repeat_policy"),
+                                }
+                                for a in repeat_blocked[:8]
+                            ]
+                            trace_item["repeat_filtered"] = {
+                                "count": len(repeat_blocked),
+                                "candidates": blocked_preview,
+                            }
+                            note(
+                                "llm_decision",
+                                "planner",
+                                f"repeat policy filtered {len(repeat_blocked)} candidate(s)",
+                                agg=agg,
+                            )
+
                         if actionable:
                             actionable.sort(
                                 key=lambda a: (
@@ -1633,26 +1756,35 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             action = actionable[0]
                             break
 
+                        if actionable_after_coverage and repeat_blocked and len(actionable_after_coverage) == len(repeat_blocked):
+                            replan_reason = "all_candidates_blocked_repeat_policy"
+                            replan_note = "all candidates blocked by repeat policy; replanning once with exclusions"
+                            stop_reason = "all_candidates_blocked_repeat_policy"
+                        else:
+                            replan_reason = "all_candidates_already_covered"
+                            replan_note = "all candidates already covered; replanning once with exclusions"
+                            stop_reason = "all_candidates_already_covered"
+
                         if not replan_attempted:
                             replan_attempted = True
                             excluded_actions_for_replan = _covered_action_exclusions(sorted_candidates)
                             trace_item["replan"] = {
                                 "attempted": True,
-                                "reason": "all_candidates_already_covered",
+                                "reason": replan_reason,
                                 "excluded_count": len(excluded_actions_for_replan),
                                 "excluded": [_action_trace_view(a) for a in excluded_actions_for_replan],
                             }
                             note(
                                 "llm_decision",
                                 "planner",
-                                "all candidates already covered; replanning once with exclusions",
+                                replan_note,
                                 agg=agg,
                             )
                             continue
 
                         if actions_executed == 0 and not ai_obj.get("actions"):
                             ai_obj["notes"] = "Planner proposed only baseline-completed web actions; stopping agentic loop."
-                        trace_item["decision"] = {"result": "stop", "reason": "all_candidates_already_covered"}
+                        trace_item["decision"] = {"result": "stop", "reason": stop_reason}
                         trace_item["finished_at"] = time.time()
                         ai_obj.setdefault("decision_trace", []).append(trace_item)
                         action = None
@@ -1734,14 +1866,31 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             allowed_web_targets = [str(x) for x in alive if str(x).strip()]
                             web_targets = allowed_web_targets
                             agg["web_targets"] = web_targets
-                    if action["tool"] == "subfinder" and entry.get("success"):
+                    if action["tool"] == "subfinder" and entry.get("success") and not lock_web_targets:
                         hosts = entry.get("data", {}).get("hosts")
                         if isinstance(hosts, list) and hosts:
-                            for h in [str(x).strip() for x in hosts[:50] if str(x).strip()]:
-                                for u in (f"http://{h}", f"https://{h}"):
-                                    if u not in allowed_web_targets:
-                                        allowed_web_targets.append(u)
-                                        web_targets.append(u)
+                            promoted = self._promote_subfinder_hosts(scan_host, hosts)
+                            promoted_urls = promoted.get("urls", []) if isinstance(promoted, dict) else []
+                            for u in promoted_urls:
+                                if not isinstance(u, str) or not u.strip():
+                                    continue
+                                if u not in allowed_web_targets:
+                                    allowed_web_targets.append(u)
+                                    web_targets.append(u)
+                            if isinstance(entry.get("data"), dict):
+                                entry["data"]["promoted_urls"] = [str(u) for u in promoted_urls if str(u).strip()]
+                                entry["data"]["promotion_stats"] = (
+                                    promoted.get("stats", {}) if isinstance(promoted, dict) else {}
+                                )
+                            stats = promoted.get("stats", {}) if isinstance(promoted.get("stats"), dict) else {}
+                            if stats:
+                                agg.setdefault("summary_notes", []).append(
+                                    (
+                                        "Subdomain expansion (agentic): discovered "
+                                        f"{int(stats.get('discovered', 0))}, in-scope {int(stats.get('in_scope', 0))}, "
+                                        f"resolved {int(stats.get('resolved', 0))}, promoted {int(stats.get('promoted_hosts', 0))} host(s)."
+                                    )
+                                )
                             agg["web_targets"] = web_targets
 
                     post_findings_count = _findings_count_now()
@@ -1765,14 +1914,21 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     # Track per-tool/target execution pressure and recent signal trend.
                     chosen_tool = str(action.get("tool") or "").strip().lower()
                     chosen_target = str(entry.get("target") or "").strip()
+                    action_repeat_key = _action_repeat_key(action, entry)
                     if chosen_tool:
                         agentic_tool_counts[chosen_tool] = int(agentic_tool_counts.get(chosen_tool, 0)) + 1
                     if chosen_target:
                         agentic_target_counts[chosen_target] = int(agentic_target_counts.get(chosen_target, 0)) + 1
+                    if action_repeat_key:
+                        agentic_action_counts[action_repeat_key] = int(agentic_action_counts.get(action_repeat_key, 0)) + 1
                     if findings_delta > 0 or web_target_delta > 0 or extra_added > 0:
                         low_signal_streak = 0
                     else:
                         low_signal_streak = int(low_signal_streak) + 1
+                        if chosen_tool:
+                            agentic_low_signal_tool_counts[chosen_tool] = (
+                                int(agentic_low_signal_tool_counts.get(chosen_tool, 0)) + 1
+                            )
 
                     trace_item["outcome"] = {
                         "status": status,
@@ -1788,6 +1944,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "low_signal_streak_after": int(low_signal_streak),
                         "tool_usage_count": int(agentic_tool_counts.get(chosen_tool, 0)),
                         "target_usage_count": int(agentic_target_counts.get(chosen_target, 0)),
+                        "tool_target_usage_count": int(agentic_action_counts.get(action_repeat_key, 0))
+                        if action_repeat_key
+                        else 0,
+                        "tool_low_signal_count": int(agentic_low_signal_tool_counts.get(chosen_tool, 0)),
                     }
                     trace_item["critique"] = {
                         "signal": signal,

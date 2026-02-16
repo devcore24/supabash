@@ -3,6 +3,7 @@ import ipaddress
 import os
 import hashlib
 import platform
+import socket
 import re
 import subprocess
 import sys
@@ -338,6 +339,128 @@ class AuditOrchestrator:
         if "/" in host or ":" in host:
             return "Not a domain target"
         return "Not a domain target"
+
+    def _domain_scope_suffixes(self, scan_host: str) -> List[str]:
+        """
+        Build acceptable domain suffixes for subdomain expansion.
+        Includes the explicit scan host and a conservative apex suffix.
+        """
+        host = str(scan_host or "").strip().lower().strip(".")
+        if not host or self._is_ip_literal(host) or "/" in host or ":" in host:
+            return []
+        labels = [x for x in host.split(".") if x]
+        suffixes: List[str] = [host]
+        if len(labels) >= 2:
+            apex2 = ".".join(labels[-2:])
+            if apex2 not in suffixes:
+                suffixes.append(apex2)
+        if len(labels) >= 3 and labels[-2] in {"co", "com", "org", "net", "gov", "ac", "edu"} and len(labels[-1]) == 2:
+            apex3 = ".".join(labels[-3:])
+            if apex3 not in suffixes:
+                suffixes.append(apex3)
+        return suffixes
+
+    def _host_matches_scope(self, host: str, suffixes: Sequence[str]) -> bool:
+        value = str(host or "").strip().lower().strip(".")
+        if not value:
+            return False
+        for suffix in suffixes or []:
+            s = str(suffix or "").strip().lower().strip(".")
+            if not s:
+                continue
+            if value == s or value.endswith(f".{s}"):
+                return True
+        return False
+
+    def _resolve_host_ips(self, host: str, max_ips: int = 4) -> List[str]:
+        try:
+            infos = socket.getaddrinfo(str(host or "").strip(), None, type=socket.SOCK_STREAM)
+        except Exception:
+            return []
+        ips: List[str] = []
+        seen = set()
+        for item in infos or []:
+            try:
+                sockaddr = item[4] if isinstance(item, tuple) and len(item) >= 5 else None
+                ip = str(sockaddr[0]).strip() if isinstance(sockaddr, tuple) and sockaddr else ""
+            except Exception:
+                ip = ""
+            if not ip or ip in seen:
+                continue
+            seen.add(ip)
+            ips.append(ip)
+            if len(ips) >= max(1, int(max_ips)):
+                break
+        return ips
+
+    def _promote_subfinder_hosts(self, scan_host: str, hosts: Sequence[Any]) -> Dict[str, Any]:
+        """
+        Validate and bound subfinder output before promoting into HTTP probing.
+        """
+        cfg = self._tool_config("subfinder")
+        try:
+            max_candidates = int(cfg.get("max_candidates", 200))
+        except Exception:
+            max_candidates = 200
+        try:
+            max_promoted = int(cfg.get("max_promoted_hosts", 40))
+        except Exception:
+            max_promoted = 40
+        max_candidates = max(1, min(max_candidates, 2000))
+        max_promoted = max(1, min(max_promoted, 500))
+        resolve_validation = cfg.get("resolve_validation")
+        resolve_validation = True if resolve_validation is None else bool(resolve_validation)
+
+        normalized_hosts: List[str] = []
+        seen = set()
+        for raw in hosts or []:
+            value = str(raw or "").strip().lower().strip(".")
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            normalized_hosts.append(value)
+            if len(normalized_hosts) >= max_candidates:
+                break
+
+        suffixes = self._domain_scope_suffixes(scan_host)
+        in_scope_hosts = [h for h in normalized_hosts if self._host_matches_scope(h, suffixes)] if suffixes else list(normalized_hosts)
+
+        resolved_map: Dict[str, List[str]] = {}
+        if resolve_validation and in_scope_hosts:
+            workers = max(2, min(16, len(in_scope_hosts)))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(self._resolve_host_ips, h): h for h in in_scope_hosts}
+                for fut, host in futures.items():
+                    try:
+                        ips = fut.result()
+                    except Exception:
+                        ips = []
+                    if isinstance(ips, list) and ips:
+                        resolved_map[host] = [str(x) for x in ips if str(x).strip()]
+
+        if resolve_validation:
+            promoted_hosts = [h for h in in_scope_hosts if h in resolved_map][:max_promoted]
+        else:
+            promoted_hosts = in_scope_hosts[:max_promoted]
+
+        urls: List[str] = []
+        for host in promoted_hosts:
+            urls.append(f"http://{host}")
+            urls.append(f"https://{host}")
+
+        return {
+            "urls": urls,
+            "hosts": promoted_hosts,
+            "resolved": resolved_map,
+            "stats": {
+                "discovered": len(normalized_hosts),
+                "in_scope": len(in_scope_hosts),
+                "resolved": len(resolved_map),
+                "promoted_hosts": len(promoted_hosts),
+                "promoted_urls": len(urls),
+                "resolve_validation": bool(resolve_validation),
+            },
+        }
 
     def _tool_config(self, tool: str) -> Dict[str, Any]:
         """
@@ -3729,7 +3852,24 @@ class AuditOrchestrator:
 
                 # Optional domain expansion (does not block web tooling already started)
                 if self._tool_enabled("subfinder", default=False) and self._has_scanner("subfinder") and self._should_run_dnsenum(scan_host):
-                    agg["results"].append(run_subfinder(scan_host))
+                    subfinder_entry = run_subfinder(scan_host)
+                    agg["results"].append(subfinder_entry)
+                    if subfinder_entry.get("success") and not lock_web_targets:
+                        hosts = subfinder_entry.get("data", {}).get("hosts", [])
+                        promoted = self._promote_subfinder_hosts(scan_host, hosts if isinstance(hosts, list) else [])
+                        for u in promoted.get("urls", []):
+                            if isinstance(u, str) and u.strip() and u not in web_targets:
+                                web_targets.append(u)
+                        agg["web_targets"] = web_targets
+                        stats = promoted.get("stats", {}) if isinstance(promoted.get("stats"), dict) else {}
+                        if stats:
+                            agg.setdefault("summary_notes", []).append(
+                                (
+                                    "Subdomain expansion: discovered "
+                                    f"{int(stats.get('discovered', 0))}, in-scope {int(stats.get('in_scope', 0))}, "
+                                    f"resolved {int(stats.get('resolved', 0))}, promoted {int(stats.get('promoted_hosts', 0))} host(s)."
+                                )
+                            )
 
                 if self._should_run_dnsenum(scan_host):
                     if self._has_scanner("dnsenum"):
@@ -3886,10 +4026,19 @@ class AuditOrchestrator:
                     if subfinder_entry.get("success"):
                         hosts = subfinder_entry.get("data", {}).get("hosts", [])
                         if isinstance(hosts, list) and hosts:
-                            # Bound the candidate explosion to keep httpx reasonable.
-                            for h in [str(x).strip() for x in hosts[:50] if str(x).strip()]:
-                                web_targets.append(f"http://{h}")
-                                web_targets.append(f"https://{h}")
+                            promoted = self._promote_subfinder_hosts(scan_host, hosts)
+                            for u in promoted.get("urls", []):
+                                if isinstance(u, str) and u.strip() and u not in web_targets:
+                                    web_targets.append(u)
+                            stats = promoted.get("stats", {}) if isinstance(promoted.get("stats"), dict) else {}
+                            if stats:
+                                agg.setdefault("summary_notes", []).append(
+                                    (
+                                        "Subdomain expansion: discovered "
+                                        f"{int(stats.get('discovered', 0))}, in-scope {int(stats.get('in_scope', 0))}, "
+                                        f"resolved {int(stats.get('resolved', 0))}, promoted {int(stats.get('promoted_hosts', 0))} host(s)."
+                                    )
+                                )
 
                 # Always include nmap-derived web targets too.
                 if not lock_web_targets:

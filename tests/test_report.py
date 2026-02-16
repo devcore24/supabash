@@ -330,6 +330,36 @@ class TestReport(unittest.TestCase):
         self.assertIn("- **CRITICAL** Supabase service role key exposed", md)
         self.assertIn("| CRITICAL | 1 |", md)
 
+    def test_recommended_next_actions_include_explicit_critical_recommendation(self):
+        report = {
+            "target": "localhost",
+            "summary": {
+                "summary": "Critical key exposure observed.",
+                "findings": [
+                    {
+                        "severity": "CRITICAL",
+                        "title": "Supabase service role key exposed",
+                        "evidence": "key detected in HTTP response",
+                        "recommendation": "Immediately rotate the exposed service role key and remove it from client-accessible responses.",
+                    }
+                ],
+            },
+            "findings": [
+                {
+                    "severity": "CRITICAL",
+                    "title": "Supabase service role key exposed (supabase_audit)",
+                    "tool": "supabase_audit",
+                    "evidence": "key=eyJ... detected in source=http://localhost:4001",
+                    "recommendation": "Immediately rotate the exposed service role key and remove it from client-accessible responses.",
+                }
+            ],
+            "results": [],
+        }
+        md = generate_markdown(report)
+        self.assertIn("## Recommended Next Actions", md)
+        self.assertIn("Immediately rotate the exposed service role key", md)
+        self.assertIn("After remediation, rerun the readiness assessment", md)
+
     def test_compliance_coverage_matrix_includes_skip_and_failure_reasons(self):
         report = {
             "target": "localhost",
