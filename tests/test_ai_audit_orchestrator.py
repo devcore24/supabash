@@ -426,6 +426,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             self.assertEqual(first.get("planner", {}).get("candidate_count"), 2)
             self.assertEqual(first.get("selected_action", {}).get("tool"), "whatweb")
             self.assertEqual(first.get("outcome", {}).get("status"), "success")
+            self.assertIn("risk_class_delta", first.get("outcome", {}))
 
         replay = report.get("replay_trace", {})
         self.assertIsInstance(replay, dict)
@@ -456,6 +457,8 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             self.assertTrue((Path(output).parent / trace_json).exists())
         if isinstance(trace_md, str):
             self.assertTrue((Path(output).parent / trace_md).exists())
+        self.assertIn("finding_metrics", report)
+        self.assertIn("duplicate_rate", report.get("finding_metrics", {}))
 
     def test_action_normalization_clamps_priority_and_defaults_optional_fields(self):
         orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=FakeLLMNormalization())

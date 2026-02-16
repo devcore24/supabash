@@ -1386,6 +1386,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 agentic_target_counts: Dict[str, int] = {}
                 agentic_action_counts: Dict[Tuple[str, str], int] = {}
                 agentic_low_signal_tool_counts: Dict[str, int] = {}
+                agentic_tool_risk_gain_counts: Dict[str, int] = {}
+                agentic_tool_no_risk_gain_counts: Dict[str, int] = {}
 
                 def _baseline_would_skip(action: Dict[str, Any]) -> bool:
                     tool = action.get("tool")
@@ -1481,6 +1483,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     except Exception:
                         return 0
 
+                def _risk_classes_now() -> Set[str]:
+                    try:
+                        items = self._collect_findings(agg)
+                        if isinstance(items, list):
+                            return self._risk_classes_from_findings(items)
+                    except Exception:
+                        pass
+                    return set()
+
                 def _candidate_sort_key(action: Dict[str, Any]) -> Tuple[int, int, str, str]:
                     skip_penalty = 1 if _baseline_would_skip(action) else 0
                     priority = clamp_int(action.get("priority"), default=50, minimum=1, maximum=100)
@@ -1504,6 +1515,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         score += 2
                     if tool and tool not in agentic_tool_counts:
                         score += 1
+                    if tool and int(agentic_tool_risk_gain_counts.get(tool, 0)) > 0:
+                        score += 1
+                    if tool and int(agentic_tool_no_risk_gain_counts.get(tool, 0)) >= 2:
+                        score -= 2
                     if target and agentic_target_counts.get(target, 0) >= 2:
                         score -= 1
                     if tool and agentic_tool_counts.get(tool, 0) >= 3:
@@ -1807,6 +1822,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     note("llm_decision", action.get("tool", "planner"), " | ".join(decision_parts), agg=agg)
 
                     pre_findings_count = _findings_count_now()
+                    pre_risk_classes = _risk_classes_now()
                     pre_web_target_count = len(set(allowed_web_targets))
 
                     note("tool_start", action["tool"], f"Running {action['tool']} (agentic)", agg=agg)
@@ -1894,13 +1910,19 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             agg["web_targets"] = web_targets
 
                     post_findings_count = _findings_count_now()
+                    post_risk_classes = _risk_classes_now()
+                    new_risk_classes = sorted(post_risk_classes - pre_risk_classes)
+                    risk_class_delta = len(new_risk_classes)
                     post_web_target_count = len(set(allowed_web_targets))
                     findings_delta = max(0, post_findings_count - pre_findings_count)
                     web_target_delta = max(0, post_web_target_count - pre_web_target_count)
                     status = "skipped" if entry.get("skipped") else ("success" if entry.get("success") else "failed")
-                    if status == "success" and (findings_delta > 0 or web_target_delta > 0 or extra_added > 0):
+                    if status == "success" and (risk_class_delta > 0 or web_target_delta > 0 or extra_added > 0):
                         signal = "high"
-                        signal_note = "Action produced new evidence or expanded target coverage."
+                        signal_note = "Action produced new risk-class evidence or expanded target coverage."
+                    elif status == "success" and findings_delta > 0:
+                        signal = "medium"
+                        signal_note = "Action added findings, but no net-new risk class."
                     elif status == "success":
                         signal = "medium"
                         signal_note = "Action succeeded but added limited net-new signal."
@@ -1921,7 +1943,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         agentic_target_counts[chosen_target] = int(agentic_target_counts.get(chosen_target, 0)) + 1
                     if action_repeat_key:
                         agentic_action_counts[action_repeat_key] = int(agentic_action_counts.get(action_repeat_key, 0)) + 1
-                    if findings_delta > 0 or web_target_delta > 0 or extra_added > 0:
+                    if risk_class_delta > 0 and chosen_tool:
+                        agentic_tool_risk_gain_counts[chosen_tool] = (
+                            int(agentic_tool_risk_gain_counts.get(chosen_tool, 0)) + 1
+                        )
+                        agentic_tool_no_risk_gain_counts[chosen_tool] = 0
+                    elif chosen_tool:
+                        agentic_tool_no_risk_gain_counts[chosen_tool] = (
+                            int(agentic_tool_no_risk_gain_counts.get(chosen_tool, 0)) + 1
+                        )
+                    if risk_class_delta > 0 or web_target_delta > 0 or extra_added > 0:
                         low_signal_streak = 0
                     else:
                         low_signal_streak = int(low_signal_streak) + 1
@@ -1938,6 +1969,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "findings_count_before": int(pre_findings_count),
                         "findings_count_after": int(post_findings_count),
                         "findings_count_delta": int(findings_delta),
+                        "risk_class_count_before": int(len(pre_risk_classes)),
+                        "risk_class_count_after": int(len(post_risk_classes)),
+                        "risk_class_delta": int(risk_class_delta),
+                        "new_risk_classes": new_risk_classes[:12],
                         "web_target_count_before": int(pre_web_target_count),
                         "web_target_count_after": int(post_web_target_count),
                         "web_target_count_delta": int(web_target_delta),
@@ -1958,7 +1993,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         action.get("tool", "planner"),
                         (
                             f"signal={signal}; status={status}; findings_delta={int(findings_delta)}; "
-                            f"web_targets_delta={int(web_target_delta)}; extra_results={int(extra_added)}"
+                            f"risk_classes_delta={int(risk_class_delta)}; web_targets_delta={int(web_target_delta)}; "
+                            f"extra_results={int(extra_added)}"
                         ),
                         agg=agg,
                     )
@@ -2038,6 +2074,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
+        try:
+            agg["finding_metrics"] = self._build_finding_metrics(findings if isinstance(findings, list) else [])
+        except Exception:
+            pass
         try:
             summary_findings = []
             summary = agg.get("summary")

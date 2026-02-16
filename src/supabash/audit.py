@@ -2,6 +2,7 @@ import json
 import ipaddress
 import os
 import hashlib
+from collections import Counter
 import platform
 import socket
 import re
@@ -1333,6 +1334,163 @@ class AuditOrchestrator:
                 self._append_llm_call(agg, meta)
         return findings
 
+    def _normalize_finding_text(self, value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if not text:
+            return ""
+        # Normalize dynamic fragments to keep dedup keys stable across runs.
+        text = re.sub(r"\b[0-9a-f]{24,}\b", "<hex>", text)
+        text = re.sub(r"\b\d{8,}\b", "<num>", text)
+        text = re.sub(r"\s+", " ", text)
+        return text
+
+    def _extract_finding_host_path(self, finding: Dict[str, Any]) -> Tuple[str, str]:
+        text = " ".join(
+            [
+                str(finding.get("title") or "").strip(),
+                str(finding.get("evidence") or "").strip(),
+            ]
+        ).strip()
+        if not text:
+            return "", ""
+
+        url_match = re.search(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE)
+        if url_match:
+            candidate = str(url_match.group(0)).strip().rstrip(".,;")
+            try:
+                parsed = urlparse(candidate)
+                host = str(parsed.hostname or "").strip().lower()
+                path = str(parsed.path or "/").strip()
+                if parsed.query:
+                    path = f"{path}?{parsed.query}"
+                return host, path
+            except Exception:
+                pass
+
+        host_match = re.search(r"\bhost=([a-z0-9._:-]+)\b", text, flags=re.IGNORECASE)
+        host = str(host_match.group(1)).strip().lower() if host_match else ""
+        path_match = re.search(r"\bpath=(/[^\s,;)]*)", text, flags=re.IGNORECASE)
+        if path_match:
+            return host, str(path_match.group(1)).strip()
+
+        endpoint_match = re.search(r"\s(/[a-z0-9._~!$&'()*+,;=:@%/-]{2,})", text, flags=re.IGNORECASE)
+        if endpoint_match:
+            return host, str(endpoint_match.group(1)).strip()
+        return host, ""
+
+    def _classify_finding_risk_class(self, finding: Dict[str, Any]) -> str:
+        tool = str(finding.get("tool") or "").strip().lower()
+        title = self._normalize_finding_text(finding.get("title"))
+        evidence = self._normalize_finding_text(finding.get("evidence"))
+        kind = self._normalize_finding_text(finding.get("type"))
+        joined = " ".join(x for x in (title, evidence, kind) if x)
+
+        if any(k in joined for k in ("service role key", "secret", "token", "password", "credential", "api key")):
+            return "secret_exposure"
+        if any(k in joined for k in ("sql injection", "xss", "rce", "cve", "vulnerability", "auth bypass")):
+            return "known_vulnerability"
+        if any(k in joined for k in ("tls", "ssl", "cipher", "certificate", "cleartext", "https")):
+            return "transport_security"
+        if any(k in joined for k in ("without authentication", "unauthenticated", "publicly accessible", "exposed", "open port")):
+            return "unauthenticated_exposure"
+        if any(k in joined for k in ("redis", "postgres", "database", "rest api", "rpc", "rls")):
+            return "data_plane_exposure"
+        if any(k in joined for k in ("missing security headers", "misconfig", "configuration", "default")):
+            return "security_misconfiguration"
+
+        if tool in ("sqlmap", "nuclei", "trivy", "wpscan"):
+            return "vulnerability_signal"
+        if tool in ("hydra", "medusa", "crackmapexec"):
+            return "credential_access"
+        if tool in ("sslscan",):
+            return "transport_security"
+        if tool in ("nmap", "httpx", "whatweb", "subfinder", "katana", "gobuster", "ffuf"):
+            return "surface_discovery"
+        if tool in ("dnsenum", "theharvester", "netdiscover"):
+            return "asset_discovery"
+        return "general_security_signal"
+
+    def _finding_dedup_key(self, finding: Dict[str, Any]) -> str:
+        tool = self._normalize_finding_text(finding.get("tool")) or "-"
+        severity = str(finding.get("severity") or "INFO").strip().upper() or "INFO"
+        template = self._normalize_finding_text(finding.get("type"))
+        if not template:
+            template = self._normalize_finding_text(finding.get("title"))
+        host, path = self._extract_finding_host_path(finding)
+        evidence_norm = self._normalize_finding_text(finding.get("evidence"))
+        evidence_hash = hashlib.sha256(evidence_norm.encode("utf-8")).hexdigest()[:16] if evidence_norm else "0" * 16
+        return "|".join(
+            [
+                tool,
+                template or "-",
+                host or "-",
+                path or "-",
+                severity,
+                evidence_hash,
+            ]
+        )
+
+    def _annotate_finding_keys(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for finding in findings or []:
+            if not isinstance(finding, dict):
+                continue
+            finding["dedup_key"] = self._finding_dedup_key(finding)
+            finding["risk_class"] = self._classify_finding_risk_class(finding)
+        return findings
+
+    def _risk_classes_from_findings(self, findings: List[Dict[str, Any]]) -> set[str]:
+        classes: set[str] = set()
+        for finding in findings or []:
+            if not isinstance(finding, dict):
+                continue
+            value = str(finding.get("risk_class") or "").strip().lower()
+            if value:
+                classes.add(value)
+        return classes
+
+    def _build_finding_metrics(self, findings: List[Dict[str, Any]]) -> Dict[str, Any]:
+        items = [f for f in (findings or []) if isinstance(f, dict)]
+        total = len(items)
+        if total <= 0:
+            return {
+                "total_findings": 0,
+                "unique_findings": 0,
+                "duplicate_findings": 0,
+                "duplicate_groups": 0,
+                "duplicate_rate": 0.0,
+                "critical_high_total": 0,
+                "critical_high_unique": 0,
+                "risk_class_count": 0,
+            }
+
+        keys = [str(f.get("dedup_key") or self._finding_dedup_key(f)) for f in items]
+        counts = Counter(keys)
+        duplicate_findings = sum(max(0, count - 1) for count in counts.values())
+        duplicate_groups = sum(1 for count in counts.values() if count > 1)
+        unique_findings = len(counts)
+
+        critical_high_total = 0
+        critical_high_keys: set[str] = set()
+        for f in items:
+            sev = str(f.get("severity") or "INFO").strip().upper()
+            if sev in ("CRITICAL", "HIGH"):
+                critical_high_total += 1
+                critical_high_keys.add(str(f.get("dedup_key") or self._finding_dedup_key(f)))
+
+        risk_classes = self._risk_classes_from_findings(items)
+        duplicate_rate = float(duplicate_findings) / float(total) if total else 0.0
+        return {
+            "total_findings": int(total),
+            "unique_findings": int(unique_findings),
+            "duplicate_findings": int(duplicate_findings),
+            "duplicate_groups": int(duplicate_groups),
+            "duplicate_rate": round(duplicate_rate, 4),
+            "critical_high_total": int(critical_high_total),
+            "critical_high_unique": int(len(critical_high_keys)),
+            "risk_class_count": int(len(risk_classes)),
+            "risk_classes": sorted(risk_classes),
+        }
+
     def _collect_findings(self, agg: Dict[str, Any]) -> List[Dict[str, Any]]:
         findings: List[Dict[str, Any]] = []
 
@@ -1905,7 +2063,7 @@ class AuditOrchestrator:
                                 "tool": "supabase_audit",
                             }
                         )
-        return findings
+        return self._annotate_finding_keys(findings)
 
     def _apply_compliance_tags(
         self,
@@ -4392,6 +4550,10 @@ class AuditOrchestrator:
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
+        try:
+            agg["finding_metrics"] = self._build_finding_metrics(findings if isinstance(findings, list) else [])
+        except Exception:
+            pass
         try:
             summary_findings = []
             summary = agg.get("summary")

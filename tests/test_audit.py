@@ -88,6 +88,8 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertIn("trivy", tool_names)
         self.assertIn("findings", data)
         self.assertGreaterEqual(len(data["findings"]), 1)
+        self.assertIn("finding_metrics", data)
+        self.assertIn("duplicate_rate", data.get("finding_metrics", {}))
         cleanup_artifact(output)
 
     def test_web_targets_include_http_service_on_nonstandard_port(self):
@@ -205,6 +207,8 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertEqual(len(findings), 2)
         self.assertEqual(findings[0]["tool"], "readiness_probe")
         self.assertEqual(findings[0]["severity"], "MEDIUM")
+        self.assertIn("dedup_key", findings[0])
+        self.assertIn("risk_class", findings[0])
 
     def test_handles_failure(self):
         scanners = {

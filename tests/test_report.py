@@ -42,6 +42,31 @@ class TestReport(unittest.TestCase):
         self.assertIn("Commands Executed", md)
         self.assertIn("nmap example.com", md)
 
+    def test_generate_markdown_includes_finding_quality_metrics(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "findings": [
+                {"severity": "INFO", "title": "Open port 8080/tcp", "evidence": "http-proxy", "tool": "nmap"},
+                {"severity": "INFO", "title": "Open port 8080/tcp", "evidence": "http-proxy", "tool": "nmap"},
+            ],
+            "finding_metrics": {
+                "total_findings": 2,
+                "unique_findings": 1,
+                "duplicate_findings": 1,
+                "duplicate_groups": 1,
+                "duplicate_rate": 0.5,
+                "critical_high_total": 0,
+                "critical_high_unique": 0,
+                "risk_class_count": 1,
+                "risk_classes": ["surface_discovery"],
+            },
+        }
+        md = generate_markdown(report)
+        self.assertIn("## Finding Quality Metrics", md)
+        self.assertIn("duplicate_rate: 0.5", md)
+        self.assertIn("risk_classes: surface_discovery", md)
+
     def test_summary_findings_are_correlated_and_evidence_merged(self):
         report = {
             "target": "localhost",

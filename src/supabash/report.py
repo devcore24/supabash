@@ -590,6 +590,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("LLM Reasoning Trace", "#llm-reasoning-trace") if isinstance(report.get("llm_reasoning_trace"), dict) else None,
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Findings Overview", "#findings-overview"),
+        ("Finding Quality Metrics", "#finding-quality-metrics") if isinstance(report.get("finding_metrics"), dict) else None,
         ("Findings (Detailed)", "#findings-detailed") if has_findings else None,
         ("Recommended Next Actions", "#recommended-next-actions") if has_findings else None,
         ("Tools Run", "#tools-run"),
@@ -1312,6 +1313,31 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     lines.append("|---|---:|")
     for sev in sev_order:
         lines.append(f"| {sev} | {tool_counts[sev]} |")
+
+    finding_metrics = report.get("finding_metrics")
+    if isinstance(finding_metrics, dict):
+        total = int(finding_metrics.get("total_findings", 0) or 0)
+        unique = int(finding_metrics.get("unique_findings", 0) or 0)
+        dup = int(finding_metrics.get("duplicate_findings", 0) or 0)
+        dup_groups = int(finding_metrics.get("duplicate_groups", 0) or 0)
+        dup_rate = finding_metrics.get("duplicate_rate", 0.0)
+        ch_total = int(finding_metrics.get("critical_high_total", 0) or 0)
+        ch_unique = int(finding_metrics.get("critical_high_unique", 0) or 0)
+        risk_count = int(finding_metrics.get("risk_class_count", 0) or 0)
+        lines.append("\n## Finding Quality Metrics")
+        lines.append(f"- total_findings: {total}")
+        lines.append(f"- unique_findings: {unique}")
+        lines.append(f"- duplicate_findings: {dup}")
+        lines.append(f"- duplicate_groups: {dup_groups}")
+        lines.append(f"- duplicate_rate: {dup_rate}")
+        lines.append(f"- critical_high_total: {ch_total}")
+        lines.append(f"- critical_high_unique: {ch_unique}")
+        lines.append(f"- risk_class_count: {risk_count}")
+        risk_classes = finding_metrics.get("risk_classes")
+        if isinstance(risk_classes, list) and risk_classes:
+            names = ", ".join(str(x).strip() for x in risk_classes if str(x).strip())
+            if names:
+                lines.append(f"- risk_classes: {names}")
 
     if llm_counts:
         promotions = []
