@@ -1587,7 +1587,7 @@ def chat():
 
             default_base = "ai-audit" if agentic and not output else "report"
             if agentic and not output and compliance:
-                compliance_slug = _compliance_slug_token(compliance)
+                compliance_slug = _compliance_slug(compliance)
                 if compliance_slug:
                     default_base = f"ai-audit-{compliance_slug}"
             out_path, md_path = build_report_paths(output, markdown, default_basename=default_base)
