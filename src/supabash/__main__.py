@@ -73,7 +73,7 @@ BANNER = r"""
 
 def print_banner():
     text = Text(BANNER, style="bold cyan")
-    panel = Panel(text, border_style="bold blue", title="v0.1.0-beta", subtitle="AI Security Agent")
+    panel = Panel(text, border_style="bold blue", title="v0.1.0-beta", subtitle="AGENTIC SECURITY AUDIT")
     console.print(panel)
 
 def _report_formats_note(config: Optional[dict]) -> str:
@@ -1247,7 +1247,7 @@ def chat():
                 console.print("[dim]Use /status (or /status --watch) for live progress, or /stop to cancel.[/dim]")
                 last_job_hint.update({"job_id": job_id, "state": state, "step": step})
 
-        user_input = typer.prompt("chat> ")
+        user_input = typer.prompt("🐭 chat> ")
         if not user_input.strip():
             continue
         if user_input.strip().lower() in ("exit", "quit"):
@@ -1802,7 +1802,7 @@ def chat():
             for s in safety[:6]:
                 lines.append(f"- {s}")
         if notes:
-            lines.append(f"\n[dim]{notes}[/dim]")
+            lines.append(f"\n[green]{notes}[/green]")
 
         if not lines:
             console.print(
@@ -1839,10 +1839,37 @@ def chat():
             meta = getattr(session, "last_llm_meta", None) or {}
             show_llm_usage(meta if isinstance(meta, dict) else {})
 
-            # Propose the first suggested command and require explicit confirmation.
+            # Propose the best actionable suggested command and require explicit confirmation.
             try:
                 if suggested:
-                    proposal = str(suggested[0]).strip()
+                    priority = {
+                        "/ai-audit": 1,
+                        "/audit": 2,
+                        "/scan": 3,
+                        "/status": 4,
+                        "/details": 5,
+                        "/summary": 6,
+                        "/report": 7,
+                        "/plan": 8,
+                        "/test": 9,
+                        "/fix": 10,
+                        "/stop": 11,
+                        "/clear-state": 12,
+                    }
+                    ranked = []
+                    for idx, item in enumerate(suggested):
+                        text = str(item).strip()
+                        if not text.startswith("/"):
+                            continue
+                        head = text.split(" ", 1)[0].strip().lower()
+                        rank = int(priority.get(head, 99))
+                        ranked.append((rank, idx, text))
+                    proposal = ""
+                    if ranked:
+                        ranked.sort(key=lambda x: (x[0], x[1], x[2]))
+                        proposal = ranked[0][2]
+                    elif suggested:
+                        proposal = str(suggested[0]).strip()
                     if proposal:
                         session.pending_action = {"command": proposal, "ts": datetime.now().isoformat(timespec="seconds")}
                         console.print(f"[cyan]Proposed:[/cyan] {proposal}  [dim](run? y/N)[/dim]")

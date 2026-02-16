@@ -1177,6 +1177,30 @@ class ChatSession:
             if not target:
                 return None
 
+            # Normalize known mode aliases to supported audit modes.
+            if cmd in ("/audit", "/ai-audit"):
+                mode_alias = {
+                    "light": "stealth",
+                    "low": "stealth",
+                    "safe": "stealth",
+                    "standard": "normal",
+                }
+                normalized_options: List[str] = []
+                j = 0
+                while j < len(options):
+                    tok = str(options[j]).strip()
+                    if tok == "--mode" and j + 1 < len(options):
+                        raw_mode = str(options[j + 1]).strip().lower()
+                        mapped_mode = mode_alias.get(raw_mode, raw_mode)
+                        if mapped_mode in ("normal", "stealth", "aggressive"):
+                            normalized_options.extend(["--mode", mapped_mode])
+                        # Unsupported mode values are dropped.
+                        j += 2
+                        continue
+                    normalized_options.append(tok)
+                    j += 1
+                options = normalized_options
+
             # `/ai-audit` implies agentic; no need to keep explicit --agentic.
             if cmd == "/ai-audit":
                 options = [opt for opt in options if opt != "--agentic"]

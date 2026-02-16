@@ -55,6 +55,26 @@ class TestChatClarifier(unittest.TestCase):
         self.assertIn("/summary", suggested)
         self.assertTrue(all("--yes" not in x for x in suggested))
 
+    def test_clarify_goal_normalizes_light_mode_to_supported_audit_mode(self):
+        fake_llm = MagicMock()
+        fake_llm.chat_with_meta.return_value = (
+            json.dumps(
+                {
+                    "questions": ["q1"],
+                    "suggested_commands": [
+                        "/audit localhost --mode light",
+                    ],
+                    "notes": "n",
+                    "safety": ["s"],
+                }
+            ),
+            {"usage": {"total_tokens": 7}, "cost_usd": 0.0},
+        )
+        session = ChatSession(scanners={}, llm=fake_llm)
+        res = session.clarify_goal("run normal audit")
+        suggested = [str(x) for x in (res.get("suggested_commands") or [])]
+        self.assertIn("/audit localhost --mode stealth", suggested)
+
     def test_clarify_goal_fallback_on_bad_json(self):
         fake_llm = MagicMock()
         fake_llm.chat_with_meta.return_value = ("not json", {"usage": {}})
