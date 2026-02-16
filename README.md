@@ -1,6 +1,6 @@
 
 # Supabash
-<img src="docs/images/supabash_mouse_small_180x205.JPG" alt="Supabash mascot" width="180" align="left" />
+<img src="docs/images/supabash_mouse_mascot_transparentbg_200x227.png" alt="Supabash mascot" width="180" align="left" />
 
 ```text
 
