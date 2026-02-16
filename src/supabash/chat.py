@@ -2,6 +2,7 @@ import json
 import shlex
 import subprocess
 import sys
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -870,6 +871,7 @@ class ChatSession:
                 "notes": "LLM is disabled (offline mode). Use slash commands to run tools.",
                 "safety": ["Confirm authorization and keep targets within core.allowed_hosts."],
             }
+            fallback = self._normalize_clarifier_output(fallback)
             self.last_clarifier = fallback
             return fallback
 
@@ -952,6 +954,7 @@ class ChatSession:
 
             if not isinstance(parsed, dict):
                 raise ValueError("clarifier output not a dict")
+            parsed = self._normalize_clarifier_output(parsed)
             self.last_clarifier = parsed
             return parsed
         except Exception as e:
@@ -973,6 +976,212 @@ class ChatSession:
                 "notes": "Freeform planning is available, but tools run only via explicit commands.",
                 "safety": ["Confirm authorization and keep targets within core.allowed_hosts."],
             }
+            fallback = self._normalize_clarifier_output(fallback)
             self.last_clarifier = fallback
             self.last_llm_meta = None
             return fallback
+
+    def _normalize_clarifier_output(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        out = dict(payload or {})
+        questions = out.get("questions")
+        out["questions"] = [str(q).strip() for q in (questions or []) if str(q).strip()] if isinstance(questions, list) else []
+        safety = out.get("safety")
+        out["safety"] = [str(s).strip() for s in (safety or []) if str(s).strip()] if isinstance(safety, list) else []
+        notes = out.get("notes")
+        out["notes"] = str(notes).strip() if isinstance(notes, str) else ""
+
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for raw in (out.get("suggested_commands") or []):
+            cmd = self._normalize_suggested_command(raw)
+            if not cmd or cmd in seen:
+                continue
+            seen.add(cmd)
+            normalized.append(cmd)
+        out["suggested_commands"] = normalized[:10]
+        return out
+
+    def _normalize_suggested_command(self, raw: Any) -> Optional[str]:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        # Convert shell form to chat slash form when possible.
+        if text.lower().startswith("supabash "):
+            try:
+                parts = shlex.split(text)
+            except Exception:
+                return None
+            if len(parts) < 2:
+                return None
+            cmd = str(parts[1]).strip().lower()
+            rest = parts[2:]
+            if cmd in ("audit", "ai-audit", "scan", "status", "stop", "details", "report", "test", "summary", "fix", "plan", "clear-state"):
+                text = f"/{cmd}" + (f" {' '.join(rest)}" if rest else "")
+            else:
+                return None
+
+        if not text.startswith("/"):
+            return None
+
+        try:
+            parts = shlex.split(text)
+        except Exception:
+            return None
+        if not parts:
+            return None
+        cmd = str(parts[0]).strip().lower()
+        aliases = {
+            "/ai_audit": "/ai-audit",
+            "/clearstate": "/clear-state",
+        }
+        cmd = aliases.get(cmd, cmd)
+        args = parts[1:]
+
+        # Utility: drop unsupported confirmation flags from chat suggestions.
+        filtered_args = [a for a in args if str(a).strip().lower() not in ("--yes", "-y", "yes")]
+        args = filtered_args
+
+        if cmd in ("/summary", "/plan", "/test", "/stop", "/clear-state"):
+            return cmd
+
+        if cmd == "/status":
+            out = [cmd]
+            i = 0
+            while i < len(args):
+                token = str(args[i]).strip()
+                if token in ("--watch", "--verbose"):
+                    out.append(token)
+                    i += 1
+                    continue
+                if token == "--interval" and i + 1 < len(args):
+                    val = str(args[i + 1]).strip()
+                    if re.fullmatch(r"\d+(\.\d+)?", val):
+                        out.extend(["--interval", val])
+                    i += 2
+                    continue
+                i += 1
+            return " ".join(out)
+
+        if cmd == "/details":
+            # Chat parser supports optional plain tool arg only.
+            for token in args:
+                tok = str(token).strip()
+                if not tok or "=" in tok or tok.startswith("-"):
+                    continue
+                return f"{cmd} {tok}"
+            return cmd
+
+        if cmd == "/report":
+            # Chat parser supports optional path only.
+            for token in args:
+                tok = str(token).strip()
+                if not tok or "=" in tok or tok.startswith("-"):
+                    continue
+                return f"{cmd} {tok}"
+            return cmd
+
+        if cmd == "/fix":
+            # Supported form: /fix <title> [evidence]
+            clean = [str(a).strip() for a in args if str(a).strip()]
+            clean = [a for a in clean if "=" not in a]
+            if not clean:
+                return None
+            if len(clean) == 1:
+                return f'/fix "{clean[0]}"'
+            return f'/fix "{clean[0]}" "{clean[1]}"'
+
+        if cmd in ("/scan", "/audit", "/ai-audit"):
+            target: Optional[str] = None
+            options: List[str] = []
+            i = 0
+            while i < len(args):
+                token = str(args[i]).strip()
+                low = token.lower()
+                # key=value compatibility
+                if "=" in token and not token.startswith("--"):
+                    key, value = token.split("=", 1)
+                    key = str(key or "").strip().lower()
+                    value = str(value or "").strip()
+                    if not value:
+                        i += 1
+                        continue
+                    if key in ("target", "host", "url"):
+                        if target is None:
+                            target = value
+                        i += 1
+                        continue
+                    if cmd in ("/audit", "/ai-audit"):
+                        if key in ("compliance", "profile", "standard"):
+                            options.extend(["--compliance", value])
+                            i += 1
+                            continue
+                        if key == "mode":
+                            options.extend(["--mode", value])
+                            i += 1
+                            continue
+                    if cmd == "/scan":
+                        if key == "profile":
+                            options.extend(["--profile", value])
+                            i += 1
+                            continue
+                        if key == "scanner":
+                            options.extend(["--scanner", value])
+                            i += 1
+                            continue
+                    i += 1
+                    continue
+
+                # long options with values
+                if token.startswith("--"):
+                    if cmd in ("/audit", "/ai-audit"):
+                        if token in ("--agentic", "--llm-plan", "--no-llm-plan", "--no-llm", "--parallel-web", "--nikto", "--remediate", "--allow-public", "--bg"):
+                            options.append(token)
+                            i += 1
+                            continue
+                        if token in (
+                            "--mode",
+                            "--compliance",
+                            "--max-actions",
+                            "--nuclei-rate",
+                            "--gobuster-threads",
+                            "--gobuster-wordlist",
+                            "--max-workers",
+                            "--container-image",
+                            "--output",
+                            "--markdown",
+                            "--max-remediations",
+                            "--min-remediation-severity",
+                        ) and i + 1 < len(args):
+                            options.extend([token, str(args[i + 1]).strip()])
+                            i += 2
+                            continue
+                    if cmd == "/scan":
+                        if token in ("--allow-public", "--bg"):
+                            options.append(token)
+                            i += 1
+                            continue
+                        if token in ("--profile", "--scanner") and i + 1 < len(args):
+                            options.extend([token, str(args[i + 1]).strip()])
+                            i += 2
+                            continue
+                    i += 1
+                    continue
+
+                # plain token target (first non-flag)
+                if not token.startswith("-") and target is None:
+                    target = token
+                    i += 1
+                    continue
+                i += 1
+
+            if not target:
+                return None
+
+            # `/ai-audit` implies agentic; no need to keep explicit --agentic.
+            if cmd == "/ai-audit":
+                options = [opt for opt in options if opt != "--agentic"]
+
+            out = [cmd, target] + options
+            return " ".join(str(x) for x in out if str(x).strip())
+
+        return None

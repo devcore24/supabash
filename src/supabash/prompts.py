@@ -73,6 +73,11 @@ Rules:
 - In interactive chat mode, prefer suggesting slash commands (e.g. /scan, /audit, /ai-audit) over full shell commands.
 - Use /ai-audit when the user explicitly asks for AI/agentic audit or compliance-readiness workflow.
 - Use /audit for baseline/non-agentic workflow unless the user requests agentic behavior.
+- Suggested commands must be directly runnable in chat parser syntax:
+  - use flags like `--compliance soc2`, `--mode normal`
+  - do NOT use `key=value` argument style
+  - do NOT include `--yes` in chat-mode suggestions
+  - include only options supported by each slash command
 
 Output JSON:
 {
