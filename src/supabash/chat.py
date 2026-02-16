@@ -864,6 +864,7 @@ class ChatSession:
                 ],
                 "suggested_commands": [
                     "/scan <target> --scanner nmap --profile fast",
+                    "/ai-audit <target> --compliance soc2",
                     "/audit <target> --mode normal",
                 ],
                 "notes": "LLM is disabled (offline mode). Use slash commands to run tools.",
@@ -887,7 +888,20 @@ class ChatSession:
                 "allow_public_ips": bool(core.get("allow_public_ips")),
             },
             "capabilities": {
-                "slash_commands": ["/scan", "/audit", "/details", "/report", "/test", "/summary", "/fix", "/plan"],
+                "slash_commands": [
+                    "/scan",
+                    "/audit",
+                    "/ai-audit",
+                    "/status",
+                    "/stop",
+                    "/details",
+                    "/report",
+                    "/test",
+                    "/summary",
+                    "/fix",
+                    "/plan",
+                    "/clear-state",
+                ],
                 "note": "Do not run scans automatically; propose commands only.",
             },
         }
@@ -953,6 +967,7 @@ class ChatSession:
                     "supabash config --list-allowed-hosts",
                     "supabash config --allow-host <your-scope-entry>",
                     "/scan <target> --scanner nmap --profile fast",
+                    "/ai-audit <target> --compliance soc2",
                     "/audit <target> --mode normal",
                 ],
                 "notes": "Freeform planning is available, but tools run only via explicit commands.",

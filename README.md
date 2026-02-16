@@ -300,6 +300,7 @@ supabash chat
 # inside chat:
 /scan 192.168.1.10 --profile fast --scanner nmap  # add --allow-public only if authorized
 /scan 192.168.1.10 --profile fast --scanner nmap --bg
+/ai-audit 192.168.1.10 --compliance soc2   # chat alias for /audit ... --agentic
 /audit 192.168.1.10 --mode normal --remediate  # writes reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.{json,md}
 /audit 192.168.1.10 --mode normal --output reports/custom.json --remediate
 /audit 192.168.1.10 --mode normal --nikto --remediate --bg
@@ -589,7 +590,7 @@ Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx 
 ### AI & Orchestration
 - **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.
 - **LLM integration:** litellm-based client with config-driven provider/model selection (OpenAI, Anthropic, Gemini, Mistral, Ollama, LM Studio)
-- **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
+- **Chat mode:** slash commands `/scan`, `/audit`, `/ai-audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
 - **Planner robustness:** one-time automatic replan with exclusions when candidates are already baseline-covered.
 - **Repeat/novelty guards:** tool-target reuse caps and low-signal penalties reduce redundant agentic retries.
 

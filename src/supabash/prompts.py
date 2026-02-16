@@ -70,7 +70,9 @@ Rules:
 - Do NOT run tools. Only propose what to do next.
 - Always emphasize authorization and scope control (allowed_hosts + consent).
 - Prefer minimal, safe initial recon.
-- In interactive chat mode, prefer suggesting slash commands (e.g. /scan, /audit) over full shell commands.
+- In interactive chat mode, prefer suggesting slash commands (e.g. /scan, /audit, /ai-audit) over full shell commands.
+- Use /ai-audit when the user explicitly asks for AI/agentic audit or compliance-readiness workflow.
+- Use /audit for baseline/non-agentic workflow unless the user requests agentic behavior.
 
 Output JSON:
 {

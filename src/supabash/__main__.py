@@ -1089,7 +1089,7 @@ def chat():
     console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
     console.print(
         "[dim]Type 'exit' to quit. Use slash commands:\n"
-        "/scan, /audit, /status, /stop, /details [tool], /report, /test, /summary, /fix, /plan, /clear-state[/dim]"
+        "/scan, /audit, /ai-audit, /status, /stop, /details [tool], /report, /test, /summary, /fix, /plan, /clear-state[/dim]"
     )
     allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
     session = ChatSession(allowed_hosts=allowed, config_manager=config_manager)
@@ -1452,16 +1452,18 @@ def chat():
                 session.save_state(state_path)
             continue
 
-        if user_input.startswith("/audit"):
+        if user_input.startswith("/audit") or user_input.startswith("/ai-audit"):
             try:
                 parts = shlex.split(user_input)
             except ValueError as e:
                 console.print(f"[red]Parse error:[/red] {e}")
                 continue
 
+            invoked_ai_audit = str(parts[0] if parts else "").strip().lower() == "/ai-audit"
             target = None
             mode = "normal"
-            agentic = False
+            # `/ai-audit` in chat is a convenience alias to `/audit --agentic`.
+            agentic = bool(invoked_ai_audit)
             compliance = None
             llm_plan = True
             max_actions = 10
@@ -1583,6 +1585,7 @@ def chat():
                     "[--container-image IMG] [--nikto] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
                     "[--output reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.json] [--markdown reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.md] [--allow-public] [--bg]"
                 )
+                console.print("[dim]Alias:[/dim] /ai-audit <target> [same options]  (implies --agentic)")
                 continue
 
             default_base = "ai-audit" if agentic and not output else "report"
@@ -1802,11 +1805,13 @@ def chat():
             lines.append(f"\n[dim]{notes}[/dim]")
 
         if not lines:
-            console.print("[yellow]No suggestions available. Use slash commands: /scan, /audit, /details, /report, /test, /summary, /fix, /plan[/yellow]")
+            console.print(
+                "[yellow]No suggestions available. Use slash commands: /scan, /audit, /ai-audit, /status, /stop, /details, /report, /test, /summary, /fix, /plan, /clear-state[/yellow]"
+            )
             try:
                 session.add_message(
                     "assistant",
-                    "No suggestions available. Use slash commands: /scan, /audit, /details, /report, /test, /summary, /fix, /plan",
+                    "No suggestions available. Use slash commands: /scan, /audit, /ai-audit, /status, /stop, /details, /report, /test, /summary, /fix, /plan, /clear-state",
                     meta={"source": "llm", "kind": "planner"},
                 )
             except Exception:

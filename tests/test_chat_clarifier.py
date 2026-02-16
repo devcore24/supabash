@@ -23,6 +23,9 @@ class TestChatClarifier(unittest.TestCase):
         res = session.clarify_goal("test goal")
         self.assertEqual(res["questions"], ["q1"])
         fake_llm.chat_with_meta.assert_called_once()
+        sent_messages = fake_llm.chat_with_meta.call_args[0][0]
+        # Ensure clarifier context advertises current slash command surface.
+        self.assertTrue(any("/ai-audit" in str(m.get("content", "")) for m in sent_messages if isinstance(m, dict)))
 
     def test_clarify_goal_fallback_on_bad_json(self):
         fake_llm = MagicMock()
@@ -31,8 +34,18 @@ class TestChatClarifier(unittest.TestCase):
         res = session.clarify_goal("test goal")
         self.assertIn("questions", res)
         self.assertTrue(res["questions"])
+        suggested = [str(x) for x in (res.get("suggested_commands") or [])]
+        self.assertTrue(any("/ai-audit" in x for x in suggested))
+
+    def test_clarify_goal_fallback_when_llm_disabled_prefers_ai_audit_command(self):
+        class DummyConfig:
+            config = {"llm": {"enabled": False}}
+
+        session = ChatSession(scanners={}, llm=MagicMock(), config_manager=DummyConfig())
+        res = session.clarify_goal("run an ai audit on staging")
+        suggested = [str(x) for x in (res.get("suggested_commands") or [])]
+        self.assertTrue(any("/ai-audit" in x for x in suggested))
 
 
 if __name__ == "__main__":
     unittest.main()
-
