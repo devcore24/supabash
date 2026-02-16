@@ -338,15 +338,30 @@ def build_recommended_next_actions(
         mapping = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
         return int(mapping.get(sev, 0))
 
-    explicit_recommendations: List[str] = []
+    critical_recommendations: List[str] = []
+    high_recommendations: List[str] = []
     for item in (summary_items or []) + (tool_items or []):
         if not isinstance(item, dict):
             continue
-        if severity_rank(item.get("severity")) < 4:
+        sev_rank = severity_rank(item.get("severity"))
+        if sev_rank < 4:
             continue
         recommendation = str(item.get("recommendation") or "").strip()
-        if recommendation:
-            explicit_recommendations.append(recommendation)
+        if not recommendation:
+            continue
+        if sev_rank >= 5:
+            critical_recommendations.append(recommendation)
+        else:
+            high_recommendations.append(recommendation)
+
+    explicit_recommendations: List[str] = []
+    seen_recs: Set[str] = set()
+    for recommendation in critical_recommendations + high_recommendations:
+        key = recommendation.lower()
+        if key in seen_recs:
+            continue
+        seen_recs.add(key)
+        explicit_recommendations.append(recommendation)
 
     source = summary_items if summary_items else tool_items
     signals: Set[str] = set()
@@ -513,8 +528,12 @@ def build_recommended_next_actions(
     keep_keys = {manual_action.lower(), rerun_action.lower()}
     keep_items = [item for item in deduped if item.lower() in keep_keys]
     pre_items = [item for item in deduped if item.lower() not in keep_keys]
+    critical_keys = {str(x).strip().lower() for x in critical_recommendations if str(x).strip()}
+    critical_items = [item for item in pre_items if item.lower() in critical_keys]
+    non_critical_items = [item for item in pre_items if item.lower() not in critical_keys]
     slots = max(0, max_actions - len(keep_items))
-    final_actions = pre_items[:slots] + keep_items
+    ordered_pre_items = critical_items + non_critical_items
+    final_actions = ordered_pre_items[:slots] + keep_items
     return final_actions[:max_actions]
 
 def generate_markdown(report: Dict[str, Any]) -> str:

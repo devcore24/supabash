@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-from supabash.report import COMPLIANCE_COVERAGE_ROWS, generate_markdown, write_markdown
+from supabash.report import COMPLIANCE_COVERAGE_ROWS, build_recommended_next_actions, generate_markdown, write_markdown
 from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
@@ -66,6 +66,25 @@ class TestReport(unittest.TestCase):
         self.assertIn("## Finding Quality Metrics", md)
         self.assertIn("duplicate_rate: 0.5", md)
         self.assertIn("risk_classes: surface_discovery", md)
+
+    def test_recommended_next_actions_preserve_critical_recommendation(self):
+        summary_items = [
+            {
+                "severity": "CRITICAL",
+                "title": "Service role key exposed",
+                "recommendation": "Rotate the service role key and remove it from client-accessible content immediately.",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Missing security headers",
+                "recommendation": "Add baseline security headers and enforce CSP.",
+            },
+        ]
+        tool_items = []
+        actions = build_recommended_next_actions(summary_items, tool_items, "compliance_pci")
+        self.assertTrue(actions)
+        self.assertIn("Rotate the service role key", actions[0])
+        self.assertTrue(any("Rotate the service role key" in item for item in actions))
 
     def test_summary_findings_are_correlated_and_evidence_merged(self):
         report = {

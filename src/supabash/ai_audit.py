@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from threading import Event
@@ -699,6 +700,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
         if not isinstance(web_targets, list):
             web_targets = []
         web_targets = [str(u).strip() for u in web_targets if isinstance(u, str) and u.strip()]
+        lock_web_targets = bool(web_targets) if normalized.get("base_url") else False
 
         # Even when the user passes a URL, nmap can discover additional HTTP(S) ports.
         # Merge derived web targets so the agentic expansion can cover them.
@@ -802,34 +804,33 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     continue
                 allowed_tools.append(tool)
 
-            baseline_success: set[tuple] = set()
-            for entry in agg.get("results", []) or []:
-                if not isinstance(entry, dict) or not entry.get("success"):
-                    continue
-                tool = entry.get("tool")
-                if tool_specs.get(tool, {}).get("target_kind") != "web":
-                    continue
-                if tool == "httpx":
-                    alive = entry.get("data", {}).get("alive")
-                    if isinstance(alive, list):
-                        for u in alive:
-                            u = str(u).strip()
-                            if u:
-                                baseline_success.add((tool, u))
-                targets = entry.get("targets")
-                if isinstance(targets, list):
-                    for u in targets:
-                        v = str(u).strip()
-                        if v:
-                            # Broad baseline nuclei is treated as "already assessed"
-                            # signal for planning context, but remains eligible for one
-                            # agentic re-check when the model has specific rationale.
-                            if tool == "nuclei" and str(entry.get("target_scope") or "").strip().lower() == "broad":
-                                continue
-                            baseline_success.add((tool, v))
-                target = entry.get("target")
-                if isinstance(target, str) and target.strip():
-                    baseline_success.add((tool, target.strip()))
+                baseline_success: set[tuple] = set()
+                baseline_broad_nuclei_targets: Set[str] = set()
+                for entry in agg.get("results", []) or []:
+                    if not isinstance(entry, dict) or not entry.get("success"):
+                        continue
+                    tool = entry.get("tool")
+                    if tool_specs.get(tool, {}).get("target_kind") != "web":
+                        continue
+                    if tool == "httpx":
+                        alive = entry.get("data", {}).get("alive")
+                        if isinstance(alive, list):
+                            for u in alive:
+                                u = str(u).strip()
+                                if u:
+                                    baseline_success.add((tool, u))
+                    targets = entry.get("targets")
+                    if isinstance(targets, list):
+                        for u in targets:
+                            v = str(u).strip()
+                            if v:
+                                if tool == "nuclei" and str(entry.get("target_scope") or "").strip().lower() == "broad":
+                                    baseline_broad_nuclei_targets.add(v)
+                                    continue
+                                baseline_success.add((tool, v))
+                    target = entry.get("target")
+                    if isinstance(target, str) and target.strip():
+                        baseline_success.add((tool, target.strip()))
 
             if not allowed_tools:
                 ai_obj["planner"]["warning"] = "No eligible tools available for agentic phase."
@@ -960,6 +961,62 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         path = data_dir / candidate
                     return str(path) if path.exists() else None
 
+                tls_port_set: Set[int] = set()
+                for p in tls_ports or []:
+                    try:
+                        tls_port_set.add(int(p))
+                    except Exception:
+                        continue
+
+                def _extract_port_from_target_hint(value: Any) -> Optional[int]:
+                    text = str(value or "").strip()
+                    if not text:
+                        return None
+                    try:
+                        parsed = urlparse(text)
+                        if parsed.scheme:
+                            if parsed.port:
+                                return int(parsed.port)
+                            if (parsed.scheme or "").lower() == "https":
+                                return 443
+                    except Exception:
+                        pass
+                    port_match = re.search(r":(\d{2,5})$", text)
+                    if port_match:
+                        try:
+                            return int(port_match.group(1))
+                        except Exception:
+                            return None
+                    return None
+
+                def _resolve_sslscan_port_for_action(action: Dict[str, Any], result_entry: Optional[Dict[str, Any]] = None) -> Optional[int]:
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    port_hint: Any = None
+                    if isinstance(result_entry, dict) and result_entry.get("port") is not None:
+                        port_hint = result_entry.get("port")
+                    if port_hint is None:
+                        port_hint = args.get("port")
+                    if port_hint is None:
+                        port_hint = _extract_port_from_target_hint(args.get("target"))
+
+                    if port_hint is not None:
+                        try:
+                            requested = int(port_hint)
+                        except Exception:
+                            requested = None
+                        if requested is None:
+                            return None
+                        if tls_port_set and requested not in tls_port_set:
+                            return None
+                        return requested
+
+                    if tls_ports:
+                        try:
+                            return int(tls_ports[0])
+                        except Exception:
+                            return None
+                    return None
+
                 def parse_tool_calls(tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
                     actions: List[Dict[str, Any]] = []
                     notes = ""
@@ -1067,6 +1124,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "trivy_requires_container": bool(container_image),
                             "tls_ports_detected": tls_ports,
                             "smb_ports_detected": bool(smb_ports),
+                            "high_risk_web_targets": sorted(_high_risk_web_targets_now())[:8],
+                            "baseline_broad_nuclei_targets": sorted(baseline_broad_nuclei_targets)[:24],
                             # Keep this reasonably large so replans can avoid the full
                             # already-covered web surface, not just a tiny subset.
                             "excluded_actions": excluded[:64],
@@ -1303,20 +1362,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 ),
                             )
                     elif tool == "sslscan":
-                        port = args.get("port")
-                        if port is None:
-                            port = tls_ports[0] if tls_ports else None
-                        try:
-                            port = int(port) if port is not None else None
-                        except Exception:
-                            port = None
+                        port = _resolve_sslscan_port_for_action(action)
                         action_target = scan_host
                         action_port = port
                         action_key = (tool, action_target or "", str(action_port or ""))
                         if action_key in agentic_success:
                             entry = self._skip_tool(tool, "Already completed in agentic phase")
                         elif port is None:
-                            entry = self._skip_tool(tool, "No TLS candidate ports detected from discovery")
+                            entry = self._skip_tool(tool, "No eligible TLS candidate port for action")
                         else:
                             entry = self._run_tool(
                                 tool,
@@ -1365,7 +1418,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         entry = self._skip_tool(tool, "Unsupported agentic action")
 
                     entry["phase"] = "agentic"
-                    if target:
+                    if tool == "sslscan":
+                        if action_port is not None:
+                            entry["target"] = f"{scan_host}:{int(action_port)}"
+                        elif scan_host:
+                            entry["target"] = scan_host
+                    elif target:
                         entry["target"] = target
                     entry["profile"] = profile
                     if entry.get("success") and not entry.get("skipped"):
@@ -1388,6 +1446,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 agentic_low_signal_tool_counts: Dict[str, int] = {}
                 agentic_tool_risk_gain_counts: Dict[str, int] = {}
                 agentic_tool_no_risk_gain_counts: Dict[str, int] = {}
+                agentic_tool_gain_scores: Dict[str, List[int]] = {}
+                recent_gain_scores: List[int] = []
 
                 def _baseline_would_skip(action: Dict[str, Any]) -> bool:
                     tool = action.get("tool")
@@ -1451,6 +1511,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         maybe_port = item[2] if len(item) >= 3 and str(item[0]).strip().lower() == "sslscan" else None
                         _add(str(item[0]), str(item[1]), port=maybe_port)
 
+                    high_risk_targets = _high_risk_web_targets_now()
+                    for target in sorted(baseline_broad_nuclei_targets):
+                        if high_risk_targets and target in high_risk_targets:
+                            continue
+                        _add("nuclei", str(target))
+
                     for action in extra_actions or []:
                         if not isinstance(action, dict):
                             continue
@@ -1465,10 +1531,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                 def _action_trace_view(action: Dict[str, Any]) -> Dict[str, Any]:
                     args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    tool = str(action.get("tool") or "").strip().lower()
+                    port_value = args.get("port")
+                    if tool == "sslscan" and port_value is None:
+                        resolved_port = _resolve_sslscan_port_for_action(action)
+                        if resolved_port is not None:
+                            port_value = int(resolved_port)
                     return {
                         "tool": action.get("tool"),
                         "target": args.get("target"),
-                        "port": args.get("port"),
+                        "port": port_value,
                         "profile": action.get("profile"),
                         "priority": action.get("priority"),
                         "reasoning": action.get("reasoning"),
@@ -1491,6 +1563,101 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     except Exception:
                         pass
                     return set()
+
+                def _unique_findings_count_now() -> int:
+                    try:
+                        items = self._collect_findings(agg)
+                        if not isinstance(items, list):
+                            return 0
+                        keys: Set[str] = set()
+                        for finding in items:
+                            if not isinstance(finding, dict):
+                                continue
+                            dedup_key = str(finding.get("dedup_key") or "").strip()
+                            if not dedup_key:
+                                dedup_key = self._finding_dedup_key(finding)
+                            if dedup_key:
+                                keys.add(dedup_key)
+                        return len(keys)
+                    except Exception:
+                        return 0
+
+                def _target_host_port_key(value: str) -> Optional[Tuple[str, int]]:
+                    text = str(value or "").strip()
+                    if not text:
+                        return None
+                    try:
+                        parsed = urlparse(text)
+                        if not parsed.scheme:
+                            return None
+                        host = str(parsed.hostname or "").strip().lower()
+                        if not host:
+                            return None
+                        port = int(parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80))
+                        return (host, port)
+                    except Exception:
+                        return None
+
+                def _target_risk_scores_now() -> Dict[str, int]:
+                    scores: Dict[str, int] = {}
+                    by_host_port: Dict[Tuple[str, int], List[str]] = {}
+                    by_host: Dict[str, List[str]] = {}
+                    for item in allowed_web_targets or []:
+                        target = str(item or "").strip()
+                        if not target:
+                            continue
+                        scores[target] = 0
+                        host_port = _target_host_port_key(target)
+                        if host_port:
+                            by_host_port.setdefault(host_port, []).append(target)
+                            by_host.setdefault(host_port[0], []).append(target)
+
+                    findings = self._collect_findings(agg)
+                    if not isinstance(findings, list) or not scores:
+                        return scores
+
+                    for finding in findings:
+                        if not isinstance(finding, dict):
+                            continue
+                        rank = int(self._severity_rank(finding.get("severity") or "INFO"))
+                        if rank <= 0:
+                            continue
+                        risk_class = str(finding.get("risk_class") or "").strip().lower()
+                        class_bonus = 2 if risk_class in ("secret_exposure", "known_vulnerability", "data_plane_exposure") else 1
+                        weight = max(1, rank) * class_bonus
+                        matched_targets: Set[str] = set()
+
+                        text = " ".join(
+                            [
+                                str(finding.get("title") or "").strip(),
+                                str(finding.get("evidence") or "").strip(),
+                            ]
+                        ).strip()
+                        for url in re.findall(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE):
+                            host_port = _target_host_port_key(str(url).rstrip(".,;"))
+                            if host_port:
+                                for mapped in by_host_port.get(host_port, []):
+                                    matched_targets.add(mapped)
+
+                        host, _ = self._extract_finding_host_path(finding)
+                        host = str(host or "").strip().lower()
+                        if host:
+                            for mapped in by_host.get(host, []):
+                                matched_targets.add(mapped)
+
+                        for target in matched_targets:
+                            scores[target] = int(scores.get(target, 0)) + int(weight)
+
+                    return scores
+
+                def _high_risk_web_targets_now() -> Set[str]:
+                    scores = _target_risk_scores_now()
+                    ranked = [(int(score), target) for target, score in scores.items() if int(score) > 0]
+                    if not ranked:
+                        return set()
+                    ranked.sort(key=lambda item: (-item[0], item[1]))
+                    cap = max(1, min(4, max(1, len(allowed_web_targets) // 3)))
+                    return {target for _, target in ranked[:cap]}
 
                 def _candidate_sort_key(action: Dict[str, Any]) -> Tuple[int, int, str, str]:
                     skip_penalty = 1 if _baseline_would_skip(action) else 0
@@ -1525,6 +1692,43 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         score -= 1
                     return score
 
+                def _action_gain_score(action: Dict[str, Any]) -> int:
+                    """
+                    Predict likely value from this action using generic historical signal.
+                    Positive means likely useful, negative means likely diminishing returns.
+                    """
+                    if not isinstance(action, dict):
+                        return -1
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    tool = str(action.get("tool") or "").strip().lower()
+                    target = str(args.get("target") or "").strip()
+                    score = int(_action_novelty(action))
+
+                    history = agentic_tool_gain_scores.get(tool, [])
+                    if history:
+                        window = history[-3:]
+                        avg_gain = float(sum(window)) / float(max(1, len(window)))
+                        if avg_gain >= 3.0:
+                            score += 2
+                        elif avg_gain <= 0.0:
+                            score -= 2
+
+                    if tool and int(agentic_low_signal_tool_counts.get(tool, 0)) >= 2:
+                        score -= 2
+
+                    if tool == "sslscan" and _resolve_sslscan_port_for_action(action) is None:
+                        score -= 4
+
+                    if tool == "nuclei":
+                        high_risk_targets = _high_risk_web_targets_now()
+                        if baseline_broad_nuclei_targets and target and target in baseline_broad_nuclei_targets:
+                            if high_risk_targets and target not in high_risk_targets:
+                                score -= 3
+                        if int(agentic_tool_no_risk_gain_counts.get(tool, 0)) >= 2:
+                            score -= 2
+
+                    return score
+
                 def _action_repeat_key(action: Dict[str, Any], result_entry: Optional[Dict[str, Any]] = None) -> Optional[Tuple[str, str]]:
                     if not isinstance(action, dict):
                         return None
@@ -1536,15 +1740,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     target = str(args.get("target") or "").strip()
 
                     if tool == "sslscan":
-                        port_val: Any = None
-                        if isinstance(result_entry, dict) and result_entry.get("port") is not None:
-                            port_val = result_entry.get("port")
-                        if port_val is None:
-                            port_val = args.get("port")
-                        try:
-                            port_txt = str(int(port_val))
-                        except Exception:
-                            port_txt = "auto"
+                        resolved_port = _resolve_sslscan_port_for_action(action, result_entry=result_entry)
+                        port_txt = str(int(resolved_port)) if resolved_port is not None else "auto"
                         return (tool, f"{scan_host}:{port_txt}")
 
                     if target_kind == "web":
@@ -1561,12 +1758,19 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         tls_count = len(tls_ports) if isinstance(tls_ports, list) else 0
                         return {
                             "max_per_pair": 1,
-                            "max_total": max(1, min(2, tls_count or 1)),
+                            "max_total": max(1, min(3, tls_count or 1)),
                             "max_low_signal": 1,
                         }
                     if t == "nuclei":
                         web_count = len(allowed_web_targets) if isinstance(allowed_web_targets, list) else 0
-                        dynamic_total = max(2, min(6, max(2, web_count // 2))) if web_count else 4
+                        if baseline_broad_nuclei_targets:
+                            dynamic_total = 2 if web_count >= 2 else 1
+                            return {
+                                "max_per_pair": 1,
+                                "max_total": dynamic_total,
+                                "max_low_signal": 1,
+                            }
+                        dynamic_total = max(2, min(5, max(2, web_count // 2))) if web_count else 4
                         return {
                             "max_per_pair": 2,
                             "max_total": dynamic_total,
@@ -1586,13 +1790,36 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     tool_count = int(agentic_tool_counts.get(tool, 0))
                     low_signal_count = int(agentic_low_signal_tool_counts.get(tool, 0))
                     novelty = int(_action_novelty(action))
+                    gain_score = int(_action_gain_score(action))
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    target = str(args.get("target") or "").strip()
+
+                    if tool == "sslscan" and _resolve_sslscan_port_for_action(action) is None:
+                        return "invalid_sslscan_target"
+
+                    if tool == "nuclei":
+                        high_risk_targets = _high_risk_web_targets_now()
+                        if (
+                            baseline_broad_nuclei_targets
+                            and target
+                            and target in baseline_broad_nuclei_targets
+                            and high_risk_targets
+                            and target not in high_risk_targets
+                            and tool_count >= 1
+                        ):
+                            return "nuclei_broad_covered_low_risk"
+                        history = agentic_tool_gain_scores.get(tool, [])
+                        if len(history) >= 2 and sum(history[-2:]) <= 1 and novelty <= 1:
+                            return "tool_low_gain_repeat_cap"
                     if pair_count >= int(limits.get("max_per_pair", 1)):
                         return "tool_target_repeat_cap"
-                    if tool_count >= int(limits.get("max_total", 1)) and novelty <= 1:
+                    if tool == "nuclei" and baseline_broad_nuclei_targets and tool_count >= int(limits.get("max_total", 1)):
+                        return "tool_repeat_cap"
+                    if tool_count >= int(limits.get("max_total", 1)) and (novelty <= 1 or gain_score <= 0):
                         return "tool_repeat_cap"
                     if tool == "sslscan" and low_signal_count >= int(limits.get("max_low_signal", 1)):
                         return "tool_low_signal_repeat_cap"
-                    if low_signal_count >= int(limits.get("max_low_signal", 1)) and novelty <= 1:
+                    if low_signal_count >= int(limits.get("max_low_signal", 1)) and (novelty <= 1 or gain_score <= 0):
                         return "tool_low_signal_repeat_cap"
                     return None
 
@@ -1604,6 +1831,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     target = str(args.get("target") or "").strip()
                     priority = clamp_int(action.get("priority"), default=50, minimum=1, maximum=100)
                     hint = f"{tool} p{priority}"
+                    if tool == "sslscan":
+                        resolved_port = _resolve_sslscan_port_for_action(action)
+                        if resolved_port is not None:
+                            hint = f"{hint} :{resolved_port}"
                     if target:
                         hint = f"{hint} @{target}"
                     return hint
@@ -1626,6 +1857,20 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "remaining_actions_before": int(remaining),
                         "started_at": time.time(),
                     }
+                    if low_signal_streak >= 3 and len(recent_gain_scores) >= 3 and sum(recent_gain_scores[-3:]) <= 0:
+                        note(
+                            "llm_decision",
+                            "planner",
+                            "diminishing returns: recent gain exhausted; stopping",
+                            agg=agg,
+                        )
+                        trace_item["decision"] = {
+                            "result": "stop",
+                            "reason": "diminishing_returns_recent_gain_exhausted",
+                        }
+                        trace_item["finished_at"] = time.time()
+                        ai_obj.setdefault("decision_trace", []).append(trace_item)
+                        break
                     action: Optional[Dict[str, Any]] = None
                     stop_requested = False
                     replan_attempted = False
@@ -1736,33 +1981,37 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if actionable:
                             actionable.sort(
                                 key=lambda a: (
+                                    -_action_gain_score(a),
                                     -_action_novelty(a),
                                     _candidate_sort_key(a),
                                 )
                             )
                             best_novelty = _action_novelty(actionable[0])
+                            best_gain = _action_gain_score(actionable[0])
                             trace_item["candidate_novelty"] = {
                                 "best": int(best_novelty),
+                                "best_gain_score": int(best_gain),
                                 "top": [
                                     {
                                         "tool": _action_trace_view(a).get("tool"),
                                         "target": _action_trace_view(a).get("target"),
                                         "priority": _action_trace_view(a).get("priority"),
                                         "novelty": int(_action_novelty(a)),
+                                        "gain_score": int(_action_gain_score(a)),
                                     }
                                     for a in actionable[:5]
                                 ],
                             }
-                            if low_signal_streak >= 2 and best_novelty <= 0:
+                            if low_signal_streak >= 2 and best_gain <= 0:
                                 note(
                                     "llm_decision",
                                     "planner",
-                                    "diminishing returns: low recent signal and low novelty candidates; stopping",
+                                    "diminishing returns: low recent signal and low gain candidates; stopping",
                                     agg=agg,
                                 )
                                 trace_item["decision"] = {
                                     "result": "stop",
-                                    "reason": "diminishing_returns_low_signal_low_novelty",
+                                    "reason": "diminishing_returns_low_signal_low_gain",
                                 }
                                 trace_item["finished_at"] = time.time()
                                 ai_obj.setdefault("decision_trace", []).append(trace_item)
@@ -1822,6 +2071,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     note("llm_decision", action.get("tool", "planner"), " | ".join(decision_parts), agg=agg)
 
                     pre_findings_count = _findings_count_now()
+                    pre_unique_findings_count = _unique_findings_count_now()
                     pre_risk_classes = _risk_classes_now()
                     pre_web_target_count = len(set(allowed_web_targets))
 
@@ -1887,42 +2137,122 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if isinstance(hosts, list) and hosts:
                             promoted = self._promote_subfinder_hosts(scan_host, hosts)
                             promoted_urls = promoted.get("urls", []) if isinstance(promoted, dict) else []
-                            for u in promoted_urls:
-                                if not isinstance(u, str) or not u.strip():
-                                    continue
+                            promoted_urls = self._dedupe_web_targets_prefer_https(
+                                [str(u).strip() for u in promoted_urls if isinstance(u, str) and str(u).strip()]
+                            )
+                            validated_urls: List[str] = []
+                            validation_stats: Dict[str, Any] = {
+                                "candidate_urls": len(promoted_urls),
+                                "validation_attempted": False,
+                                "validated_urls": 0,
+                                "used_httpx": False,
+                            }
+
+                            subfinder_cfg = self._tool_config("subfinder")
+                            try:
+                                max_validation_targets = int(subfinder_cfg.get("max_validation_targets", 120))
+                            except Exception:
+                                max_validation_targets = 120
+                            max_validation_targets = max(1, min(max_validation_targets, 500))
+                            candidate_urls = promoted_urls[:max_validation_targets]
+
+                            if candidate_urls and self._has_scanner("httpx") and self._tool_enabled("httpx", default=True):
+                                validation_stats["validation_attempted"] = True
+                                validation_stats["used_httpx"] = True
+                                validation_started = time.time()
+                                note(
+                                    "tool_start",
+                                    "httpx",
+                                    f"Validating {len(candidate_urls)} subfinder-promoted URL(s) with httpx",
+                                    agg=agg,
+                                )
+                                validation_entry = self._run_tool(
+                                    "httpx",
+                                    lambda: self.scanners["httpx"].scan(
+                                        candidate_urls,
+                                        cancel_event=cancel_event,
+                                        timeout_seconds=self._tool_timeout_seconds("httpx"),
+                                    ),
+                                )
+                                validation_finished = time.time()
+                                note("tool_end", "httpx", "Finished subfinder promotion validation", agg=agg)
+                                validation_entry["phase"] = "agentic"
+                                validation_entry["target"] = scan_host
+                                validation_entry["profile"] = action.get("profile")
+                                validation_entry["target_scope"] = "subfinder_promotion_validation"
+                                validation_entry["reason"] = "Validate subfinder-promoted URLs before expansion"
+                                agg.setdefault("results", []).append(validation_entry)
+                                ai_obj["actions"].append(
+                                    {
+                                        "tool": "httpx",
+                                        "target": scan_host,
+                                        "profile": action.get("profile"),
+                                        "reasoning": "Validate promoted subdomains before promoting to web targets.",
+                                        "phase": "agentic",
+                                        "success": bool(validation_entry.get("success"))
+                                        if not validation_entry.get("skipped")
+                                        else False,
+                                        "skipped": bool(validation_entry.get("skipped")),
+                                        "error": validation_entry.get("error") or validation_entry.get("reason"),
+                                        "reason": validation_entry.get("reason"),
+                                        "started_at": validation_started,
+                                        "finished_at": validation_finished,
+                                    }
+                                )
+                                extra_added += 1
+                                if validation_entry.get("success"):
+                                    alive = validation_entry.get("data", {}).get("alive")
+                                    if isinstance(alive, list):
+                                        validated_urls = self._dedupe_web_targets_prefer_https(
+                                            [str(u).strip() for u in alive if isinstance(u, str) and str(u).strip()]
+                                        )
+                                        for u in validated_urls:
+                                            agentic_success.add(("httpx", u))
+                            else:
+                                validated_urls = candidate_urls
+
+                            validation_stats["validated_urls"] = len(validated_urls)
+                            for u in validated_urls:
                                 if u not in allowed_web_targets:
                                     allowed_web_targets.append(u)
                                     web_targets.append(u)
                             if isinstance(entry.get("data"), dict):
                                 entry["data"]["promoted_urls"] = [str(u) for u in promoted_urls if str(u).strip()]
+                                entry["data"]["validated_urls"] = [str(u) for u in validated_urls if str(u).strip()]
                                 entry["data"]["promotion_stats"] = (
                                     promoted.get("stats", {}) if isinstance(promoted, dict) else {}
                                 )
+                                entry["data"]["validation_stats"] = validation_stats
                             stats = promoted.get("stats", {}) if isinstance(promoted.get("stats"), dict) else {}
                             if stats:
                                 agg.setdefault("summary_notes", []).append(
                                     (
                                         "Subdomain expansion (agentic): discovered "
                                         f"{int(stats.get('discovered', 0))}, in-scope {int(stats.get('in_scope', 0))}, "
-                                        f"resolved {int(stats.get('resolved', 0))}, promoted {int(stats.get('promoted_hosts', 0))} host(s)."
+                                        f"resolved {int(stats.get('resolved', 0))}, promoted {int(stats.get('promoted_hosts', 0))} host(s), "
+                                        f"validated URLs {int(validation_stats.get('validated_urls', 0))}."
                                     )
                                 )
                             agg["web_targets"] = web_targets
 
                     post_findings_count = _findings_count_now()
+                    post_unique_findings_count = _unique_findings_count_now()
                     post_risk_classes = _risk_classes_now()
                     new_risk_classes = sorted(post_risk_classes - pre_risk_classes)
                     risk_class_delta = len(new_risk_classes)
                     post_web_target_count = len(set(allowed_web_targets))
                     findings_delta = max(0, post_findings_count - pre_findings_count)
+                    unique_findings_delta = max(0, post_unique_findings_count - pre_unique_findings_count)
                     web_target_delta = max(0, post_web_target_count - pre_web_target_count)
                     status = "skipped" if entry.get("skipped") else ("success" if entry.get("success") else "failed")
-                    if status == "success" and (risk_class_delta > 0 or web_target_delta > 0 or extra_added > 0):
+                    if status == "success" and (
+                        risk_class_delta > 0 or web_target_delta > 0 or unique_findings_delta > 0 or extra_added > 0
+                    ):
                         signal = "high"
-                        signal_note = "Action produced new risk-class evidence or expanded target coverage."
+                        signal_note = "Action produced net-new risk/coverage signal."
                     elif status == "success" and findings_delta > 0:
                         signal = "medium"
-                        signal_note = "Action added findings, but no net-new risk class."
+                        signal_note = "Action added findings, but mostly duplicated existing risk classes."
                     elif status == "success":
                         signal = "medium"
                         signal_note = "Action succeeded but added limited net-new signal."
@@ -1932,6 +2262,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     else:
                         signal = "low"
                         signal_note = "Action was skipped due to coverage/scope constraints."
+
+                    gain_score = (
+                        int(risk_class_delta) * 4
+                        + int(unique_findings_delta) * 2
+                        + int(web_target_delta) * 2
+                        + (1 if int(extra_added) > 0 else 0)
+                    )
+                    if status != "success":
+                        gain_score -= 1
 
                     # Track per-tool/target execution pressure and recent signal trend.
                     chosen_tool = str(action.get("tool") or "").strip().lower()
@@ -1943,6 +2282,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         agentic_target_counts[chosen_target] = int(agentic_target_counts.get(chosen_target, 0)) + 1
                     if action_repeat_key:
                         agentic_action_counts[action_repeat_key] = int(agentic_action_counts.get(action_repeat_key, 0)) + 1
+                    if chosen_tool:
+                        agentic_tool_gain_scores.setdefault(chosen_tool, []).append(int(gain_score))
+                        if len(agentic_tool_gain_scores.get(chosen_tool, [])) > 6:
+                            agentic_tool_gain_scores[chosen_tool] = agentic_tool_gain_scores[chosen_tool][-6:]
+                    recent_gain_scores.append(int(gain_score))
+                    if len(recent_gain_scores) > 8:
+                        recent_gain_scores = recent_gain_scores[-8:]
                     if risk_class_delta > 0 and chosen_tool:
                         agentic_tool_risk_gain_counts[chosen_tool] = (
                             int(agentic_tool_risk_gain_counts.get(chosen_tool, 0)) + 1
@@ -1952,7 +2298,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         agentic_tool_no_risk_gain_counts[chosen_tool] = (
                             int(agentic_tool_no_risk_gain_counts.get(chosen_tool, 0)) + 1
                         )
-                    if risk_class_delta > 0 or web_target_delta > 0 or extra_added > 0:
+                    if gain_score > 0:
                         low_signal_streak = 0
                     else:
                         low_signal_streak = int(low_signal_streak) + 1
@@ -1969,6 +2315,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "findings_count_before": int(pre_findings_count),
                         "findings_count_after": int(post_findings_count),
                         "findings_count_delta": int(findings_delta),
+                        "unique_findings_count_before": int(pre_unique_findings_count),
+                        "unique_findings_count_after": int(post_unique_findings_count),
+                        "unique_findings_count_delta": int(unique_findings_delta),
                         "risk_class_count_before": int(len(pre_risk_classes)),
                         "risk_class_count_after": int(len(post_risk_classes)),
                         "risk_class_delta": int(risk_class_delta),
@@ -1976,6 +2325,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "web_target_count_before": int(pre_web_target_count),
                         "web_target_count_after": int(post_web_target_count),
                         "web_target_count_delta": int(web_target_delta),
+                        "gain_score": int(gain_score),
                         "low_signal_streak_after": int(low_signal_streak),
                         "tool_usage_count": int(agentic_tool_counts.get(chosen_tool, 0)),
                         "target_usage_count": int(agentic_target_counts.get(chosen_target, 0)),
@@ -1993,8 +2343,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         action.get("tool", "planner"),
                         (
                             f"signal={signal}; status={status}; findings_delta={int(findings_delta)}; "
+                            f"unique_findings_delta={int(unique_findings_delta)}; "
                             f"risk_classes_delta={int(risk_class_delta)}; web_targets_delta={int(web_target_delta)}; "
-                            f"extra_results={int(extra_added)}"
+                            f"extra_results={int(extra_added)}; gain_score={int(gain_score)}"
                         ),
                         agg=agg,
                     )

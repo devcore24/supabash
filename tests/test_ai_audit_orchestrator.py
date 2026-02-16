@@ -127,6 +127,15 @@ class FakeFfufScanner:
         return {"success": True, "command": f"ffuf -u {target}/FUZZ ...", "findings": []}
 
 
+class FakeSubfinderScanner:
+    def scan(self, target, **kwargs):
+        return {
+            "success": True,
+            "command": f"subfinder -d {target}",
+            "hosts": ["app.example.com", "api.example.com", "cdn.example.com"],
+        }
+
+
 class FakeLLMIterative:
     def __init__(self):
         self.plan_calls = 0
@@ -392,6 +401,87 @@ class FakeLLMRepeatSslscan:
         )
 
 
+class FakeLLMRepeatNucleiTargets:
+    def __init__(self):
+        self.plan_calls = 0
+        self._targets = [
+            "http://localhost:8080",
+            "http://localhost:9090",
+            "http://localhost:19090",
+            "http://localhost:4006",
+        ]
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        idx = (self.plan_calls - 1) % len(self._targets)
+        target = self._targets[idx]
+        return (
+            [
+                {
+                    "name": "propose_actions",
+                    "arguments": {
+                        "actions": [
+                            {
+                                "tool_name": "nuclei",
+                                "arguments": {"profile": "standard", "target": target},
+                                "reasoning": "Repeat nuclei on another web target.",
+                                "priority": 5,
+                            }
+                        ],
+                        "stop": False,
+                        "notes": "Keep running nuclei.",
+                    },
+                }
+            ],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 6}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMSelectSubfinder:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "subfinder",
+                                    "arguments": {"profile": "standard", "target": "example.com"},
+                                    "reasoning": "Expand subdomain surface for validation.",
+                                    "priority": 5,
+                                }
+                            ],
+                            "stop": False,
+                            "notes": "Run subfinder once.",
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True, "notes": "Done."}}],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
 def _build_scanners():
     return {
         "nmap": FakeNmapScanner(),
@@ -614,6 +704,84 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             second = trace[1]
             self.assertEqual(second.get("decision", {}).get("reason"), "all_candidates_blocked_repeat_policy")
             self.assertIn("repeat_filtered", second)
+
+    def test_repeat_policy_caps_agentic_nuclei_after_broad_baseline(self):
+        scanners = _build_scanners()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMRepeatNucleiTargets())
+        output = artifact_path("ai_audit_repeat_policy_nuclei_cap.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=5,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "nuclei" and a.get("phase") == "agentic"
+        ]
+        self.assertLessEqual(len(actions), 2)
+
+    def test_agentic_subfinder_promotions_are_validated_with_httpx(self):
+        scanners = _build_scanners()
+        scanners["subfinder"] = FakeSubfinderScanner()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectSubfinder())
+        orchestrator._tool_enabled = lambda _tool, default=True: True
+        orchestrator._promote_subfinder_hosts = lambda _scan_host, _hosts: {
+            "urls": [
+                "https://app.example.com",
+                "http://app.example.com",
+                "https://api.example.com",
+            ],
+            "stats": {
+                "discovered": 3,
+                "in_scope": 3,
+                "resolved": 3,
+                "promoted_hosts": 2,
+                "promoted_urls": 3,
+                "resolve_validation": True,
+            },
+        }
+        output = artifact_path("ai_audit_agentic_subfinder_validation.json")
+        report = orchestrator.run(
+            "example.com",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        validation_entries = [
+            r
+            for r in (report.get("results") or [])
+            if isinstance(r, dict)
+            and r.get("tool") == "httpx"
+            and r.get("phase") == "agentic"
+            and r.get("target_scope") == "subfinder_promotion_validation"
+        ]
+        self.assertTrue(validation_entries)
+        subfinder_actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "subfinder" and a.get("phase") == "agentic"
+        ]
+        self.assertTrue(subfinder_actions)
+        subfinder_result = None
+        for r in (report.get("results") or []):
+            if isinstance(r, dict) and r.get("tool") == "subfinder" and r.get("phase") == "agentic":
+                subfinder_result = r
+                break
+        self.assertIsNotNone(subfinder_result)
+        if isinstance(subfinder_result, dict):
+            data = subfinder_result.get("data", {})
+            self.assertIn("validated_urls", data)
+            self.assertIsInstance(data.get("validated_urls"), list)
+        notes = report.get("summary_notes", [])
+        self.assertTrue(any("validated URLs" in str(n) for n in notes))
 
 
 if __name__ == "__main__":
