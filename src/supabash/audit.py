@@ -19,6 +19,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from supabash.logger import setup_logger
 from supabash.tools import (
     NmapScanner,
+    MasscanScanner,
+    RustscanScanner,
     WhatWebScanner,
     HttpxScanner,
     NucleiScanner,
@@ -211,6 +213,8 @@ class AuditOrchestrator:
         # Allow dependency injection for testing
         self.scanners = scanners or {
             "nmap": NmapScanner(),
+            "masscan": MasscanScanner(),
+            "rustscan": RustscanScanner(),
             "whatweb": WhatWebScanner(),
             "httpx": HttpxScanner(),
             "nuclei": NucleiScanner(),
@@ -2455,8 +2459,17 @@ class AuditOrchestrator:
                 checks.append({"name": "listener_scope", "success": False, "error": str(e)})
 
         # 2) Unauthenticated endpoint probes on discovered web targets.
-        # Keep this slightly broader than deep-scan targets: these are lightweight probes with tight timeouts.
-        probe_targets = self._prioritize_web_targets_for_deep_scan(web_targets, max_targets=10)
+        # This is intentionally broad (all confirmed web targets, capped) because probes are lightweight.
+        probe_cfg = self._tool_config("readiness_probe")
+        max_probe_targets = probe_cfg.get("max_web_targets", 30)
+        try:
+            max_probe_targets = int(max_probe_targets)
+        except Exception:
+            max_probe_targets = 30
+        max_probe_targets = max(1, min(max_probe_targets, 100))
+        probe_targets = self._dedupe_web_targets_prefer_https(
+            [str(u).strip() for u in (web_targets or []) if str(u).strip()]
+        )[:max_probe_targets]
         probe_paths = (
             ("/debug/pprof/", "Go pprof debug endpoint accessible without authentication", "LOW", "pprof_exposure"),
             ("/metrics", "Unauthenticated metrics endpoint accessible", "MEDIUM", "metrics_exposure"),
@@ -2686,6 +2699,18 @@ class AuditOrchestrator:
             max_workers=max_workers,
         )
 
+        nmap_cfg = self._tool_config("nmap")
+        fast_discovery_flag = nmap_cfg.get("fast_discovery")
+        fast_discovery_enabled = bool(fast_discovery_flag) if fast_discovery_flag is not None else True
+        fast_discovery_ports = str(nmap_cfg.get("fast_discovery_ports") or "1-65535").strip()
+        if not fast_discovery_ports:
+            fast_discovery_ports = "1-65535"
+        try:
+            fast_discovery_max_ports = int(nmap_cfg.get("fast_discovery_max_ports", 256))
+        except Exception:
+            fast_discovery_max_ports = 256
+        fast_discovery_max_ports = max(1, min(fast_discovery_max_ports, 4096))
+
         agg: Dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "target": target,
@@ -2698,6 +2723,9 @@ class AuditOrchestrator:
                 "nuclei_templates": nuclei_templates,
                 "gobuster_threads": gobuster_threads,
                 "gobuster_wordlist": gobuster_wordlist,
+                "nmap_fast_discovery": bool(fast_discovery_enabled),
+                "nmap_fast_discovery_ports": fast_discovery_ports,
+                "nmap_fast_discovery_max_ports": int(fast_discovery_max_ports),
                 "nikto_enabled": bool(run_nikto),
                 "hydra_enabled": bool(run_hydra),
                 "hydra_services": hydra_services,
@@ -2754,12 +2782,128 @@ class AuditOrchestrator:
                 except Exception:
                     pass
 
-        def run_nmap() -> Dict[str, Any]:
+        def _normalize_port_list(values: Sequence[Any]) -> List[int]:
+            ports: List[int] = []
+            seen_ports = set()
+            for value in values or []:
+                try:
+                    port = int(value)
+                except Exception:
+                    continue
+                if port <= 0 or port > 65535 or port in seen_ports:
+                    continue
+                seen_ports.add(port)
+                ports.append(port)
+            return sorted(ports)
+
+        def run_fast_port_discovery() -> Tuple[List[int], List[Dict[str, Any]], Optional[str]]:
+            """
+            Optional fast open-port discovery before nmap service detection.
+            Falls back silently to regular nmap behavior when unavailable/no-signal.
+            """
+            if not fast_discovery_enabled:
+                return [], [], None
+            if lock_web_targets or normalized["base_url"]:
+                return [], [], None
+
+            discovered_ports: List[int] = []
+            fast_entries: List[Dict[str, Any]] = []
+            used_scanner: Optional[str] = None
+
+            if self._has_scanner("rustscan") and self._tool_enabled("rustscan", default=True):
+                rust_cfg = self._tool_config("rustscan")
+                rust_ports = str(rust_cfg.get("ports") or fast_discovery_ports).strip() or fast_discovery_ports
+                try:
+                    rust_batch = int(rust_cfg.get("batch", 2000))
+                except Exception:
+                    rust_batch = 2000
+                if mode == "aggressive":
+                    rust_batch = min(max(rust_batch, 2000) * 2, 10000)
+                elif mode == "stealth":
+                    rust_batch = max(500, rust_batch // 2)
+                rust_args = rust_cfg.get("arguments")
+                rust_args = str(rust_args).strip() if isinstance(rust_args, str) and rust_args.strip() else None
+
+                note("tool_start", "rustscan", "Running rustscan (fast port discovery)")
+                rustscan_entry = self._run_tool(
+                    "rustscan",
+                    lambda: self.scanners["rustscan"].scan(
+                        scan_host,
+                        ports=rust_ports,
+                        batch=rust_batch,
+                        arguments=rust_args,
+                        cancel_event=cancel_event,
+                        timeout_seconds=self._tool_timeout_seconds("rustscan"),
+                    ),
+                )
+                fast_entries.append(rustscan_entry)
+                note("tool_end", "rustscan", "Finished rustscan")
+                if rustscan_entry.get("success"):
+                    scan_data = rustscan_entry.get("data", {}).get("scan_data", {})
+                    discovered_ports = _normalize_port_list(
+                        self._open_ports_from_nmap(scan_data if isinstance(scan_data, dict) else {})
+                    )
+                    if discovered_ports:
+                        used_scanner = "rustscan"
+
+            if not discovered_ports and self._is_ip_literal(scan_host):
+                if self._has_scanner("masscan") and self._tool_enabled("masscan", default=True):
+                    mass_cfg = self._tool_config("masscan")
+                    mass_ports = str(mass_cfg.get("ports") or fast_discovery_ports).strip() or fast_discovery_ports
+                    try:
+                        mass_rate = int(mass_cfg.get("rate", 1000))
+                    except Exception:
+                        mass_rate = 1000
+                    if mode == "aggressive":
+                        mass_rate = min(max(mass_rate, 1000) * 2, 10000)
+                    elif mode == "stealth":
+                        mass_rate = max(100, mass_rate // 2)
+                    mass_args = mass_cfg.get("arguments")
+                    mass_args = str(mass_args).strip() if isinstance(mass_args, str) and mass_args.strip() else None
+
+                    note("tool_start", "masscan", "Running masscan (fast port discovery)")
+                    masscan_entry = self._run_tool(
+                        "masscan",
+                        lambda: self.scanners["masscan"].scan(
+                            scan_host,
+                            ports=mass_ports,
+                            rate=mass_rate,
+                            arguments=mass_args,
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("masscan"),
+                        ),
+                    )
+                    fast_entries.append(masscan_entry)
+                    note("tool_end", "masscan", "Finished masscan")
+                    if masscan_entry.get("success"):
+                        scan_data = masscan_entry.get("data", {}).get("scan_data", {})
+                        discovered_ports = _normalize_port_list(
+                            self._open_ports_from_nmap(scan_data if isinstance(scan_data, dict) else {})
+                        )
+                        if discovered_ports:
+                            used_scanner = "masscan"
+
+            if len(discovered_ports) > fast_discovery_max_ports:
+                discovered_ports = discovered_ports[:fast_discovery_max_ports]
+
+            return discovered_ports, fast_entries, used_scanner
+
+        def run_nmap(discovered_ports: Optional[Sequence[int]] = None) -> Dict[str, Any]:
+            nmap_args = self._nmap_args_for_mode(mode, compliance_profile=normalized_compliance)
+            ports_arg: Optional[str] = None
+            normalized_ports = _normalize_port_list(discovered_ports or [])
+            if normalized_ports:
+                ports_arg = ",".join(str(p) for p in normalized_ports)
+                # Prevent conflicting full-range port arguments when using targeted service detection.
+                nmap_args = " ".join(
+                    token for token in str(nmap_args or "").split() if token.strip() and token.strip() != "-p-"
+                ).strip()
             return self._run_tool_if_enabled(
                 "nmap",
                 lambda: self.scanners["nmap"].scan(
                     scan_host,
-                    arguments=self._nmap_args_for_mode(mode, compliance_profile=normalized_compliance),
+                    ports=ports_arg,
+                    arguments=nmap_args,
                     cancel_event=cancel_event,
                     timeout_seconds=self._tool_timeout_seconds("nmap"),
                 ),
@@ -3229,7 +3373,11 @@ class AuditOrchestrator:
             note("tool_end", "prowler", "Finished Prowler")
             return entry
 
-        def run_web_tools(web_target: str, include_content_discovery: bool = True) -> List[Dict[str, Any]]:
+        def run_web_tools(
+            web_target: str,
+            include_content_discovery: bool = True,
+            include_nuclei: bool = True,
+        ) -> List[Dict[str, Any]]:
             def tag(entry: Dict[str, Any]) -> Dict[str, Any]:
                 if isinstance(entry, dict):
                     entry.setdefault("target", web_target)
@@ -3276,23 +3424,24 @@ class AuditOrchestrator:
                     if canceled() or (isinstance(wpscan_entry.get("data"), dict) and wpscan_entry["data"].get("canceled")):
                         return results
 
-                note("tool_start", "nuclei", f"Running nuclei on {web_target}")
-                nuclei_entry = self._run_tool_if_enabled(
-                    "nuclei",
-                    lambda: self.scanners["nuclei"].scan(
-                        web_target,
-                        templates=nuclei_templates,
-                        rate_limit=nuclei_rate_limit or None,
-                        tags=nuclei_tags,
-                        severity=nuclei_severity,
-                        cancel_event=cancel_event,
-                        timeout_seconds=self._tool_timeout_seconds("nuclei"),
-                    ),
-                )
-                note("tool_end", "nuclei", f"Finished nuclei on {web_target}")
-                results.append(tag(nuclei_entry))
-                if canceled() or (isinstance(nuclei_entry.get("data"), dict) and nuclei_entry["data"].get("canceled")):
-                    return results
+                if include_nuclei:
+                    note("tool_start", "nuclei", f"Running nuclei on {web_target}")
+                    nuclei_entry = self._run_tool_if_enabled(
+                        "nuclei",
+                        lambda: self.scanners["nuclei"].scan(
+                            web_target,
+                            templates=nuclei_templates,
+                            rate_limit=nuclei_rate_limit or None,
+                            tags=nuclei_tags,
+                            severity=nuclei_severity,
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                        ),
+                    )
+                    note("tool_end", "nuclei", f"Finished nuclei on {web_target}")
+                    results.append(tag(nuclei_entry))
+                    if canceled() or (isinstance(nuclei_entry.get("data"), dict) and nuclei_entry["data"].get("canceled")):
+                        return results
 
                 if include_content_discovery:
                     note("tool_start", "gobuster", f"Running gobuster on {web_target}")
@@ -3379,24 +3528,25 @@ class AuditOrchestrator:
                     ] = "whatweb"
                 else:
                     results.append(tag(self._skip_disabled("whatweb")))
-                note("tool_start", "nuclei", f"Running nuclei on {web_target}")
-                if self._tool_enabled("nuclei", default=True):
-                    futures[
-                        ex.submit(
-                            self._run_tool,
-                            "nuclei",
-                            lambda: self.scanners["nuclei"].scan(
-                                web_target,
-                                rate_limit=nuclei_rate_limit or None,
-                                tags=nuclei_tags,
-                                severity=nuclei_severity,
-                                cancel_event=cancel_event,
-                                timeout_seconds=self._tool_timeout_seconds("nuclei"),
-                            ),
-                        )
-                    ] = "nuclei"
-                else:
-                    results.append(tag(self._skip_disabled("nuclei")))
+                if include_nuclei:
+                    note("tool_start", "nuclei", f"Running nuclei on {web_target}")
+                    if self._tool_enabled("nuclei", default=True):
+                        futures[
+                            ex.submit(
+                                self._run_tool,
+                                "nuclei",
+                                lambda: self.scanners["nuclei"].scan(
+                                    web_target,
+                                    rate_limit=nuclei_rate_limit or None,
+                                    tags=nuclei_tags,
+                                    severity=nuclei_severity,
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                                ),
+                            )
+                        ] = "nuclei"
+                    else:
+                        results.append(tag(self._skip_disabled("nuclei")))
                 if include_content_discovery:
                     note("tool_start", "gobuster", f"Running gobuster on {web_target}")
                     if gobuster_wordlist:
@@ -3469,6 +3619,34 @@ class AuditOrchestrator:
                 results.append(tag(wpscan_entry))
             return results
 
+        def run_broad_nuclei(web_target_list: Sequence[str]) -> Optional[Dict[str, Any]]:
+            if not self._has_scanner("nuclei"):
+                return None
+            if not self._tool_enabled("nuclei", default=True):
+                return self._skip_disabled("nuclei")
+            deduped_targets = self._dedupe_web_targets_prefer_https(
+                [str(u).strip() for u in (web_target_list or []) if str(u).strip()]
+            )
+            if len(deduped_targets) <= 1:
+                return None
+            note("tool_start", "nuclei", f"Running nuclei broad pass on {len(deduped_targets)} targets")
+            entry = self._run_tool(
+                "nuclei",
+                lambda: self.scanners["nuclei"].scan(
+                    deduped_targets,
+                    templates=nuclei_templates,
+                    rate_limit=nuclei_rate_limit or None,
+                    tags=nuclei_tags,
+                    severity=nuclei_severity,
+                    cancel_event=cancel_event,
+                    timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                ),
+            )
+            entry["target_scope"] = "broad"
+            entry["targets"] = deduped_targets
+            note("tool_end", "nuclei", "Finished nuclei broad pass")
+            return entry
+
         # Recon & web scans (optional parallel overlap)
         nmap_entry: Optional[Dict[str, Any]] = None
         web_targets: List[str] = []
@@ -3491,6 +3669,17 @@ class AuditOrchestrator:
                 return [str(x).strip() for x in web_targets if str(x).strip()]
             return self._prioritize_web_targets_for_deep_scan(web_targets, max_targets=3)
 
+        fast_ports_for_nmap: List[int] = []
+        fast_discovery_used: Optional[str] = None
+        if not canceled():
+            fast_ports_for_nmap, fast_entries, fast_discovery_used = run_fast_port_discovery()
+            for entry in fast_entries:
+                agg["results"].append(entry)
+            if fast_ports_for_nmap:
+                agg.setdefault("summary_notes", []).append(
+                    f"Fast port discovery ({fast_discovery_used or 'scanner'}) found {len(fast_ports_for_nmap)} open port(s); scoped nmap service detection to discovered ports."
+                )
+
         if canceled():
             agg["canceled"] = True
             agg["finished_at"] = time.time()
@@ -3503,10 +3692,14 @@ class AuditOrchestrator:
             max_w = max(1, min(int(max_workers), 8))
             with ThreadPoolExecutor(max_workers=max_w) as ex:
                 note("tool_start", "nmap", f"Running nmap ({mode})")
-                nmap_future = ex.submit(run_nmap)
+                nmap_future = ex.submit(run_nmap, fast_ports_for_nmap)
                 web_future = ex.submit(run_web_tools, web_target, True)
 
                 nmap_entry = nmap_future.result()
+                if fast_ports_for_nmap and (not nmap_entry or not nmap_entry.get("success")):
+                    note("tool_start", "nmap", "Fast-targeted nmap failed; retrying full nmap discovery")
+                    nmap_entry = run_nmap()
+                    note("tool_end", "nmap", "Finished nmap fallback run")
                 agg["results"].append(nmap_entry)
                 note("tool_end", "nmap", "Finished nmap")
 
@@ -3515,7 +3708,11 @@ class AuditOrchestrator:
 
             # Continue with additional prioritized web targets (if any).
             for extra_target in [t for t in deep_web_targets_for_run() if t != web_target]:
-                for entry in run_web_tools(extra_target, include_content_discovery=False):
+                for entry in run_web_tools(
+                    extra_target,
+                    include_content_discovery=False,
+                    include_nuclei=False,
+                ):
                     agg["results"].append(entry)
 
             if nmap_entry and nmap_entry.get("success"):
@@ -3665,7 +3862,11 @@ class AuditOrchestrator:
         else:
             # Run nmap first (required to discover web targets)
             note("tool_start", "nmap", f"Running nmap ({mode})")
-            nmap_entry = run_nmap()
+            nmap_entry = run_nmap(fast_ports_for_nmap)
+            if fast_ports_for_nmap and (not nmap_entry or not nmap_entry.get("success")):
+                note("tool_start", "nmap", "Fast-targeted nmap failed; retrying full nmap discovery")
+                nmap_entry = run_nmap()
+                note("tool_end", "nmap", "Finished nmap fallback run")
             agg["results"].append(nmap_entry)
             note("tool_end", "nmap", "Finished nmap")
 
@@ -3839,10 +4040,22 @@ class AuditOrchestrator:
                     return agg
 
             if web_targets:
+                nuclei_covered_by_broad = False
+                broad_nuclei_entry = run_broad_nuclei(web_targets)
+                if isinstance(broad_nuclei_entry, dict):
+                    agg["results"].append(broad_nuclei_entry)
+                    nuclei_covered_by_broad = bool(
+                        broad_nuclei_entry.get("success") and not broad_nuclei_entry.get("skipped")
+                    )
+
                 deep_targets = deep_web_targets_for_run()
                 for idx, target_url in enumerate(deep_targets):
                     include_content_discovery = idx == 0
-                    for entry in run_web_tools(target_url, include_content_discovery=include_content_discovery):
+                    for entry in run_web_tools(
+                        target_url,
+                        include_content_discovery=include_content_discovery,
+                        include_nuclei=not nuclei_covered_by_broad,
+                    ):
                         agg["results"].append(entry)
                 if run_nikto:
                     if self._has_scanner("nikto"):
@@ -3882,7 +4095,7 @@ class AuditOrchestrator:
                 "readiness_probe",
                 lambda: self._run_readiness_probe(
                     scan_host=scan_host,
-                    web_targets=deep_web_targets_for_run(),
+                    web_targets=web_targets,
                     open_ports=agg.get("open_ports", []),
                 ),
             )

@@ -59,6 +59,18 @@ class TestNucleiScanner(unittest.TestCase):
         self.assertIn("-rate-limit", command)
         self.assertIn("5", command)
 
+    def test_scan_uses_target_file_for_multiple_targets(self):
+        self.mock_runner.run.return_value = CommandResult(
+            command="", return_code=0, stdout="", stderr="", success=True
+        )
+        self.scanner.scan(["https://a.example", "https://b.example"])
+        args, _ = self.mock_runner.run.call_args
+        command = args[0]
+        self.assertEqual(command[0], "nuclei")
+        self.assertIn("-l", command)
+        self.assertIn("-jsonl", command)
+        self.assertNotIn("-u", command)
+
     def test_failure_uses_stdout_when_stderr_empty(self):
         self.mock_runner.run.return_value = CommandResult(
             command="nuclei", return_code=2, stdout="bad flag", stderr="", success=False

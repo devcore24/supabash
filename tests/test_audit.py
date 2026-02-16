@@ -281,6 +281,186 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertFalse(dnsenum_scanner.called)
         cleanup_artifact(output)
 
+    def test_fast_port_discovery_scopes_nmap_ports(self):
+        class CaptureNmapScanner:
+            def __init__(self):
+                self.calls = []
+
+            def scan(self, target, ports=None, arguments=None, **kwargs):
+                self.calls.append({"target": target, "ports": ports, "arguments": arguments})
+                open_ports = [22, 8080] if ports else [22, 8080, 9090]
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {
+                                        "port": p,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http" if p in (8080, 9090) else "ssh",
+                                    }
+                                    for p in open_ports
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeRustscanScanner:
+            def scan(self, target, ports="1-65535", batch=2000, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "rustscan test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 22, "protocol": "tcp", "state": "open"},
+                                    {"port": 8080, "protocol": "tcp", "state": "open"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxScanner:
+            def scan(self, targets, **kwargs):
+                alive = [str(x) for x in (targets or []) if str(x).startswith("http://")]
+                return {"success": True, "command": "httpx test", "alive": alive}
+
+        scanners = {
+            "nmap": CaptureNmapScanner(),
+            "rustscan": FakeRustscanScanner(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeScanner("whatweb"),
+            "nuclei": FakeScanner("nuclei"),
+            "gobuster": FakeScanner("gobuster"),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+
+        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        output = artifact_path("audit_fast_discovery_scopes_nmap.json")
+        report = orch.run("example.com", output, use_llm=False)
+
+        nmap_calls = scanners["nmap"].calls
+        self.assertTrue(nmap_calls)
+        if nmap_calls:
+            self.assertEqual(nmap_calls[0].get("ports"), "22,8080")
+        rustscan_entry = next((r for r in report["results"] if r.get("tool") == "rustscan"), None)
+        self.assertIsNotNone(rustscan_entry)
+        self.assertTrue(bool(rustscan_entry.get("success")))
+        cleanup_artifact(output)
+
+    def test_baseline_runs_single_broad_nuclei_pass_for_multiple_targets(self):
+        class FakeNmapMultiWeb:
+            def scan(self, target, ports=None, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 3000, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 3001, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 5050, "protocol": "tcp", "state": "open", "service": "http"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxAlive:
+            def scan(self, targets, **kwargs):
+                return {"success": True, "command": "httpx test", "alive": [str(t) for t in targets]}
+
+        class CaptureNuclei:
+            def __init__(self):
+                self.calls = []
+
+            def scan(self, target, **kwargs):
+                self.calls.append(target)
+                return {"success": True, "command": "nuclei test", "findings": []}
+
+        nuclei_scanner = CaptureNuclei()
+        scanners = {
+            "nmap": FakeNmapMultiWeb(),
+            "httpx": FakeHttpxAlive(),
+            "whatweb": FakeScanner("whatweb"),
+            "nuclei": nuclei_scanner,
+            "gobuster": FakeScanner("gobuster"),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+
+        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        output = artifact_path("audit_broad_nuclei_single_pass.json")
+        report = orch.run("localhost", output, use_llm=False)
+
+        self.assertEqual(len(nuclei_scanner.calls), 1)
+        if nuclei_scanner.calls:
+            self.assertIsInstance(nuclei_scanner.calls[0], list)
+            self.assertGreaterEqual(len(nuclei_scanner.calls[0]), 2)
+        nuclei_entries = [
+            r for r in report.get("results", []) if isinstance(r, dict) and r.get("tool") == "nuclei" and not r.get("skipped")
+        ]
+        self.assertEqual(len(nuclei_entries), 1)
+        cleanup_artifact(output)
+
+    def test_readiness_probe_receives_all_confirmed_web_targets(self):
+        class FakeNmapMultiWeb:
+            def scan(self, target, ports=None, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 3000, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 3001, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 5050, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 8080, "protocol": "tcp", "state": "open", "service": "http"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxAlive:
+            def scan(self, targets, **kwargs):
+                return {"success": True, "command": "httpx test", "alive": [str(t) for t in targets]}
+
+        scanners = {
+            "nmap": FakeNmapMultiWeb(),
+            "httpx": FakeHttpxAlive(),
+            "whatweb": FakeScanner("whatweb"),
+            "nuclei": FakeScanner("nuclei"),
+            "gobuster": FakeScanner("gobuster"),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+
+        captured = {}
+        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+
+        def fake_readiness(scan_host, web_targets, open_ports):
+            captured["scan_host"] = scan_host
+            captured["web_targets"] = list(web_targets or [])
+            captured["open_ports"] = list(open_ports or [])
+            return {"success": True, "command": "internal readiness probes", "findings": [], "checks": [], "commands": []}
+
+        orch._run_readiness_probe = fake_readiness  # type: ignore[assignment]
+
+        output = artifact_path("audit_readiness_probe_target_breadth.json")
+        report = orch.run("localhost", output, use_llm=False, compliance_profile="soc2")
+
+        report_targets = report.get("web_targets") if isinstance(report.get("web_targets"), list) else []
+        self.assertGreaterEqual(len(report_targets), 4)
+        self.assertEqual(sorted(captured.get("web_targets", [])), sorted([str(x) for x in report_targets]))
+        cleanup_artifact(output)
+
     def test_compliance_tagging_avoids_caa_and_soft_maps_vuln_findings(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
         findings = [

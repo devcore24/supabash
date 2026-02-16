@@ -1,5 +1,7 @@
 import json
-from typing import Dict, List, Any, Optional
+import os
+import tempfile
+from typing import Dict, List, Any, Optional, Sequence, Union
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
 from supabash.tool_settings import resolve_timeout_seconds
@@ -16,7 +18,7 @@ class NucleiScanner:
 
     def scan(
         self,
-        target: str,
+        target: Union[str, Sequence[str]],
         templates: str = None,
         tags: Optional[str] = None,
         severity: Optional[str] = None,
@@ -36,14 +38,37 @@ class NucleiScanner:
         Returns:
             Dict: Parsed scan results.
         """
-        logger.info(f"Starting Nuclei scan on {target}")
-        
-        # Command: nuclei -u <target> -jsonl
-        command = [
-            "nuclei",
-            "-u", target,
-            "-jsonl",
-        ]
+        target_list: List[str] = []
+        if isinstance(target, (list, tuple, set)):
+            for item in target:
+                value = str(item or "").strip()
+                if value and value not in target_list:
+                    target_list.append(value)
+        else:
+            value = str(target or "").strip()
+            if value:
+                target_list = [value]
+
+        if not target_list:
+            return {"success": False, "error": "No valid targets provided", "command": "nuclei"}
+
+        logger.info(
+            "Starting Nuclei scan on %s",
+            target_list[0] if len(target_list) == 1 else f"{len(target_list)} targets",
+        )
+
+        # Command: nuclei -u <target> -jsonl OR nuclei -l <targets_file> -jsonl
+        command = ["nuclei"]
+        temp_targets_file: Optional[str] = None
+        if len(target_list) == 1:
+            command.extend(["-u", target_list[0]])
+        else:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as handle:
+                handle.write("\n".join(target_list))
+                handle.write("\n")
+                temp_targets_file = handle.name
+            command.extend(["-l", temp_targets_file])
+        command.append("-jsonl")
 
         if silent:
             command.append("-silent")
@@ -61,7 +86,14 @@ class NucleiScanner:
         kwargs = {"timeout": timeout}
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
-        result: CommandResult = self.runner.run(command, **kwargs)
+        try:
+            result: CommandResult = self.runner.run(command, **kwargs)
+        finally:
+            if temp_targets_file:
+                try:
+                    os.unlink(temp_targets_file)
+                except Exception:
+                    pass
 
         if not result.success:
             logger.error(f"Nuclei scan failed: {result.stderr}")

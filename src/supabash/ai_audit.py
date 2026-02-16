@@ -816,6 +816,17 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             u = str(u).strip()
                             if u:
                                 baseline_success.add((tool, u))
+                targets = entry.get("targets")
+                if isinstance(targets, list):
+                    for u in targets:
+                        v = str(u).strip()
+                        if v:
+                            # Broad baseline nuclei is treated as "already assessed"
+                            # signal for planning context, but remains eligible for one
+                            # agentic re-check when the model has specific rationale.
+                            if tool == "nuclei" and str(entry.get("target_scope") or "").strip().lower() == "broad":
+                                continue
+                            baseline_success.add((tool, v))
                 target = entry.get("target")
                 if isinstance(target, str) and target.strip():
                     baseline_success.add((tool, target.strip()))

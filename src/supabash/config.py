@@ -57,9 +57,16 @@ DEFAULT_CONFIG = {
     # Tool registry (enable/disable tools globally)
     # Note: some tools are also conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL).
     "tools": {
-        "nmap": {"enabled": True, "timeout_seconds": 600},
-        "masscan": {"enabled": True, "timeout_seconds": 600},
-        "rustscan": {"enabled": True, "timeout_seconds": 600},
+        "nmap": {
+            "enabled": True,
+            "timeout_seconds": 600,
+            # Fast discovery before nmap service detection (rustscan/masscan + targeted nmap).
+            "fast_discovery": True,
+            "fast_discovery_ports": "1-65535",
+            "fast_discovery_max_ports": 256,
+        },
+        "masscan": {"enabled": True, "timeout_seconds": 600, "rate": 1000, "ports": "1-65535"},
+        "rustscan": {"enabled": True, "timeout_seconds": 600, "batch": 2000, "ports": "1-65535"},
         # Subdomain discovery (domain targets only; many sources require API keys)
         "subfinder": {"enabled": False, "timeout_seconds": 600},
         "httpx": {"enabled": True, "timeout_seconds": 300},
@@ -87,6 +94,7 @@ DEFAULT_CONFIG = {
         "searchsploit": {"enabled": False, "timeout_seconds": 120},
         "trivy": {"enabled": True, "timeout_seconds": 1800},
         "supabase_audit": {"enabled": True, "timeout_seconds": 10, "max_pages": 5, "extra_urls": []},
+        "readiness_probe": {"enabled": True, "max_web_targets": 30},
         # Credentials brute forcing should remain opt-in/manual for safety.
         "hydra": {"enabled": False, "timeout_seconds": 3600},
     },
