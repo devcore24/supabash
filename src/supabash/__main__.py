@@ -1083,13 +1083,23 @@ def config(
 @app.command()
 def chat():
     """
-    Enter interactive chat mode with the Security Agent.
+    Enter interactive chat mode with focused slash-command controls.
+
+    Notes:
+    - Slash commands use a focused subset of `audit`/`ai-audit` options.
+    - `/ai-audit` is a chat alias for agentic audit execution.
+    - For full option coverage, run terminal commands directly:
+      `supabash audit --help` / `supabash ai-audit --help`.
     """
     logger.info("Command 'chat' triggered")
     console.print("[bold magenta][*] Interactive Chat Mode[/bold magenta]")
     console.print(
         "[dim]Type 'exit' to quit. Use slash commands:\n"
         "/scan, /audit, /ai-audit, /status, /stop, /details [tool], /report, /test, /summary, /fix, /plan, /clear-state[/dim]"
+    )
+    console.print(
+        "[dim]Note: chat slash commands support common audit flags only. "
+        "For full flags, run `supabash audit --help` or `supabash ai-audit --help` in terminal mode.[/dim]"
     )
     allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
     session = ChatSession(allowed_hosts=allowed, config_manager=config_manager)
@@ -1586,6 +1596,10 @@ def chat():
                     "[--output reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.json] [--markdown reports/report-YYYYmmdd-HHMMSS/report-YYYYmmdd-HHMMSS.md] [--allow-public] [--bg]"
                 )
                 console.print("[dim]Alias:[/dim] /ai-audit <target> [same options]  (implies --agentic)")
+                console.print(
+                    "[dim]Note:[/dim] Chat slash parsing supports a focused subset of full CLI audit flags. "
+                    "Use terminal `supabash audit --help` / `supabash ai-audit --help` for advanced options."
+                )
                 continue
 
             default_base = "ai-audit" if agentic and not output else "report"

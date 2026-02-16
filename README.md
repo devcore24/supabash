@@ -321,6 +321,11 @@ supabash chat
 I want to audit my staging app for common web vulns
 ```
 
+Notes:
+- Chat slash parsing supports a focused subset of `audit`/`ai-audit` options for safe interactive use.
+- Use terminal mode (`supabash audit --help` / `supabash ai-audit --help`) for advanced flags such as Hydra/Medusa/CME, ScoutSuite/Prowler, TheHarvester, Netdiscover, Aircrack, and Nuclei tag/severity tuning.
+- Chat suggestions intentionally omit `--yes`; consent still applies via `core.consent_accepted` or interactive prompt behavior.
+
 Chat memory & context awareness:
 - Chat state is persisted to `.supabash/chat_state.json` (last results + message history + rolling summary).
 - Freeform chat may propose a slash command; type `y/yes` to run the proposed command.
@@ -457,6 +462,10 @@ supabash ai-audit [OPTIONS] TARGET
 ```bash
 supabash chat
 ```
+
+- Slash commands are available for `/scan`, `/audit`, `/ai-audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`.
+- `/ai-audit` in chat is an alias for agentic audit execution (`/audit ... --agentic` behavior).
+- Chat command parsing intentionally supports a focused subset of audit flags; use terminal commands for full option coverage.
 </details>
 
 <details>
@@ -590,7 +599,7 @@ Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx 
 ### AI & Orchestration
 - **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.
 - **LLM integration:** litellm-based client with config-driven provider/model selection (OpenAI, Anthropic, Gemini, Mistral, Ollama, LM Studio)
-- **Chat mode:** slash commands `/scan`, `/audit`, `/ai-audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
+- **Chat mode:** slash commands `/scan`, `/audit`, `/ai-audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state` with a focused interactive option subset.
 - **Planner robustness:** one-time automatic replan with exclusions when candidates are already baseline-covered.
 - **Repeat/novelty guards:** tool-target reuse caps and low-signal penalties reduce redundant agentic retries.
 
