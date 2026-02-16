@@ -1,15 +1,17 @@
 
 # Supabash
+<img src="docs/images/supabash_mouse_small_180x205.JPG" alt="Supabash mascot" width="180" align="left" />
 
 ```text
+
    _____                   _               _     
   / ____|                 | |             | |    
  | (___  _   _ _ __   __ _| |__   __ _ ___| |__  
   \___ \| | | | '_ \ / _` | '_ \ / _` / __| '_ \ 
   ____) | |_| | |_) | (_| | |_) | (_| \__ \ | | |
  |_____/ \__,_| .__/ \__,_|_.__/ \__,_|___/_| |_|
-              | |                                
-              |_|                                
+              | |     AGENTIC   AI   AUDIT                         
+              |_|      
 ```
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
