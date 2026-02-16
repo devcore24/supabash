@@ -333,6 +333,35 @@ def build_recommended_next_actions(
     tool_items: List[Dict[str, Any]],
     profile: Any,
 ) -> List[str]:
+    def canonical_action_key(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if not text:
+            return ""
+        text = re.sub(r"[^a-z0-9\s]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        stop_words = {
+            "the",
+            "and",
+            "or",
+            "for",
+            "with",
+            "to",
+            "of",
+            "in",
+            "on",
+            "all",
+            "any",
+            "only",
+            "ensure",
+            "verify",
+            "validate",
+            "immediately",
+            "where",
+            "possible",
+        }
+        tokens = [tok for tok in text.split(" ") if tok and tok not in stop_words]
+        return " ".join(tokens[:14])
+
     def severity_rank(value: Any) -> int:
         sev = str(value or "").strip().upper()
         mapping = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
@@ -514,14 +543,20 @@ def build_recommended_next_actions(
 
     deduped: List[str] = []
     seen: Set[str] = set()
+    seen_semantic: Set[str] = set()
     for action in actions:
         text = str(action).strip()
         if not text:
             continue
         key = text.lower()
+        semantic_key = canonical_action_key(text)
         if key in seen:
             continue
+        if semantic_key and semantic_key in seen_semantic:
+            continue
         seen.add(key)
+        if semantic_key:
+            seen_semantic.add(semantic_key)
         deduped.append(text)
 
     max_actions = 8

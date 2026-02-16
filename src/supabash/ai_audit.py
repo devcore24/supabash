@@ -49,6 +49,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
             actions = ai.get("actions") if isinstance(ai, dict) else []
             if not isinstance(actions, list):
                 actions = []
+            planner_context_history = ai.get("planner_context_history") if isinstance(ai, dict) else []
+            if not isinstance(planner_context_history, list):
+                planner_context_history = []
             commands = [
                 {"tool": r.get("tool"), "command": r.get("command"), "target": r.get("target"), "phase": r.get("phase")}
                 for r in (agg.get("results", []) or [])
@@ -221,6 +224,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
             actions = ai.get("actions") if isinstance(ai, dict) else []
             if not isinstance(actions, list):
                 actions = []
+            planner_context_history = ai.get("planner_context_history") if isinstance(ai, dict) else []
+            if not isinstance(planner_context_history, list):
+                planner_context_history = []
 
             llm_obj = agg.get("llm")
             llm_calls = llm_obj.get("calls") if isinstance(llm_obj, dict) else []
@@ -255,6 +261,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 "llm_calls": llm_calls,
                 "planner_calls": planner_calls,
                 "summary_calls": summary_calls,
+                "planner_context_history": planner_context_history,
                 "decision_trace": decision_trace,
                 "actions": actions,
             }
@@ -294,6 +301,29 @@ class AIAuditOrchestrator(AuditOrchestrator):
             md_lines.append(f"- llm_calls: {len(llm_calls)}")
             md_lines.append(f"- planner_calls: {len(planner_calls)}")
             md_lines.append(f"- summary_calls: {len(summary_calls)}")
+            md_lines.append(f"- planner_context_snapshots: {len(planner_context_history)}")
+
+            if planner_context_history:
+                md_lines.append("\n## Planner Context Snapshots")
+                for idx, item in enumerate(planner_context_history[:120], start=1):
+                    if not isinstance(item, dict):
+                        continue
+                    when = _fmt_ts(item.get("timestamp")) or "-"
+                    remaining = item.get("remaining_actions")
+                    findings_total = item.get("findings_total")
+                    clusters = item.get("finding_cluster_count")
+                    open_high = item.get("open_high_risk_cluster_count")
+                    md_lines.append(
+                        f"- {idx}. [{when}] remaining={remaining} findings={findings_total} "
+                        f"clusters={clusters} open_high_risk={open_high}"
+                    )
+                    last_action = item.get("last_action")
+                    if isinstance(last_action, dict):
+                        tool = _short(last_action.get("tool"), 40) or "-"
+                        target = _short(last_action.get("target"), 120) or "-"
+                        status = _short(last_action.get("status"), 40) or "-"
+                        gain = last_action.get("gain_score")
+                        md_lines.append(f"  - last_action: tool={tool} target={target} status={status} gain={gain}")
 
             if thinking_events:
                 md_lines.append("\n## Event Stream")
@@ -837,6 +867,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 ai_obj["agentic_skipped"] = True
             else:
                 allowed_argument_keys = {"profile", "target", "port", "rate_limit", "threads", "wordlist"}
+                if not isinstance(ai_obj.get("planner_context_history"), list):
+                    ai_obj["planner_context_history"] = []
+                planner_context_history: List[Dict[str, Any]] = ai_obj.get("planner_context_history") or []
 
                 def build_tool_schema(allowed: List[str]) -> Dict[str, Any]:
                     return {
@@ -1056,11 +1089,31 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             }
                         )
 
-                    findings_preview = []
+                    all_findings: List[Dict[str, Any]] = []
                     try:
-                        findings_preview = self._collect_findings(agg)[-20:]
+                        collected = self._collect_findings(agg)
+                        all_findings = collected if isinstance(collected, list) else []
                     except Exception:
-                        findings_preview = []
+                        all_findings = []
+                    finding_clusters = _cluster_findings_for_planner(all_findings)
+
+                    findings_recent: List[Dict[str, Any]] = []
+                    for f in all_findings[-30:]:
+                        if not isinstance(f, dict):
+                            continue
+                        findings_recent.append(
+                            {
+                                "severity": str(f.get("severity") or "INFO").strip().upper(),
+                                "title": str(f.get("title") or "").strip(),
+                                "evidence": str(f.get("evidence") or "").strip()[:240],
+                                "tool": str(f.get("tool") or "").strip(),
+                                "phase": str(f.get("phase") or "baseline").strip(),
+                                "risk_class": str(f.get("risk_class") or "").strip().lower(),
+                                "dedup_key": str(f.get("dedup_key") or "").strip(),
+                            }
+                        )
+                        if len(findings_recent) >= 30:
+                            break
 
                     compliance_block = {}
                     if compliance_profiles:
@@ -1100,6 +1153,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             }
                         )
 
+                    baseline_action_rows = _baseline_action_ledger()
+                    agentic_action_rows = _planner_action_ledger_snapshot(limit=120)
+                    blocked_recent_rows = [dict(x) for x in planner_blocked_candidates[-120:] if isinstance(x, dict)]
                     context_obj = {
                         "target": target,
                         "mode": mode,
@@ -1113,8 +1169,29 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "open_ports": open_ports,
                         "observations": {
                             "web_targets": allowed_web_targets[:12],
-                            "results": results_summary[-12:],
-                            "findings": findings_preview,
+                            "results_recent": results_summary[-20:],
+                            "findings_recent": findings_recent,
+                        },
+                        "findings_state": {
+                            "coverage": {
+                                "all_findings_included": True,
+                                "baseline_and_agentic_included": True,
+                                "total_findings": int(finding_clusters.get("total_findings", 0)),
+                                "cluster_count": int(finding_clusters.get("cluster_count", 0)),
+                            },
+                            "open_high_risk_clusters": finding_clusters.get("open_high_risk_clusters", []),
+                            "covered_cluster_ids": finding_clusters.get("covered_cluster_ids", []),
+                            "clusters": finding_clusters.get("clusters", []),
+                        },
+                        "actions_state": {
+                            "baseline_actions": baseline_action_rows[-80:],
+                            "agentic_actions_taken": agentic_action_rows,
+                            "blocked_candidates_recent": blocked_recent_rows,
+                            "already_done_actions": excluded[:120],
+                            "low_signal_streak": int(low_signal_streak),
+                            "recent_gain_scores": [int(x) for x in recent_gain_scores[-8:]],
+                            "nonpositive_after_broad_streak": int(nonpositive_after_broad_streak),
+                            "last_action": agentic_action_rows[-1] if agentic_action_rows else None,
                         },
                         "compliance": compliance_block,
                         "constraints": {
@@ -1131,8 +1208,29 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "excluded_actions": excluded[:64],
                         },
                     }
+                    planner_context_history.append(
+                        {
+                            "timestamp": time.time(),
+                            "remaining_actions": int(remaining),
+                            "allowed_tools": list(allowed_tools),
+                            "open_ports_count": len(open_ports or []),
+                            "web_target_count": len(allowed_web_targets or []),
+                            "findings_total": int(finding_clusters.get("total_findings", 0)),
+                            "finding_cluster_count": int(finding_clusters.get("cluster_count", 0)),
+                            "open_high_risk_cluster_count": len(finding_clusters.get("open_high_risk_clusters", []) or []),
+                            "baseline_actions_count": len(baseline_action_rows),
+                            "agentic_actions_count": len(agentic_action_rows),
+                            "blocked_recent_count": len(blocked_recent_rows),
+                            "excluded_actions_count": len(excluded),
+                            "last_action": agentic_action_rows[-1] if agentic_action_rows else None,
+                            "open_high_risk_clusters": finding_clusters.get("open_high_risk_clusters", [])[:20],
+                        }
+                    )
+                    if len(planner_context_history) > 120:
+                        planner_context_history[:] = planner_context_history[-120:]
+                    ai_obj["planner_context_history"] = planner_context_history
 
-                    max_chars = self._llm_max_chars(default=8000)
+                    max_chars = self._llm_max_chars(default=12000)
                     payload, truncated = prepare_json_payload(context_obj, max_chars=max_chars)
                     messages = [
                         {"role": "system", "content": prompts.AGENTIC_TOOLCALL_PROMPT},
@@ -1440,6 +1538,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 agentic_success: set[tuple] = set()
                 actions_executed = 0
                 low_signal_streak = 0
+                nonpositive_after_broad_streak = 0
                 agentic_tool_counts: Dict[str, int] = {}
                 agentic_target_counts: Dict[str, int] = {}
                 agentic_action_counts: Dict[Tuple[str, str], int] = {}
@@ -1448,6 +1547,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 agentic_tool_no_risk_gain_counts: Dict[str, int] = {}
                 agentic_tool_gain_scores: Dict[str, List[int]] = {}
                 recent_gain_scores: List[int] = []
+                planner_action_ledger: List[Dict[str, Any]] = []
+                planner_blocked_candidates: List[Dict[str, Any]] = []
 
                 def _baseline_would_skip(action: Dict[str, Any]) -> bool:
                     tool = action.get("tool")
@@ -1658,6 +1759,151 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     ranked.sort(key=lambda item: (-item[0], item[1]))
                     cap = max(1, min(4, max(1, len(allowed_web_targets) // 3)))
                     return {target for _, target in ranked[:cap]}
+
+                def _normalize_target_label(value: Any) -> str:
+                    text = str(value or "").strip()
+                    if not text:
+                        return ""
+                    try:
+                        parsed = urlparse(text)
+                        if parsed.scheme:
+                            host = str(parsed.hostname or "").strip().lower()
+                            if not host:
+                                return text.lower()
+                            port = int(parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80))
+                            return f"{host}:{port}"
+                    except Exception:
+                        pass
+                    return text.lower()
+
+                def _baseline_action_ledger() -> List[Dict[str, Any]]:
+                    rows: List[Dict[str, Any]] = []
+                    for entry in agg.get("results", []) or []:
+                        if not isinstance(entry, dict):
+                            continue
+                        if str(entry.get("phase") or "baseline").strip().lower() != "baseline":
+                            continue
+                        status = "skipped" if entry.get("skipped") else ("success" if entry.get("success") else "failed")
+                        rows.append(
+                            {
+                                "phase": "baseline",
+                                "tool": str(entry.get("tool") or "").strip(),
+                                "target": str(entry.get("target") or "").strip(),
+                                "status": status,
+                                "reason": str(entry.get("reason") or "").strip(),
+                                "error": str(entry.get("error") or "").strip(),
+                            }
+                        )
+                    return rows
+
+                def _cluster_findings_for_planner(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
+                    by_key: Dict[str, Dict[str, Any]] = {}
+                    total = 0
+                    for finding in findings or []:
+                        if not isinstance(finding, dict):
+                            continue
+                        total += 1
+                        sev = str(finding.get("severity") or "INFO").strip().upper() or "INFO"
+                        tool = str(finding.get("tool") or "").strip()
+                        risk_class = str(finding.get("risk_class") or "").strip().lower()
+                        dedup_key = str(finding.get("dedup_key") or "").strip()
+                        if not dedup_key:
+                            dedup_key = self._finding_dedup_key(finding)
+                        if not dedup_key:
+                            continue
+                        phase = str(finding.get("phase") or "baseline").strip().lower() or "baseline"
+                        title = str(finding.get("title") or "").strip()
+                        evidence = str(finding.get("evidence") or "").strip()
+                        host, path = self._extract_finding_host_path(finding)
+                        target_label = ""
+                        if host:
+                            target_label = host
+                            if path:
+                                target_label = f"{target_label}{path}"
+                        cluster = by_key.get(dedup_key)
+                        if cluster is None:
+                            cluster = {
+                                "cluster_id": dedup_key,
+                                "severity": sev,
+                                "severity_rank": int(self._severity_rank(sev)),
+                                "risk_class": risk_class or "general_security_signal",
+                                "title": title,
+                                "count": 0,
+                                "tools": set(),
+                                "phases": set(),
+                                "targets": set(),
+                                "evidence_samples": [],
+                            }
+                            by_key[dedup_key] = cluster
+                        cluster["count"] = int(cluster.get("count", 0)) + 1
+                        if int(self._severity_rank(sev)) > int(cluster.get("severity_rank", 0)):
+                            cluster["severity"] = sev
+                            cluster["severity_rank"] = int(self._severity_rank(sev))
+                        if tool:
+                            cluster["tools"].add(tool)
+                        if phase:
+                            cluster["phases"].add(phase)
+                        if target_label:
+                            cluster["targets"].add(target_label)
+                        elif host:
+                            cluster["targets"].add(host)
+                        if evidence and len(cluster["evidence_samples"]) < 3:
+                            cluster["evidence_samples"].append(evidence[:220])
+
+                    clusters: List[Dict[str, Any]] = []
+                    for item in by_key.values():
+                        phases = sorted(str(x) for x in item.get("phases", set()) if str(x).strip())
+                        targets = sorted(str(x) for x in item.get("targets", set()) if str(x).strip())
+                        tools = sorted(str(x) for x in item.get("tools", set()) if str(x).strip())
+                        cluster = {
+                            "cluster_id": item.get("cluster_id"),
+                            "severity": item.get("severity"),
+                            "severity_rank": int(item.get("severity_rank", 0)),
+                            "risk_class": item.get("risk_class"),
+                            "title": item.get("title"),
+                            "count": int(item.get("count", 0)),
+                            "tools": tools[:6],
+                            "phases": phases,
+                            "targets": targets[:6],
+                            "evidence_samples": list(item.get("evidence_samples", []))[:3],
+                            "seen_in_agentic": "agentic" in phases,
+                        }
+                        clusters.append(cluster)
+
+                    clusters.sort(
+                        key=lambda c: (
+                            -int(c.get("severity_rank", 0)),
+                            -int(c.get("count", 0)),
+                            str(c.get("title") or ""),
+                        )
+                    )
+
+                    open_high_risk_clusters = [
+                        {
+                            "cluster_id": c.get("cluster_id"),
+                            "severity": c.get("severity"),
+                            "risk_class": c.get("risk_class"),
+                            "title": c.get("title"),
+                            "count": c.get("count"),
+                            "targets": c.get("targets", [])[:4],
+                            "tools": c.get("tools", [])[:4],
+                        }
+                        for c in clusters
+                        if int(c.get("severity_rank", 0)) >= 4 and not bool(c.get("seen_in_agentic"))
+                    ][:30]
+                    covered_cluster_ids = [str(c.get("cluster_id") or "") for c in clusters if bool(c.get("seen_in_agentic"))][:80]
+                    return {
+                        "total_findings": int(total),
+                        "cluster_count": len(clusters),
+                        "clusters": clusters[:140],
+                        "open_high_risk_clusters": open_high_risk_clusters,
+                        "covered_cluster_ids": covered_cluster_ids,
+                    }
+
+                def _planner_action_ledger_snapshot(limit: int = 100) -> List[Dict[str, Any]]:
+                    if limit <= 0:
+                        return []
+                    return [dict(x) for x in planner_action_ledger[-int(limit) :] if isinstance(x, dict)]
 
                 def _candidate_sort_key(action: Dict[str, Any]) -> Tuple[int, int, str, str]:
                     skip_penalty = 1 if _baseline_would_skip(action) else 0
@@ -1871,6 +2117,20 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         trace_item["finished_at"] = time.time()
                         ai_obj.setdefault("decision_trace", []).append(trace_item)
                         break
+                    if baseline_broad_nuclei_targets and nonpositive_after_broad_streak >= 2:
+                        note(
+                            "llm_decision",
+                            "planner",
+                            "diminishing returns: forced pivot exhausted after consecutive non-positive gain actions; stopping",
+                            agg=agg,
+                        )
+                        trace_item["decision"] = {
+                            "result": "stop",
+                            "reason": "forced_pivot_exhausted_nonpositive_gain",
+                        }
+                        trace_item["finished_at"] = time.time()
+                        ai_obj.setdefault("decision_trace", []).append(trace_item)
+                        break
                     action: Optional[Dict[str, Any]] = None
                     stop_requested = False
                     replan_attempted = False
@@ -1967,6 +2227,22 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 }
                                 for a in repeat_blocked[:8]
                             ]
+                            planner_blocked_candidates.extend(
+                                [
+                                    {
+                                        "iteration": int(trace_item.get("iteration") or 0),
+                                        "tool": item.get("tool"),
+                                        "target": item.get("target"),
+                                        "port": item.get("port"),
+                                        "priority": item.get("priority"),
+                                        "reason": item.get("reason"),
+                                    }
+                                    for item in blocked_preview
+                                    if isinstance(item, dict)
+                                ]
+                            )
+                            if len(planner_blocked_candidates) > 500:
+                                planner_blocked_candidates = planner_blocked_candidates[-500:]
                             trace_item["repeat_filtered"] = {
                                 "count": len(repeat_blocked),
                                 "candidates": blocked_preview,
@@ -2002,6 +2278,23 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     for a in actionable[:5]
                                 ],
                             }
+                            if baseline_broad_nuclei_targets and nonpositive_after_broad_streak == 1 and not replan_attempted:
+                                replan_attempted = True
+                                pivot_exclusions = actionable[:2] + sorted_candidates[:4]
+                                excluded_actions_for_replan = _covered_action_exclusions(pivot_exclusions)
+                                trace_item["replan"] = {
+                                    "attempted": True,
+                                    "reason": "recent_nonpositive_gain_forced_pivot",
+                                    "excluded_count": len(excluded_actions_for_replan),
+                                    "excluded": [_action_trace_view(a) for a in excluded_actions_for_replan],
+                                }
+                                note(
+                                    "llm_decision",
+                                    "planner",
+                                    "recent non-positive gain detected; forcing one pivot replan",
+                                    agg=agg,
+                                )
+                                continue
                             if low_signal_streak >= 2 and best_gain <= 0:
                                 note(
                                     "llm_decision",
@@ -2306,6 +2599,32 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             agentic_low_signal_tool_counts[chosen_tool] = (
                                 int(agentic_low_signal_tool_counts.get(chosen_tool, 0)) + 1
                             )
+                    if baseline_broad_nuclei_targets:
+                        if gain_score <= 0:
+                            nonpositive_after_broad_streak = int(nonpositive_after_broad_streak) + 1
+                        else:
+                            nonpositive_after_broad_streak = 0
+                    ledger_entry = {
+                        "iteration": int(trace_item.get("iteration") or 0),
+                        "phase": "agentic",
+                        "tool": chosen_tool,
+                        "target": chosen_target,
+                        "status": status,
+                        "reason": str(entry.get("reason") or "").strip(),
+                        "error": str(entry.get("error") or "").strip(),
+                        "findings_delta": int(findings_delta),
+                        "unique_findings_delta": int(unique_findings_delta),
+                        "risk_class_delta": int(risk_class_delta),
+                        "web_target_delta": int(web_target_delta),
+                        "extra_results": int(extra_added),
+                        "gain_score": int(gain_score),
+                        "started_at": started_at,
+                        "finished_at": finished_at,
+                    }
+                    planner_action_ledger.append(ledger_entry)
+                    if len(planner_action_ledger) > 500:
+                        planner_action_ledger = planner_action_ledger[-500:]
+                    agg["agentic_action_ledger"] = [dict(x) for x in planner_action_ledger]
 
                     trace_item["outcome"] = {
                         "status": status,
@@ -2327,6 +2646,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "web_target_count_delta": int(web_target_delta),
                         "gain_score": int(gain_score),
                         "low_signal_streak_after": int(low_signal_streak),
+                        "nonpositive_after_broad_streak_after": int(nonpositive_after_broad_streak),
                         "tool_usage_count": int(agentic_tool_counts.get(chosen_tool, 0)),
                         "target_usage_count": int(agentic_target_counts.get(chosen_target, 0)),
                         "tool_target_usage_count": int(agentic_action_counts.get(action_repeat_key, 0))
@@ -2399,6 +2719,59 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 f"{total} paths across {len(ffuf_agentic_hits)} target(s): {targets}."
             )
             agg.setdefault("summary_notes", []).append(summary_note)
+
+        findings_for_state = self._collect_findings(agg)
+        if not isinstance(findings_for_state, list):
+            findings_for_state = []
+        cluster_state = _cluster_findings_for_planner(findings_for_state)
+        agg["finding_cluster_overview"] = {
+            "total_findings": int(cluster_state.get("total_findings", 0)),
+            "cluster_count": int(cluster_state.get("cluster_count", 0)),
+            "open_high_risk_cluster_count": len(cluster_state.get("open_high_risk_clusters", []) or []),
+            "covered_cluster_count": len(cluster_state.get("covered_cluster_ids", []) or []),
+        }
+        agg["finding_clusters"] = cluster_state.get("clusters", [])
+        agg["baseline_action_ledger"] = _baseline_action_ledger()
+        if planner_action_ledger:
+            agg["agentic_action_ledger"] = [dict(x) for x in planner_action_ledger]
+
+        baseline_keys: Set[str] = set()
+        agentic_keys: Set[str] = set()
+        baseline_total = 0
+        agentic_total = 0
+        for f in findings_for_state:
+            if not isinstance(f, dict):
+                continue
+            phase = str(f.get("phase") or "baseline").strip().lower() or "baseline"
+            dedup_key = str(f.get("dedup_key") or "").strip()
+            if not dedup_key:
+                dedup_key = self._finding_dedup_key(f)
+            if phase == "agentic":
+                agentic_total += 1
+                if dedup_key:
+                    agentic_keys.add(dedup_key)
+            else:
+                baseline_total += 1
+                if dedup_key:
+                    baseline_keys.add(dedup_key)
+        agentic_delta = {
+            "baseline_total_findings": int(baseline_total),
+            "agentic_total_findings": int(agentic_total),
+            "baseline_unique_findings": len(baseline_keys),
+            "agentic_unique_findings": len(agentic_keys),
+            "agentic_net_new_unique_findings": len(agentic_keys - baseline_keys),
+            "agentic_reconfirmed_unique_findings": len(agentic_keys & baseline_keys),
+        }
+        agg["agentic_delta"] = agentic_delta
+        agg.setdefault("summary_notes", []).append(
+            (
+                "Agentic phase delta: "
+                f"{int(agentic_delta.get('agentic_total_findings', 0))} finding(s), "
+                f"{int(agentic_delta.get('agentic_unique_findings', 0))} unique, "
+                f"net-new unique {int(agentic_delta.get('agentic_net_new_unique_findings', 0))}, "
+                f"reconfirmed unique {int(agentic_delta.get('agentic_reconfirmed_unique_findings', 0))}."
+            )
+        )
 
         # Label LLM status for visibility
         if not llm_enabled:

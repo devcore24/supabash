@@ -1186,8 +1186,8 @@ class AuditOrchestrator:
             )
         )
 
-        max_total = 60
-        max_info = 15
+        max_total = 120
+        max_info = 30
         selected: List[Dict[str, Any]] = []
         info_count = 0
         for f in unique:
@@ -1235,13 +1235,50 @@ class AuditOrchestrator:
         ai = agg.get("ai_audit")
         if isinstance(ai, dict):
             planner = ai.get("planner") if isinstance(ai.get("planner"), dict) else {}
+            action_rows: List[Dict[str, Any]] = []
+            for action in ai.get("actions") or []:
+                if not isinstance(action, dict):
+                    continue
+                action_rows.append(
+                    {
+                        "tool": str(action.get("tool") or "").strip(),
+                        "target": str(action.get("target") or "").strip(),
+                        "phase": str(action.get("phase") or "").strip(),
+                        "status": (
+                            "skipped"
+                            if action.get("skipped")
+                            else ("success" if action.get("success") else "failed")
+                        ),
+                        "reason": str(action.get("reason") or "").strip(),
+                        "error": str(action.get("error") or "").strip(),
+                        "priority": action.get("priority"),
+                        "started_at": action.get("started_at"),
+                        "finished_at": action.get("finished_at"),
+                    }
+                )
             ctx["agentic_expansion"] = {
                 "phase": ai.get("phase"),
                 "notes": ai.get("notes"),
                 "planner": planner.get("type"),
                 "planner_error": planner.get("error"),
-                "actions": [a.get("action") for a in (ai.get("actions") or []) if isinstance(a, dict)][:20],
+                "actions": action_rows[:80],
+                "decision_steps": len(ai.get("decision_trace") or []) if isinstance(ai.get("decision_trace"), list) else 0,
             }
+        finding_clusters = agg.get("finding_clusters")
+        if isinstance(finding_clusters, list) and finding_clusters:
+            ctx["finding_clusters"] = finding_clusters[:200]
+            overview = agg.get("finding_cluster_overview")
+            if isinstance(overview, dict):
+                ctx["finding_cluster_overview"] = overview
+        baseline_ledger = agg.get("baseline_action_ledger")
+        if isinstance(baseline_ledger, list) and baseline_ledger:
+            ctx["baseline_action_ledger"] = baseline_ledger[:120]
+        agentic_ledger = agg.get("agentic_action_ledger")
+        if isinstance(agentic_ledger, list) and agentic_ledger:
+            ctx["agentic_action_ledger"] = agentic_ledger[:160]
+        agentic_delta = agg.get("agentic_delta")
+        if isinstance(agentic_delta, dict) and agentic_delta:
+            ctx["agentic_delta"] = agentic_delta
         return ctx
 
     def _severity_rank(self, severity: str) -> int:
@@ -2670,6 +2707,7 @@ class AuditOrchestrator:
 
         # 1) Listener scope check (local-only; remote targets cannot be validated from here).
         is_local = False
+        is_private_ip = False
         host_val = (scan_host or "").strip().lower()
         if host_val in ("localhost", "localhost.localdomain", "localdomain") or host_val.endswith(".localhost"):
             is_local = True
@@ -2677,8 +2715,12 @@ class AuditOrchestrator:
             try:
                 ip = ipaddress.ip_address(host_val)
                 is_local = bool(getattr(ip, "is_loopback", False))
+                is_private_ip = bool(getattr(ip, "is_private", False) or getattr(ip, "is_link_local", False))
             except Exception:
                 is_local = False
+                is_private_ip = False
+
+        allow_active_http_probes = bool(is_local or is_private_ip)
 
         if not is_local:
             checks.append(
@@ -2740,80 +2782,97 @@ class AuditOrchestrator:
                 checks.append({"name": "listener_scope", "success": False, "error": str(e)})
 
         # 2) Unauthenticated endpoint probes on discovered web targets.
-        # This is intentionally broad (all confirmed web targets, capped) because probes are lightweight.
-        probe_cfg = self._tool_config("readiness_probe")
-        max_probe_targets = probe_cfg.get("max_web_targets", 30)
-        try:
-            max_probe_targets = int(max_probe_targets)
-        except Exception:
-            max_probe_targets = 30
-        max_probe_targets = max(1, min(max_probe_targets, 100))
-        probe_targets = self._dedupe_web_targets_prefer_https(
-            [str(u).strip() for u in (web_targets or []) if str(u).strip()]
-        )[:max_probe_targets]
-        probe_paths = (
-            ("/debug/pprof/", "Go pprof debug endpoint accessible without authentication", "LOW", "pprof_exposure"),
-            ("/metrics", "Unauthenticated metrics endpoint accessible", "MEDIUM", "metrics_exposure"),
-            ("/api/v1/status/config", "Prometheus config endpoint accessible without authentication", "HIGH", "prometheus_config_exposure"),
-            ("/debug/vars", "Debug endpoint accessible without authentication", "LOW", "debug_endpoint_exposure"),
-        )
-        seen_urls = set()
-        for base in probe_targets:
-            base_url = str(base or "").rstrip("/")
-            if not base_url:
-                continue
-
-            # Root probe: detect S3-compatible anonymous list-buckets (e.g., MinIO) without hardcoding ports/products.
-            if base_url not in seen_urls:
-                seen_urls.add(base_url)
-                status, body, error = self._http_probe_status(base_url, timeout_seconds=3)
-                checks.append(
-                    {
-                        "name": "http_probe_root",
-                        "url": base_url,
-                        "status": status,
-                        "error": error,
-                    }
-                )
-                if status is not None and 200 <= status < 300 and isinstance(body, str) and body:
-                    body_l = body.lower()
-                    if "listallmybucketsresult" in body_l or "listbucketresult" in body_l:
-                        findings.append(
-                            {
-                                "severity": "HIGH",
-                                "title": "Anonymous S3-compatible bucket listing accessible",
-                                "evidence": f"{base_url}/ (HTTP {status})",
-                                "type": "s3_bucket_listing",
-                            }
-                        )
-
-            for path, title, severity, finding_type in probe_paths:
-                probe_url = f"{base_url}{path}"
-                if probe_url in seen_urls:
+        # Keep active probing scoped to localhost/private-IP targets to avoid
+        # long DNS/connect stalls and unintended remote side effects.
+        if not allow_active_http_probes:
+            checks.append(
+                {
+                    "name": "http_probe_scope",
+                    "success": None,
+                    "skipped": True,
+                    "reason": "Skipped: active readiness HTTP probes run only for localhost/private-IP targets",
+                }
+            )
+        else:
+            # This is intentionally broad (all confirmed web targets, capped) because probes are lightweight.
+            probe_cfg = self._tool_config("readiness_probe")
+            max_probe_targets = probe_cfg.get("max_web_targets", 30)
+            try:
+                max_probe_targets = int(max_probe_targets)
+            except Exception:
+                max_probe_targets = 30
+            max_probe_targets = max(1, min(max_probe_targets, 100))
+            probe_targets = self._dedupe_web_targets_prefer_https(
+                [str(u).strip() for u in (web_targets or []) if str(u).strip()]
+            )[:max_probe_targets]
+            probe_paths = (
+                ("/debug/pprof/", "Go pprof debug endpoint accessible without authentication", "LOW", "pprof_exposure"),
+                ("/metrics", "Unauthenticated metrics endpoint accessible", "MEDIUM", "metrics_exposure"),
+                (
+                    "/api/v1/status/config",
+                    "Prometheus config endpoint accessible without authentication",
+                    "HIGH",
+                    "prometheus_config_exposure",
+                ),
+                ("/debug/vars", "Debug endpoint accessible without authentication", "LOW", "debug_endpoint_exposure"),
+            )
+            seen_urls = set()
+            for base in probe_targets:
+                base_url = str(base or "").rstrip("/")
+                if not base_url:
                     continue
-                seen_urls.add(probe_url)
-                status, body, error = self._http_probe_status(probe_url, timeout_seconds=3)
-                checks.append(
-                    {
-                        "name": "http_probe",
-                        "url": probe_url,
-                        "status": status,
-                        "error": error,
-                    }
-                )
-                if status is not None and 200 <= status < 400:
-                    if finding_type == "pprof_exposure":
-                        body_l = (body or "").lower() if isinstance(body, str) else ""
-                        if "pprof" not in body_l:
-                            continue
-                    findings.append(
+
+                # Root probe: detect S3-compatible anonymous list-buckets (e.g., MinIO) without hardcoding ports/products.
+                if base_url not in seen_urls:
+                    seen_urls.add(base_url)
+                    status, body, error = self._http_probe_status(base_url, timeout_seconds=3)
+                    checks.append(
                         {
-                            "severity": severity,
-                            "title": title,
-                            "evidence": f"{probe_url} (HTTP {status})",
-                            "type": finding_type,
+                            "name": "http_probe_root",
+                            "url": base_url,
+                            "status": status,
+                            "error": error,
                         }
                     )
+                    if status is not None and 200 <= status < 300 and isinstance(body, str) and body:
+                        body_l = body.lower()
+                        if "listallmybucketsresult" in body_l or "listbucketresult" in body_l:
+                            findings.append(
+                                {
+                                    "severity": "HIGH",
+                                    "title": "Anonymous S3-compatible bucket listing accessible",
+                                    "evidence": f"{base_url}/ (HTTP {status})",
+                                    "type": "s3_bucket_listing",
+                                }
+                            )
+
+                for path, title, severity, finding_type in probe_paths:
+                    probe_url = f"{base_url}{path}"
+                    if probe_url in seen_urls:
+                        continue
+                    seen_urls.add(probe_url)
+                    status, body, error = self._http_probe_status(probe_url, timeout_seconds=3)
+                    checks.append(
+                        {
+                            "name": "http_probe",
+                            "url": probe_url,
+                            "status": status,
+                            "error": error,
+                        }
+                    )
+                    if status is not None and 200 <= status < 400:
+                        if finding_type == "pprof_exposure":
+                            body_l = (body or "").lower() if isinstance(body, str) else ""
+                            if "pprof" not in body_l:
+                                continue
+                        findings.append(
+                            {
+                                "severity": severity,
+                                "title": title,
+                                "evidence": f"{probe_url} (HTTP {status})",
+                                "type": finding_type,
+                            }
+                        )
 
         # 3) Redis unauthenticated access posture check (best-effort).
         if any(int(p) == 6379 for p in (open_ports or [])):
