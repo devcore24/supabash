@@ -1649,39 +1649,50 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "expected_evidence": action.get("expected_evidence"),
                     }
 
-                def _findings_count_now() -> int:
+                def _findings_state_now() -> Dict[str, Any]:
                     try:
                         items = self._collect_findings(agg)
-                        return len(items) if isinstance(items, list) else 0
                     except Exception:
-                        return 0
-
-                def _risk_classes_now() -> Set[str]:
-                    try:
-                        items = self._collect_findings(agg)
-                        if isinstance(items, list):
-                            return self._risk_classes_from_findings(items)
-                    except Exception:
-                        pass
-                    return set()
-
-                def _unique_findings_count_now() -> int:
-                    try:
-                        items = self._collect_findings(agg)
-                        if not isinstance(items, list):
-                            return 0
-                        keys: Set[str] = set()
-                        for finding in items:
-                            if not isinstance(finding, dict):
-                                continue
-                            dedup_key = str(finding.get("dedup_key") or "").strip()
-                            if not dedup_key:
-                                dedup_key = self._finding_dedup_key(finding)
+                        items = []
+                    if not isinstance(items, list):
+                        items = []
+                    all_keys: Set[str] = set()
+                    baseline_keys: Set[str] = set()
+                    agentic_keys: Set[str] = set()
+                    baseline_total = 0
+                    agentic_total = 0
+                    risk_classes = self._risk_classes_from_findings(items)
+                    for finding in items:
+                        if not isinstance(finding, dict):
+                            continue
+                        dedup_key = str(finding.get("dedup_key") or "").strip()
+                        if not dedup_key:
+                            dedup_key = self._finding_dedup_key(finding)
+                        if dedup_key:
+                            all_keys.add(dedup_key)
+                        phase = str(finding.get("phase") or "baseline").strip().lower() or "baseline"
+                        if phase == "agentic":
+                            agentic_total += 1
                             if dedup_key:
-                                keys.add(dedup_key)
-                        return len(keys)
-                    except Exception:
-                        return 0
+                                agentic_keys.add(dedup_key)
+                        else:
+                            baseline_total += 1
+                            if dedup_key:
+                                baseline_keys.add(dedup_key)
+                    cluster_state = _cluster_findings_for_planner(items)
+                    return {
+                        "items": items,
+                        "total_count": len(items),
+                        "unique_all_count": len(all_keys),
+                        "risk_classes": risk_classes,
+                        "all_keys": all_keys,
+                        "baseline_total": int(baseline_total),
+                        "agentic_total": int(agentic_total),
+                        "baseline_keys": baseline_keys,
+                        "agentic_keys": agentic_keys,
+                        "open_high_risk_clusters": cluster_state.get("open_high_risk_clusters", []),
+                        "open_high_risk_cluster_count": len(cluster_state.get("open_high_risk_clusters", []) or []),
+                    }
 
                 def _target_host_port_key(value: str) -> Optional[Tuple[str, int]]:
                     text = str(value or "").strip()
@@ -1759,6 +1770,81 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     ranked.sort(key=lambda item: (-item[0], item[1]))
                     cap = max(1, min(4, max(1, len(allowed_web_targets) // 3)))
                     return {target for _, target in ranked[:cap]}
+
+                def _open_high_risk_target_hints_now() -> Dict[str, Set[str]]:
+                    hosts: Set[str] = set()
+                    host_ports: Set[str] = set()
+                    try:
+                        state = _findings_state_now()
+                        open_clusters = state.get("open_high_risk_clusters", [])
+                    except Exception:
+                        open_clusters = []
+                    if not isinstance(open_clusters, list):
+                        return {"hosts": hosts, "host_ports": host_ports}
+                    for cluster in open_clusters:
+                        if not isinstance(cluster, dict):
+                            continue
+                        for target_label in cluster.get("targets", []) or []:
+                            text = str(target_label or "").strip()
+                            if not text:
+                                continue
+                            try:
+                                if "://" in text:
+                                    parsed = urlparse(text)
+                                    host = str(parsed.hostname or "").strip().lower()
+                                    if host:
+                                        hosts.add(host)
+                                    port_val = parsed.port
+                                    if host and port_val is not None:
+                                        host_ports.add(f"{host}:{int(port_val)}")
+                                    continue
+                            except Exception:
+                                pass
+                            host_part = str(text).split("/", 1)[0].strip().lower().strip("[]")
+                            if not host_part:
+                                continue
+                            if ":" in host_part:
+                                maybe_host, maybe_port = host_part.rsplit(":", 1)
+                                if maybe_host:
+                                    hosts.add(maybe_host)
+                                    try:
+                                        host_ports.add(f"{maybe_host}:{int(maybe_port)}")
+                                        continue
+                                    except Exception:
+                                        pass
+                            hosts.add(host_part)
+                    return {"hosts": hosts, "host_ports": host_ports}
+
+                def _action_links_open_high_risk_cluster(action: Dict[str, Any]) -> bool:
+                    if not isinstance(action, dict):
+                        return False
+                    hints = _open_high_risk_target_hints_now()
+                    hosts = hints.get("hosts", set()) if isinstance(hints, dict) else set()
+                    host_ports = hints.get("host_ports", set()) if isinstance(hints, dict) else set()
+                    args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+                    tool = str(action.get("tool") or "").strip().lower()
+                    target = str(args.get("target") or "").strip()
+                    if target:
+                        host_port = _target_host_port_key(target)
+                        if host_port:
+                            host = str(host_port[0]).strip().lower()
+                            pair = f"{host}:{int(host_port[1])}"
+                            if host in hosts or pair in host_ports:
+                                return True
+                        else:
+                            host_only = str(target).split("/", 1)[0].strip().lower().strip("[]")
+                            if host_only in hosts:
+                                return True
+                    if tool == "sslscan":
+                        resolved_port = _resolve_sslscan_port_for_action(action)
+                        host = str(scan_host or "").strip().lower().strip("[]")
+                        if host and host in hosts:
+                            return True
+                        if host and resolved_port is not None and f"{host}:{int(resolved_port)}" in host_ports:
+                            return True
+                    if target and target in _high_risk_web_targets_now():
+                        return True
+                    return False
 
                 def _normalize_target_label(value: Any) -> str:
                     text = str(value or "").strip()
@@ -2042,6 +2128,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                     if tool == "sslscan" and _resolve_sslscan_port_for_action(action) is None:
                         return "invalid_sslscan_target"
+
+                    if (
+                        tool in ("nuclei", "sslscan", "gobuster", "ffuf", "katana", "nikto", "sqlmap")
+                        and tool_count >= 1
+                        and novelty <= 0
+                        and gain_score <= 0
+                        and not _action_links_open_high_risk_cluster(action)
+                    ):
+                        return "low_gain_not_linked_open_high_risk"
 
                     if tool == "nuclei":
                         high_risk_targets = _high_risk_web_targets_now()
@@ -2363,9 +2458,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         decision_parts.append(f"expect={expected}")
                     note("llm_decision", action.get("tool", "planner"), " | ".join(decision_parts), agg=agg)
 
-                    pre_findings_count = _findings_count_now()
-                    pre_unique_findings_count = _unique_findings_count_now()
-                    pre_risk_classes = _risk_classes_now()
+                    pre_findings_state = _findings_state_now()
+                    pre_findings_count = int(pre_findings_state.get("total_count", 0))
+                    pre_unique_findings_count = int(pre_findings_state.get("unique_all_count", 0))
+                    pre_risk_classes = set(pre_findings_state.get("risk_classes", set()) or set())
+                    pre_all_keys = set(pre_findings_state.get("all_keys", set()) or set())
+                    pre_agentic_keys = set(pre_findings_state.get("agentic_keys", set()) or set())
+                    pre_agentic_total = int(pre_findings_state.get("agentic_total", 0))
+                    pre_open_high_risk_cluster_count = int(pre_findings_state.get("open_high_risk_cluster_count", 0))
                     pre_web_target_count = len(set(allowed_web_targets))
 
                     note("tool_start", action["tool"], f"Running {action['tool']} (agentic)", agg=agg)
@@ -2528,24 +2628,44 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 )
                             agg["web_targets"] = web_targets
 
-                    post_findings_count = _findings_count_now()
-                    post_unique_findings_count = _unique_findings_count_now()
-                    post_risk_classes = _risk_classes_now()
+                    post_findings_state = _findings_state_now()
+                    post_findings_count = int(post_findings_state.get("total_count", 0))
+                    post_unique_findings_count = int(post_findings_state.get("unique_all_count", 0))
+                    post_risk_classes = set(post_findings_state.get("risk_classes", set()) or set())
+                    post_agentic_keys = set(post_findings_state.get("agentic_keys", set()) or set())
+                    post_agentic_total = int(post_findings_state.get("agentic_total", 0))
+                    post_open_high_risk_cluster_count = int(post_findings_state.get("open_high_risk_cluster_count", 0))
                     new_risk_classes = sorted(post_risk_classes - pre_risk_classes)
                     risk_class_delta = len(new_risk_classes)
                     post_web_target_count = len(set(allowed_web_targets))
                     findings_delta = max(0, post_findings_count - pre_findings_count)
                     unique_findings_delta = max(0, post_unique_findings_count - pre_unique_findings_count)
+                    agentic_findings_delta = max(0, post_agentic_total - pre_agentic_total)
+                    agentic_unique_findings_delta = max(0, len(post_agentic_keys) - len(pre_agentic_keys))
+                    new_agentic_keys = post_agentic_keys - pre_agentic_keys
+                    agentic_net_new_unique_delta = len(new_agentic_keys - pre_all_keys)
+                    agentic_reconfirmed_unique_delta = len(new_agentic_keys & pre_all_keys)
+                    open_high_risk_cluster_delta = max(
+                        0, pre_open_high_risk_cluster_count - post_open_high_risk_cluster_count
+                    )
                     web_target_delta = max(0, post_web_target_count - pre_web_target_count)
                     status = "skipped" if entry.get("skipped") else ("success" if entry.get("success") else "failed")
                     if status == "success" and (
-                        risk_class_delta > 0 or web_target_delta > 0 or unique_findings_delta > 0 or extra_added > 0
+                        risk_class_delta > 0
+                        or web_target_delta > 0
+                        or agentic_net_new_unique_delta > 0
+                        or open_high_risk_cluster_delta > 0
+                        or extra_added > 0
                     ):
                         signal = "high"
                         signal_note = "Action produced net-new risk/coverage signal."
-                    elif status == "success" and findings_delta > 0:
+                    elif status == "success" and (
+                        agentic_unique_findings_delta > 0
+                        or agentic_reconfirmed_unique_delta > 0
+                        or findings_delta > 0
+                    ):
                         signal = "medium"
-                        signal_note = "Action added findings, but mostly duplicated existing risk classes."
+                        signal_note = "Action added or reconfirmed findings, but with limited net-new risk classes."
                     elif status == "success":
                         signal = "medium"
                         signal_note = "Action succeeded but added limited net-new signal."
@@ -2558,10 +2678,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                     gain_score = (
                         int(risk_class_delta) * 4
-                        + int(unique_findings_delta) * 2
+                        + int(agentic_net_new_unique_delta) * 3
+                        + int(open_high_risk_cluster_delta) * 4
                         + int(web_target_delta) * 2
                         + (1 if int(extra_added) > 0 else 0)
                     )
+                    if int(agentic_reconfirmed_unique_delta) > 0:
+                        gain_score += 1
                     if status != "success":
                         gain_score -= 1
 
@@ -2614,7 +2737,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "error": str(entry.get("error") or "").strip(),
                         "findings_delta": int(findings_delta),
                         "unique_findings_delta": int(unique_findings_delta),
+                        "agentic_findings_delta": int(agentic_findings_delta),
+                        "agentic_unique_findings_delta": int(agentic_unique_findings_delta),
+                        "agentic_net_new_unique_delta": int(agentic_net_new_unique_delta),
+                        "agentic_reconfirmed_unique_delta": int(agentic_reconfirmed_unique_delta),
                         "risk_class_delta": int(risk_class_delta),
+                        "open_high_risk_cluster_delta": int(open_high_risk_cluster_delta),
                         "web_target_delta": int(web_target_delta),
                         "extra_results": int(extra_added),
                         "gain_score": int(gain_score),
@@ -2637,10 +2765,21 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "unique_findings_count_before": int(pre_unique_findings_count),
                         "unique_findings_count_after": int(post_unique_findings_count),
                         "unique_findings_count_delta": int(unique_findings_delta),
+                        "agentic_findings_count_before": int(pre_agentic_total),
+                        "agentic_findings_count_after": int(post_agentic_total),
+                        "agentic_findings_count_delta": int(agentic_findings_delta),
+                        "agentic_unique_findings_count_before": int(len(pre_agentic_keys)),
+                        "agentic_unique_findings_count_after": int(len(post_agentic_keys)),
+                        "agentic_unique_findings_count_delta": int(agentic_unique_findings_delta),
+                        "agentic_net_new_unique_delta": int(agentic_net_new_unique_delta),
+                        "agentic_reconfirmed_unique_delta": int(agentic_reconfirmed_unique_delta),
                         "risk_class_count_before": int(len(pre_risk_classes)),
                         "risk_class_count_after": int(len(post_risk_classes)),
                         "risk_class_delta": int(risk_class_delta),
                         "new_risk_classes": new_risk_classes[:12],
+                        "open_high_risk_cluster_count_before": int(pre_open_high_risk_cluster_count),
+                        "open_high_risk_cluster_count_after": int(post_open_high_risk_cluster_count),
+                        "open_high_risk_cluster_delta": int(open_high_risk_cluster_delta),
                         "web_target_count_before": int(pre_web_target_count),
                         "web_target_count_after": int(post_web_target_count),
                         "web_target_count_delta": int(web_target_delta),
@@ -2664,7 +2803,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         (
                             f"signal={signal}; status={status}; findings_delta={int(findings_delta)}; "
                             f"unique_findings_delta={int(unique_findings_delta)}; "
+                            f"agentic_unique_delta={int(agentic_unique_findings_delta)}; "
+                            f"net_new_unique_delta={int(agentic_net_new_unique_delta)}; "
+                            f"reconfirmed_unique_delta={int(agentic_reconfirmed_unique_delta)}; "
                             f"risk_classes_delta={int(risk_class_delta)}; web_targets_delta={int(web_target_delta)}; "
+                            f"open_high_risk_delta={int(open_high_risk_cluster_delta)}; "
                             f"extra_results={int(extra_added)}; gain_score={int(gain_score)}"
                         ),
                         agg=agg,
@@ -2761,15 +2904,23 @@ class AIAuditOrchestrator(AuditOrchestrator):
             "agentic_unique_findings": len(agentic_keys),
             "agentic_net_new_unique_findings": len(agentic_keys - baseline_keys),
             "agentic_reconfirmed_unique_findings": len(agentic_keys & baseline_keys),
+            "agentic_duplicate_only_findings": max(0, int(agentic_total) - int(len(agentic_keys))),
         }
         agg["agentic_delta"] = agentic_delta
+        reconfirmed_only = bool(
+            int(agentic_delta.get("agentic_unique_findings", 0)) > 0
+            and int(agentic_delta.get("agentic_net_new_unique_findings", 0)) == 0
+        )
+        reconfirmed_note = " (reconfirmed existing signatures only)" if reconfirmed_only else ""
         agg.setdefault("summary_notes", []).append(
             (
                 "Agentic phase delta: "
                 f"{int(agentic_delta.get('agentic_total_findings', 0))} finding(s), "
-                f"{int(agentic_delta.get('agentic_unique_findings', 0))} unique, "
+                f"{int(agentic_delta.get('agentic_unique_findings', 0))} unique signatures, "
                 f"net-new unique {int(agentic_delta.get('agentic_net_new_unique_findings', 0))}, "
-                f"reconfirmed unique {int(agentic_delta.get('agentic_reconfirmed_unique_findings', 0))}."
+                f"reconfirmed unique {int(agentic_delta.get('agentic_reconfirmed_unique_findings', 0))}, "
+                f"duplicate-only findings {int(agentic_delta.get('agentic_duplicate_only_findings', 0))}."
+                f"{reconfirmed_note}"
             )
         )
 

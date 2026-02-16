@@ -333,6 +333,42 @@ def build_recommended_next_actions(
     tool_items: List[Dict[str, Any]],
     profile: Any,
 ) -> List[str]:
+    def action_intent_key(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if not text:
+            return ""
+        flat = re.sub(r"[^a-z0-9\s]", " ", text)
+        flat = re.sub(r"\s+", " ", flat).strip()
+
+        def has_any(*phrases: str) -> bool:
+            return any(str(p).strip().lower() in flat for p in phrases if str(p).strip())
+
+        if has_any("service role key") and has_any("rotate", "revoke"):
+            return "supabase_service_role_key_rotation"
+        if has_any("rest api", "rest access", "jwt", "api keys") and has_any("authentication", "require auth", "enforce"):
+            return "supabase_rest_auth_hardening"
+        if has_any("rls", "row level security") and has_any("enable", "policy", "least privilege"):
+            return "supabase_rls_enforcement"
+        if has_any("monitoring", "metrics", "prometheus", "pprof", "debug endpoint") and has_any(
+            "restrict", "authentication", "authorization"
+        ):
+            return "monitoring_debug_access_control"
+        if has_any("redis") and has_any("authentication", "acl", "bind", "firewall"):
+            return "redis_exposure_hardening"
+        if has_any("postgresql", "database") and has_any("auth", "tls", "exposure", "limit"):
+            return "database_exposure_hardening"
+        if has_any("attack surface", "unused listeners", "wildcard interfaces", "least privilege network"):
+            return "attack_surface_reduction"
+        if has_any("security headers", "method restrictions", "admin endpoints", "default endpoints"):
+            return "web_baseline_hardening"
+        if has_any("tls", "transport security", "cipher", "certificate"):
+            return "tls_hardening"
+        if has_any("manual evidence", "control operation evidence", "governance", "readiness review"):
+            return "manual_control_evidence_collection"
+        if has_any("rerun", "compare deltas", "evidence artifacts"):
+            return "rerun_and_compare_deltas"
+        return ""
+
     def canonical_action_key(value: Any) -> str:
         text = str(value or "").strip().lower()
         if not text:
@@ -544,17 +580,23 @@ def build_recommended_next_actions(
     deduped: List[str] = []
     seen: Set[str] = set()
     seen_semantic: Set[str] = set()
+    seen_intents: Set[str] = set()
     for action in actions:
         text = str(action).strip()
         if not text:
             continue
         key = text.lower()
         semantic_key = canonical_action_key(text)
+        intent_key = action_intent_key(text)
         if key in seen:
+            continue
+        if intent_key and intent_key in seen_intents:
             continue
         if semantic_key and semantic_key in seen_semantic:
             continue
         seen.add(key)
+        if intent_key:
+            seen_intents.add(intent_key)
         if semantic_key:
             seen_semantic.add(semantic_key)
         deduped.append(text)

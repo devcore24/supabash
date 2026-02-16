@@ -117,6 +117,28 @@ class FakeNucleiScanner:
         return {"success": True, "command": command, "findings": []}
 
 
+class FakeNucleiScannerWithFindings:
+    def scan(self, target, **kwargs):
+        command = f"nuclei -u {target} -jsonl"
+        rate_limit = kwargs.get("rate_limit")
+        if rate_limit:
+            command = f"{command} -rate-limit {int(rate_limit)}"
+        target_txt = str(target or "").rstrip("/")
+        return {
+            "success": True,
+            "command": command,
+            "findings": [
+                {
+                    "id": "http-missing-security-headers",
+                    "name": "HTTP Missing Security Headers",
+                    "severity": "info",
+                    "matched_at": f"{target_txt}/",
+                    "type": "http",
+                }
+            ],
+        }
+
+
 class FakeGobusterScanner:
     def scan(self, target, **kwargs):
         return {"success": True, "command": f"gobuster dir -u {target} ...", "findings": []}
@@ -724,6 +746,26 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             if isinstance(a, dict) and a.get("tool") == "nuclei" and a.get("phase") == "agentic"
         ]
         self.assertLessEqual(len(actions), 2)
+
+    def test_agentic_delta_includes_phase_scoped_findings(self):
+        scanners = _build_scanners()
+        scanners["nuclei"] = FakeNucleiScannerWithFindings()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMRepeatNucleiTargets())
+        output = artifact_path("ai_audit_agentic_phase_delta.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        delta = report.get("agentic_delta", {})
+        self.assertIsInstance(delta, dict)
+        self.assertGreater(int(delta.get("agentic_total_findings", 0) or 0), 0)
+        self.assertGreater(int(delta.get("agentic_unique_findings", 0) or 0), 0)
+        self.assertIn("agentic_duplicate_only_findings", delta)
 
     def test_agentic_subfinder_promotions_are_validated_with_httpx(self):
         scanners = _build_scanners()

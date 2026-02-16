@@ -86,6 +86,27 @@ class TestReport(unittest.TestCase):
         self.assertIn("Rotate the service role key", actions[0])
         self.assertTrue(any("Rotate the service role key" in item for item in actions))
 
+    def test_recommended_next_actions_dedupe_service_role_rotation_intent(self):
+        summary_items = [
+            {
+                "severity": "CRITICAL",
+                "title": "Supabase service role key exposed",
+                "recommendation": "Rotate the service role key immediately and remove it from client-side code.",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Supabase service role key exposed (credential leakage)",
+                "recommendation": (
+                    "Rotate/revoke the exposed service role key immediately, remove it from any client-side "
+                    "or publicly accessible location, and review logs for misuse."
+                ),
+            },
+        ]
+        actions = build_recommended_next_actions(summary_items, [], "compliance_soc2")
+        self.assertTrue(actions)
+        rotation_actions = [a for a in actions if "service role key" in str(a).lower() and "rotate" in str(a).lower()]
+        self.assertEqual(len(rotation_actions), 1)
+
     def test_summary_findings_are_correlated_and_evidence_merged(self):
         report = {
             "target": "localhost",

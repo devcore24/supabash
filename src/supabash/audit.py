@@ -1547,6 +1547,10 @@ class AuditOrchestrator:
             data = entry.get("data", {})
             if entry.get("skipped") or not entry.get("success"):
                 continue
+            start_idx = len(findings)
+            entry_phase = str(entry.get("phase") or "baseline").strip().lower() or "baseline"
+            entry_target = str(entry.get("target") or "").strip()
+            entry_profile = str(entry.get("profile") or "").strip()
             # Nmap open ports as INFO findings
             if tool == "nmap":
                 for host in data.get("scan_data", {}).get("hosts", []):
@@ -2100,6 +2104,15 @@ class AuditOrchestrator:
                                 "tool": "supabase_audit",
                             }
                         )
+            for idx in range(start_idx, len(findings)):
+                finding = findings[idx]
+                if not isinstance(finding, dict):
+                    continue
+                finding.setdefault("phase", entry_phase)
+                if entry_target:
+                    finding.setdefault("target", entry_target)
+                if entry_profile:
+                    finding.setdefault("profile", entry_profile)
         return self._annotate_finding_keys(findings)
 
     def _apply_compliance_tags(
