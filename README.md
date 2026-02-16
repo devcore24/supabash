@@ -10,7 +10,7 @@
   \___ \| | | | '_ \ / _` | '_ \ / _` / __| '_ \ 
   ____) | |_| | |_) | (_| | |_) | (_| \__ \ | | |
  |_____/ \__,_| .__/ \__,_|_.__/ \__,_|___/_| |_|
-              | |     AGENTIC   AI   AUDIT                         
+              | |   AGENTIC   SECURITY   AUDIT                         
               |_|      
 ```
 
@@ -29,8 +29,6 @@ Example: [reports](example_reports/)
 Requirements:
 Supabash requires Linux (Kali, Ubuntu, Debian) or WSL2.  
 macOS: manual/experimental setup only, untested.  
-
-
 
 ---
 

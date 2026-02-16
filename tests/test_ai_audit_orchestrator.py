@@ -139,6 +139,28 @@ class FakeNucleiScannerWithFindings:
         }
 
 
+class FakeNucleiScannerWithHighFindings:
+    def scan(self, target, **kwargs):
+        command = f"nuclei -u {target} -jsonl"
+        rate_limit = kwargs.get("rate_limit")
+        if rate_limit:
+            command = f"{command} -rate-limit {int(rate_limit)}"
+        target_txt = str(target or "").rstrip("/")
+        return {
+            "success": True,
+            "command": command,
+            "findings": [
+                {
+                    "id": "prometheus-unauthenticated",
+                    "name": "Prometheus Monitoring System - Unauthenticated",
+                    "severity": "high",
+                    "matched_at": f"{target_txt}/api/v1/status/config",
+                    "type": "http",
+                }
+            ],
+        }
+
+
 class FakeGobusterScanner:
     def scan(self, target, **kwargs):
         return {"success": True, "command": f"gobuster dir -u {target} ...", "findings": []}
@@ -465,6 +487,85 @@ class FakeLLMRepeatNucleiTargets:
         )
 
 
+class FakeLLMRepeatSameNucleiTarget:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        return (
+            [
+                {
+                    "name": "propose_actions",
+                    "arguments": {
+                        "actions": [
+                            {
+                                "tool_name": "nuclei",
+                                "arguments": {
+                                    "profile": "soc2",
+                                    "target": "http://localhost:9090/api/v1/status/config",
+                                },
+                                "reasoning": "Re-validate unresolved high-risk Prometheus exposure.",
+                                "priority": 1,
+                            }
+                        ],
+                        "stop": False,
+                        "notes": "Keep checking unresolved high-risk cluster.",
+                    },
+                }
+            ],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 6}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMEndpointNuclei:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "nuclei",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "http://localhost:9090/api/v1/status/config",
+                                    },
+                                    "reasoning": "Validate a high-risk endpoint-level exposure.",
+                                    "priority": 1,
+                                }
+                            ],
+                            "stop": False,
+                            "notes": "Run targeted nuclei on a specific exposed endpoint.",
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 6}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True, "notes": "Done."}}],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 3}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 7}},
+        )
+
+
 class FakeLLMSelectSubfinder:
     def __init__(self):
         self.plan_calls = 0
@@ -747,6 +848,40 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         ]
         self.assertLessEqual(len(actions), 2)
 
+    def test_coverage_debt_pivot_injects_non_nuclei_action_after_repeat_block(self):
+        scanners = _build_scanners()
+        scanners["nuclei"] = FakeNucleiScannerWithHighFindings()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMRepeatSameNucleiTarget())
+        output = artifact_path("ai_audit_coverage_debt_pivot.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=3,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("phase") == "agentic"
+        ]
+        self.assertGreaterEqual(len(actions), 2)
+        self.assertTrue(any(str(a.get("tool") or "").strip().lower() != "nuclei" for a in actions))
+
+        trace = report.get("ai_audit", {}).get("decision_trace", [])
+        self.assertIsInstance(trace, list)
+        self.assertTrue(
+            any(
+                isinstance(step, dict) and isinstance(step.get("coverage_debt_pivot"), dict)
+                for step in trace
+            )
+        )
+
+        summary_notes = report.get("summary_notes", [])
+        self.assertTrue(any("Coverage-debt fallback pivot used" in str(n) for n in summary_notes))
+
     def test_agentic_delta_includes_phase_scoped_findings(self):
         scanners = _build_scanners()
         scanners["nuclei"] = FakeNucleiScannerWithFindings()
@@ -766,6 +901,31 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertGreater(int(delta.get("agentic_total_findings", 0) or 0), 0)
         self.assertGreater(int(delta.get("agentic_unique_findings", 0) or 0), 0)
         self.assertIn("agentic_duplicate_only_findings", delta)
+
+    def test_endpoint_level_web_target_is_not_skipped_when_host_port_is_allowed(self):
+        scanners = _build_scanners()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMEndpointNuclei())
+        output = artifact_path("ai_audit_endpoint_level_target_allowed.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "nuclei" and a.get("phase") == "agentic"
+        ]
+        self.assertEqual(len(actions), 1)
+        if actions:
+            self.assertEqual(actions[0].get("target"), "http://localhost:9090/api/v1/status/config")
+        trace = report.get("ai_audit", {}).get("decision_trace", [])
+        self.assertIsInstance(trace, list)
+        self.assertTrue(any((t.get("decision") or {}).get("result") == "executed" for t in trace if isinstance(t, dict)))
 
     def test_agentic_subfinder_promotions_are_validated_with_httpx(self):
         scanners = _build_scanners()

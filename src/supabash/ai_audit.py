@@ -1160,6 +1160,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "target": target,
                         "mode": mode,
                         "remaining_actions": int(remaining),
+                        "planning_objective": {
+                            "primary": "Close uncovered high-risk finding clusters first.",
+                            "must_link_open_high_risk_cluster": bool(
+                                len(finding_clusters.get("open_high_risk_clusters", []) or []) > 0
+                            ),
+                            "open_high_risk_cluster_count": len(
+                                finding_clusters.get("open_high_risk_clusters", []) or []
+                            ),
+                        },
                         "allowed_tools": allowed_tools,
                         "allowed_targets": {
                             "web": allowed_web_targets[:12],
@@ -1549,6 +1558,40 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 recent_gain_scores: List[int] = []
                 planner_action_ledger: List[Dict[str, Any]] = []
                 planner_blocked_candidates: List[Dict[str, Any]] = []
+                coverage_debt_pivot_count = 0
+                coverage_debt_pivot_cap = 2
+
+                def _target_on_allowed_web_surface(target: str) -> bool:
+                    text = str(target or "").strip()
+                    if not text:
+                        return False
+                    try:
+                        parsed = urlparse(text)
+                        if not parsed.scheme:
+                            return False
+                        host = str(parsed.hostname or "").strip().lower()
+                        if not host:
+                            return False
+                        port = int(parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80))
+                    except Exception:
+                        return False
+                    for item in allowed_web_targets or []:
+                        item_text = str(item or "").strip()
+                        if not item_text:
+                            continue
+                        try:
+                            item_parsed = urlparse(item_text)
+                            if not item_parsed.scheme:
+                                continue
+                            item_host = str(item_parsed.hostname or "").strip().lower()
+                            if not item_host:
+                                continue
+                            item_port = int(item_parsed.port or (443 if (item_parsed.scheme or "").lower() == "https" else 80))
+                        except Exception:
+                            continue
+                        if item_host == host and item_port == port:
+                            return True
+                    return False
 
                 def _baseline_would_skip(action: Dict[str, Any]) -> bool:
                     tool = action.get("tool")
@@ -1560,7 +1603,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if not target:
                         return True
                     if target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
-                        return True
+                        # Allow endpoint-level targets on an already discovered host:port surface.
+                        # This keeps agentic follow-up actions generic (not localhost-specific) while
+                        # still preventing out-of-scope host expansion.
+                        if str(tool or "").strip().lower() != "sqlmap" and _target_on_allowed_web_surface(target):
+                            pass
+                        else:
+                            return True
                     return (tool, target) in baseline_success or (tool, target) in agentic_success
 
                 def _covered_action_exclusions(extra_actions: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
@@ -1771,12 +1820,21 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     cap = max(1, min(4, max(1, len(allowed_web_targets) // 3)))
                     return {target for _, target in ranked[:cap]}
 
+                def _open_high_risk_clusters_now() -> List[Dict[str, Any]]:
+                    try:
+                        state = _findings_state_now()
+                        rows = state.get("open_high_risk_clusters", [])
+                        if isinstance(rows, list):
+                            return [r for r in rows if isinstance(r, dict)]
+                    except Exception:
+                        pass
+                    return []
+
                 def _open_high_risk_target_hints_now() -> Dict[str, Set[str]]:
                     hosts: Set[str] = set()
                     host_ports: Set[str] = set()
                     try:
-                        state = _findings_state_now()
-                        open_clusters = state.get("open_high_risk_clusters", [])
+                        open_clusters = _open_high_risk_clusters_now()
                     except Exception:
                         open_clusters = []
                     if not isinstance(open_clusters, list):
@@ -1845,6 +1903,194 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if target and target in _high_risk_web_targets_now():
                         return True
                     return False
+
+                def _coverage_debt_pivot_tool_order(open_clusters: List[Dict[str, Any]]) -> List[str]:
+                    risk_counts: Dict[str, int] = {}
+                    for cluster in open_clusters or []:
+                        if not isinstance(cluster, dict):
+                            continue
+                        rc = str(cluster.get("risk_class") or "general_security_signal").strip().lower()
+                        if not rc:
+                            rc = "general_security_signal"
+                        risk_counts[rc] = int(risk_counts.get(rc, 0)) + 1
+
+                    if not risk_counts:
+                        preferred = ["whatweb", "gobuster", "ffuf", "katana"]
+                    elif any(k in risk_counts for k in ("unauthenticated_exposure", "data_plane_exposure")):
+                        preferred = ["gobuster", "ffuf", "whatweb", "katana"]
+                    elif "secret_exposure" in risk_counts:
+                        preferred = ["whatweb", "gobuster", "ffuf", "katana"]
+                    else:
+                        preferred = ["whatweb", "gobuster", "ffuf", "katana"]
+                    return [t for t in preferred if t in allowed_tools]
+
+                def _coverage_debt_candidate_targets(
+                    open_clusters: List[Dict[str, Any]],
+                    repeat_blocked_actions: List[Dict[str, Any]],
+                ) -> List[str]:
+                    by_host: Dict[str, List[str]] = {}
+                    by_host_port: Dict[Tuple[str, int], List[str]] = {}
+                    for item in allowed_web_targets or []:
+                        target = str(item or "").strip()
+                        if not target:
+                            continue
+                        hp = _target_host_port_key(target)
+                        if not hp:
+                            continue
+                        by_host.setdefault(hp[0], []).append(target)
+                        by_host_port.setdefault(hp, []).append(target)
+
+                    out: List[str] = []
+                    seen: Set[str] = set()
+
+                    def _add(url: str) -> None:
+                        u = str(url or "").strip()
+                        if not u or u in seen:
+                            return
+                        seen.add(u)
+                        out.append(u)
+
+                    # 1) Prefer blocked nuclei targets (same host:port surface).
+                    for cand in repeat_blocked_actions or []:
+                        if not isinstance(cand, dict):
+                            continue
+                        if str(cand.get("tool") or "").strip().lower() != "nuclei":
+                            continue
+                        args = cand.get("arguments") if isinstance(cand.get("arguments"), dict) else {}
+                        target = str(args.get("target") or "").strip()
+                        hp = _target_host_port_key(target)
+                        if hp:
+                            for mapped in by_host_port.get(hp, []):
+                                _add(mapped)
+
+                    # 2) High-risk web targets from current evidence graph.
+                    risk_scores = _target_risk_scores_now()
+                    ranked_risk_targets = [
+                        t for _, t in sorted([(int(v), k) for k, v in risk_scores.items() if int(v) > 0], key=lambda x: (-x[0], x[1]))
+                    ]
+                    for target in ranked_risk_targets[:8]:
+                        _add(target)
+
+                    # 3) Cluster labels -> host/path candidates on in-scope host:port surfaces.
+                    for cluster in open_clusters[:10]:
+                        if not isinstance(cluster, dict):
+                            continue
+                        for target_label in cluster.get("targets", []) or []:
+                            text = str(target_label or "").strip()
+                            if not text:
+                                continue
+                            host_part = text
+                            path_part = ""
+                            if "/" in text:
+                                host_part, remainder = text.split("/", 1)
+                                path_part = "/" + remainder.lstrip("/")
+                            host_part = host_part.strip().lower().strip("[]")
+                            if not host_part:
+                                continue
+                            mapped_bases: List[str] = []
+                            if ":" in host_part:
+                                maybe_host, maybe_port = host_part.rsplit(":", 1)
+                                try:
+                                    hp = (str(maybe_host).strip().lower(), int(maybe_port))
+                                    mapped_bases = by_host_port.get(hp, [])
+                                except Exception:
+                                    mapped_bases = []
+                            else:
+                                mapped_bases = by_host.get(host_part, [])
+                            for base in mapped_bases:
+                                _add(base)
+                                if path_part and path_part != "/":
+                                    _add(f"{str(base).rstrip('/')}{path_part}")
+
+                    if not out:
+                        for target in allowed_web_targets[:6]:
+                            _add(target)
+                    return out[:12]
+
+                def _build_coverage_debt_pivot_actions(
+                    open_clusters: List[Dict[str, Any]],
+                    repeat_blocked_actions: List[Dict[str, Any]],
+                    repeat_blocked_reason_map: Dict[Tuple[str, str], str],
+                ) -> List[Dict[str, Any]]:
+                    if int(coverage_debt_pivot_count) >= int(coverage_debt_pivot_cap):
+                        return []
+                    blocked_nuclei = []
+                    for cand in repeat_blocked_actions or []:
+                        if not isinstance(cand, dict):
+                            continue
+                        if str(cand.get("tool") or "").strip().lower() != "nuclei":
+                            continue
+                        key = _action_repeat_key(cand)
+                        reason = repeat_blocked_reason_map.get(key or ("", ""), "repeat_policy")
+                        blocked_nuclei.append((cand, reason))
+                    if not blocked_nuclei:
+                        return []
+
+                    tool_order = _coverage_debt_pivot_tool_order(open_clusters)
+                    if not tool_order:
+                        return []
+                    targets = _coverage_debt_candidate_targets(open_clusters, repeat_blocked_actions)
+                    if not targets:
+                        return []
+
+                    profile = requested_compliance or "standard"
+                    reason_by_tool = {
+                        "whatweb": (
+                            "Coverage-debt pivot: fingerprint unresolved high-risk service to confirm "
+                            "component/header context before remediation."
+                        ),
+                        "gobuster": (
+                            "Coverage-debt pivot: enumerate unlinked high-risk paths tied to unresolved "
+                            "exposure clusters."
+                        ),
+                        "ffuf": (
+                            "Coverage-debt pivot: perform focused content discovery to validate unresolved "
+                            "high-risk exposure hypotheses."
+                        ),
+                        "katana": (
+                            "Coverage-debt pivot: crawl unresolved high-risk web surface to discover "
+                            "linked endpoints for follow-up validation."
+                        ),
+                    }
+                    expected_by_tool = {
+                        "whatweb": "Service fingerprint and security-relevant headers linked to unresolved clusters.",
+                        "gobuster": "Additional high-value paths/endpoints supporting or disproving unresolved cluster impact.",
+                        "ffuf": "HTTP hits on sensitive/admin/config paths relevant to unresolved high-risk findings.",
+                        "katana": "Discovered endpoint graph and candidate URLs associated with unresolved high-risk areas.",
+                    }
+
+                    out: List[Dict[str, Any]] = []
+                    seen_keys: Set[Tuple[str, str]] = set()
+                    for target in targets:
+                        for tool in tool_order:
+                            action = {
+                                "tool": tool,
+                                "arguments": {"profile": profile, "target": str(target).strip()},
+                                "profile": profile,
+                                "reasoning": reason_by_tool.get(tool, "Coverage-debt pivot action."),
+                                "hypothesis": (
+                                    "This in-scope target contains additional evidence to close unresolved "
+                                    "high-risk clusters."
+                                ),
+                                "expected_evidence": expected_by_tool.get(tool, "Additional evidence for unresolved clusters."),
+                                "priority": 3,
+                            }
+                            key = _action_repeat_key(action)
+                            if key and key in seen_keys:
+                                continue
+                            if _baseline_would_skip(action):
+                                continue
+                            block_reason = _repeat_block_reason(action)
+                            if block_reason:
+                                continue
+                            if not _action_links_open_high_risk_cluster(action):
+                                continue
+                            if key:
+                                seen_keys.add(key)
+                            out.append(action)
+                            if len(out) >= 4:
+                                return out
+                    return out
 
                 def _normalize_target_label(value: Any) -> str:
                     text = str(value or "").strip()
@@ -2193,12 +2439,20 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if canceled():
                         break
                     remaining = int(max_actions) - actions_executed
+                    open_high_risk_clusters = _open_high_risk_clusters_now()
+                    coverage_debt_open_count = len(open_high_risk_clusters)
                     trace_item: Dict[str, Any] = {
                         "iteration": int(actions_executed) + 1,
                         "remaining_actions_before": int(remaining),
                         "started_at": time.time(),
+                        "open_high_risk_cluster_count_before": int(coverage_debt_open_count),
                     }
-                    if low_signal_streak >= 3 and len(recent_gain_scores) >= 3 and sum(recent_gain_scores[-3:]) <= 0:
+                    if (
+                        coverage_debt_open_count <= 0
+                        and low_signal_streak >= 3
+                        and len(recent_gain_scores) >= 3
+                        and sum(recent_gain_scores[-3:]) <= 0
+                    ):
                         note(
                             "llm_decision",
                             "planner",
@@ -2212,7 +2466,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         trace_item["finished_at"] = time.time()
                         ai_obj.setdefault("decision_trace", []).append(trace_item)
                         break
-                    if baseline_broad_nuclei_targets and nonpositive_after_broad_streak >= 2:
+                    if (
+                        coverage_debt_open_count <= 0
+                        and baseline_broad_nuclei_targets
+                        and nonpositive_after_broad_streak >= 2
+                    ):
                         note(
                             "llm_decision",
                             "planner",
@@ -2226,6 +2484,17 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         trace_item["finished_at"] = time.time()
                         ai_obj.setdefault("decision_trace", []).append(trace_item)
                         break
+                    if coverage_debt_open_count > 0:
+                        note(
+                            "llm_decision",
+                            "planner",
+                            (
+                                "coverage debt active: "
+                                f"{int(coverage_debt_open_count)} open high-risk cluster(s); "
+                                "prioritizing cluster-linked actions before normal stop."
+                            ),
+                            agg=agg,
+                        )
                     action: Optional[Dict[str, Any]] = None
                     stop_requested = False
                     replan_attempted = False
@@ -2288,9 +2557,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             ai_obj["notes"] = plan.get("notes")
                         stop_requested = stop_requested or bool(plan.get("stop"))
                         if not sorted_candidates:
+                            if coverage_debt_open_count > 0:
+                                trace_item["unresolved_high_risk_clusters"] = open_high_risk_clusters[:10]
                             trace_item["decision"] = {
                                 "result": "stop",
-                                "reason": "planner_stop" if stop_requested else "no_actions",
+                                "reason": (
+                                    "unresolved_high_risk_no_actionable_candidates"
+                                    if coverage_debt_open_count > 0
+                                    else ("planner_stop" if stop_requested else "no_actions")
+                                ),
                             }
                             trace_item["finished_at"] = time.time()
                             ai_obj.setdefault("decision_trace", []).append(trace_item)
@@ -2349,7 +2624,82 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 agg=agg,
                             )
 
+                        if coverage_debt_open_count > 0 and not actionable:
+                            pivot_candidates = _build_coverage_debt_pivot_actions(
+                                open_high_risk_clusters,
+                                repeat_blocked,
+                                repeat_blocked_reasons,
+                            )
+                            if pivot_candidates:
+                                coverage_debt_pivot_count = int(coverage_debt_pivot_count) + 1
+                                actionable = list(pivot_candidates)
+                                trace_item["coverage_debt_pivot"] = {
+                                    "attempted": True,
+                                    "pivot_count": int(coverage_debt_pivot_count),
+                                    "reason": "nuclei_repeat_blocked_with_open_high_risk",
+                                    "injected_count": len(pivot_candidates),
+                                    "injected": [_action_trace_view(a) for a in pivot_candidates[:6]],
+                                }
+                                note(
+                                    "llm_decision",
+                                    "planner",
+                                    (
+                                        "coverage debt pivot injected "
+                                        f"{len(pivot_candidates)} fallback candidate(s) after nuclei repeat blocking"
+                                    ),
+                                    agg=agg,
+                                )
+
                         if actionable:
+                            if coverage_debt_open_count > 0:
+                                linked_actionable = [a for a in actionable if _action_links_open_high_risk_cluster(a)]
+                                if linked_actionable:
+                                    actionable = linked_actionable
+                                    trace_item["coverage_debt_filter"] = {
+                                        "active": True,
+                                        "open_high_risk_cluster_count": int(coverage_debt_open_count),
+                                        "linked_candidates_count": len(linked_actionable),
+                                        "unresolved_clusters_preview": [
+                                            {
+                                                "cluster_id": str(c.get("cluster_id") or ""),
+                                                "severity": str(c.get("severity") or ""),
+                                                "risk_class": str(c.get("risk_class") or ""),
+                                                "title": str(c.get("title") or ""),
+                                            }
+                                            for c in open_high_risk_clusters[:6]
+                                            if isinstance(c, dict)
+                                        ],
+                                    }
+                                else:
+                                    if not replan_attempted:
+                                        replan_attempted = True
+                                        excluded_actions_for_replan = _covered_action_exclusions(sorted_candidates)
+                                        trace_item["replan"] = {
+                                            "attempted": True,
+                                            "reason": "no_open_high_risk_linked_candidates",
+                                            "excluded_count": len(excluded_actions_for_replan),
+                                            "excluded": [_action_trace_view(a) for a in excluded_actions_for_replan],
+                                        }
+                                        note(
+                                            "llm_decision",
+                                            "planner",
+                                            (
+                                                "coverage debt active but no candidate linked to unresolved high-risk "
+                                                "clusters; replanning with broader exclusions"
+                                            ),
+                                            agg=agg,
+                                        )
+                                        continue
+                                    trace_item["unresolved_high_risk_clusters"] = open_high_risk_clusters[:10]
+                                    trace_item["decision"] = {
+                                        "result": "stop",
+                                        "reason": "unresolved_high_risk_no_actionable_candidates",
+                                    }
+                                    trace_item["finished_at"] = time.time()
+                                    ai_obj.setdefault("decision_trace", []).append(trace_item)
+                                    action = None
+                                    break
+
                             actionable.sort(
                                 key=lambda a: (
                                     -_action_gain_score(a),
@@ -2390,7 +2740,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     agg=agg,
                                 )
                                 continue
-                            if low_signal_streak >= 2 and best_gain <= 0:
+                            if coverage_debt_open_count <= 0 and low_signal_streak >= 2 and best_gain <= 0:
                                 note(
                                     "llm_decision",
                                     "planner",
@@ -2408,7 +2758,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             action = actionable[0]
                             break
 
-                        if actionable_after_coverage and repeat_blocked and len(actionable_after_coverage) == len(repeat_blocked):
+                        if coverage_debt_open_count > 0:
+                            replan_reason = "unresolved_high_risk_no_actionable_candidates"
+                            replan_note = (
+                                "coverage debt active with unresolved high-risk clusters; "
+                                "replanning once with exclusions"
+                            )
+                            stop_reason = "unresolved_high_risk_no_actionable_candidates"
+                        elif actionable_after_coverage and repeat_blocked and len(actionable_after_coverage) == len(repeat_blocked):
                             replan_reason = "all_candidates_blocked_repeat_policy"
                             replan_note = "all candidates blocked by repeat policy; replanning once with exclusions"
                             stop_reason = "all_candidates_blocked_repeat_policy"
@@ -2436,6 +2793,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                         if actions_executed == 0 and not ai_obj.get("actions"):
                             ai_obj["notes"] = "Planner proposed only baseline-completed web actions; stopping agentic loop."
+                        if coverage_debt_open_count > 0:
+                            trace_item["unresolved_high_risk_clusters"] = open_high_risk_clusters[:10]
                         trace_item["decision"] = {"result": "stop", "reason": stop_reason}
                         trace_item["finished_at"] = time.time()
                         ai_obj.setdefault("decision_trace", []).append(trace_item)
@@ -2862,6 +3221,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 f"{total} paths across {len(ffuf_agentic_hits)} target(s): {targets}."
             )
             agg.setdefault("summary_notes", []).append(summary_note)
+        if int(coverage_debt_pivot_count) > 0:
+            agg.setdefault("summary_notes", []).append(
+                (
+                    "Coverage-debt fallback pivot used "
+                    f"{int(coverage_debt_pivot_count)} time(s) to avoid repeat-blocked high-risk action loops."
+                )
+            )
 
         findings_for_state = self._collect_findings(agg)
         if not isinstance(findings_for_state, list):
@@ -2874,6 +3240,24 @@ class AIAuditOrchestrator(AuditOrchestrator):
             "covered_cluster_count": len(cluster_state.get("covered_cluster_ids", []) or []),
         }
         agg["finding_clusters"] = cluster_state.get("clusters", [])
+        unresolved_high_risk_clusters = [
+            c for c in (cluster_state.get("open_high_risk_clusters", []) or []) if isinstance(c, dict)
+        ]
+        agg["unresolved_high_risk_clusters"] = unresolved_high_risk_clusters[:50]
+        if unresolved_high_risk_clusters:
+            sample_titles = ", ".join(
+                str(c.get("title") or "cluster").strip() for c in unresolved_high_risk_clusters[:3] if str(c.get("title") or "").strip()
+            )
+            if len(unresolved_high_risk_clusters) > 3:
+                sample_titles = f"{sample_titles}, ..."
+            agg.setdefault("summary_notes", []).append(
+                (
+                    "Unresolved high-risk clusters remain after agentic phase: "
+                    f"{len(unresolved_high_risk_clusters)}"
+                    + (f" ({sample_titles})" if sample_titles else "")
+                    + "."
+                )
+            )
         agg["baseline_action_ledger"] = _baseline_action_ledger()
         if planner_action_ledger:
             agg["agentic_action_ledger"] = [dict(x) for x in planner_action_ledger]

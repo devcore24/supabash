@@ -685,6 +685,10 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("Reproducibility Trace", "#reproducibility-trace") if isinstance(report.get("replay_trace"), dict) else None,
         ("LLM Reasoning Trace", "#llm-reasoning-trace") if isinstance(report.get("llm_reasoning_trace"), dict) else None,
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
+        ("Unresolved High-Risk Clusters", "#unresolved-high-risk-clusters")
+        if isinstance(report.get("unresolved_high_risk_clusters"), list)
+        and len(report.get("unresolved_high_risk_clusters") or []) > 0
+        else None,
         ("Findings Overview", "#findings-overview"),
         ("Finding Quality Metrics", "#finding-quality-metrics") if isinstance(report.get("finding_metrics"), dict) else None,
         ("Findings (Detailed)", "#findings-detailed") if has_findings else None,
@@ -1347,6 +1351,39 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     elif isinstance(err, str) and err.strip():
                         lines.append(f"  - Error: {err.strip()}")
 
+    unresolved_clusters = report.get("unresolved_high_risk_clusters")
+    if isinstance(unresolved_clusters, list) and unresolved_clusters:
+        lines.append("\n## Unresolved High-Risk Clusters")
+        lines.append(f"- count: {len(unresolved_clusters)}")
+        lines.append(
+            "- note: these clusters remained open when the agentic phase stopped; prioritize follow-up validation/remediation."
+        )
+        for cluster in unresolved_clusters[:20]:
+            if not isinstance(cluster, dict):
+                continue
+            sev = str(cluster.get("severity") or "HIGH").strip().upper() or "HIGH"
+            title = str(cluster.get("title") or "High-risk cluster").strip() or "High-risk cluster"
+            risk_class = str(cluster.get("risk_class") or "").strip()
+            cluster_id = str(cluster.get("cluster_id") or "").strip()
+            count = cluster.get("count")
+            targets = cluster.get("targets") if isinstance(cluster.get("targets"), list) else []
+            tools = cluster.get("tools") if isinstance(cluster.get("tools"), list) else []
+            lines.append(f"- **{sev}** {title}")
+            if cluster_id:
+                lines.append(f"  - cluster_id: `{cluster_id}`")
+            if risk_class:
+                lines.append(f"  - risk_class: {risk_class}")
+            if isinstance(count, int):
+                lines.append(f"  - observations: {count}")
+            if targets:
+                target_list = ", ".join(str(t).strip() for t in targets[:6] if str(t).strip())
+                if target_list:
+                    lines.append(f"  - targets: {target_list}")
+            if tools:
+                tool_list = ", ".join(str(t).strip() for t in tools[:6] if str(t).strip())
+                if tool_list:
+                    lines.append(f"  - tools: {tool_list}")
+
     # Findings overview table
     sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
     def sev_counts(findings: Any) -> Dict[str, int]:
@@ -1399,10 +1436,13 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     lines.append("\n## Findings Overview")
     if summary_findings:
         lines.append("\n### Summary (LLM)")
-        lines.append("| Severity | Count |")
-        lines.append("|---|---:|")
+        lines.append("| Severity | Prioritized (LLM) | Tools Total |")
+        lines.append("|---|---:|---:|")
         for sev in sev_order:
-            lines.append(f"| {sev} | {llm_counts[sev]} |")
+            lines.append(f"| {sev} | {llm_counts[sev]} | {tool_counts[sev]} |")
+        lines.append(
+            "\n- Note: `Prioritized (LLM)` reflects risk-synthesis emphasis; `Tools Total` reflects full collected evidence."
+        )
         lines.append("\n### Detailed (Tools)")
 
     lines.append("| Severity | Count |")

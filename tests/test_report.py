@@ -155,6 +155,28 @@ class TestReport(unittest.TestCase):
         self.assertIn("    - readiness_probe confirmed config endpoint exposure.", summary_block)
         self.assertIn("    - nuclei: http://localhost:9090/api/v1/status/config (HTTP 200)", summary_block)
 
+    def test_generate_markdown_includes_unresolved_high_risk_clusters_section(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "findings": [],
+            "unresolved_high_risk_clusters": [
+                {
+                    "cluster_id": "nuclei|prometheus|localhost|/api/v1/status/config|HIGH|abcd",
+                    "severity": "HIGH",
+                    "risk_class": "unauthenticated_exposure",
+                    "title": "Prometheus config endpoint exposed",
+                    "count": 3,
+                    "targets": ["localhost:9090"],
+                    "tools": ["nuclei", "readiness_probe"],
+                }
+            ],
+        }
+        md = generate_markdown(report)
+        self.assertIn("## Unresolved High-Risk Clusters", md)
+        self.assertIn("Prometheus config endpoint exposed", md)
+        self.assertIn("risk_class: unauthenticated_exposure", md)
+
     def test_summary_findings_include_evidence_artifact_references(self):
         report = {
             "target": "localhost",
