@@ -34,10 +34,11 @@ macOS: manual/experimental setup only, untested.
 
 ## 🚀 Key Features
 
-*   **🤖 Autonomous Reasoning (Beta):** Tool-calling planning proposes bounded, evidence-driven follow-ups.
+*   **🤖 Autonomous Reasoning (Beta):** Iterative tool-calling planning proposes one best-next action at a time, critiques outcome signal, and replans.
 *   **🛡️ Assessment Coverage:** Infrastructure, web apps, containers, and wireless (experimental) with scope controls.
 *   **📋 Compliance-Mapped:** Optional compliance profiles (PCI, SOC2, ISO 27001, DORA, NIS2, GDPR, BSI) tune tool settings and annotate findings with control references for readiness.
 *   **📝 Assessment Reporting + Evidence Packs:** Structured JSON/Markdown/HTML/PDF outputs with severity, evidence, compliance coverage matrix, and recommended next actions.
+*   **📉 Signal Economy Controls:** Repeat-policy filtering + diminishing-returns stopping reduce redundant low-yield agentic actions.
 *   **⚡ Performance:** Combines fast scanners (Rust/Go) with deep-dive frameworks (Python/Ruby).
 *   **🔌 Extensible Design:** Modular wrappers with a configurable tool registry (plugins planned).
 
@@ -45,7 +46,7 @@ macOS: manual/experimental setup only, untested.
 
 ## 🛠️ The Arsenal (Toolset)
 
-Supabash orchestrates the following security tools. **28 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
+Supabash orchestrates the following security tools. **27 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
 
 ### 🔍 Recon & Discovery
 *   ✅ **Nmap** (Network mapping & service detection)
@@ -273,6 +274,10 @@ supabash ai-audit 192.168.1.10 --yes --compliance bsi
 Notes:
 - AI audit uses provider tool-calling to plan additional evidence collection. If tool-calling is unsupported, Supabash logs a warning, skips the agentic phase, and still produces the baseline report.
 - Agentic planning uses a `profile` field (`fast|standard|aggressive|compliance_*`) to guide assessment intensity and compliance posture.
+- Baseline pipeline uses fast port discovery (`rustscan` and `masscan` fallback) before nmap service detection when applicable.
+- Baseline web coverage runs one broad nuclei pass across deduplicated live targets, then deep scans on prioritized top targets.
+- Agentic loop applies repeat-policy and low-novelty guards to avoid noisy loops and stop on diminishing returns.
+- Domain expansion can use `subfinder` (when enabled), with in-scope filtering, optional DNS resolve validation, and bounded promotion to web probing.
 - Compliance profiles tune tool settings and annotate findings with control references when evidence supports a requirement.
 - Reports include compliance profile/focus in methodology, scope assumptions, a compliance coverage matrix, not-assessable areas, and deterministic recommended next actions.
 - Each AI-audit run writes trace sidecars:
@@ -500,8 +505,10 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `./debug.log` by default (override with `SUPABASH_LOG_DIR`).
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
+- Fast discovery tuning: `tools.nmap.fast_discovery`, `tools.nmap.fast_discovery_ports`, `tools.nmap.fast_discovery_max_ports`.
 - Set a default Nuclei throttling rate via `tools.nuclei.rate_limit` (overridden by `--nuclei-rate`).
 - Optionally scope Nuclei templates with `tools.nuclei.tags` or `tools.nuclei.severity` for faster audits.
+- Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
@@ -527,10 +534,10 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 
 ---
 
-## ✅ Implemented Wrappers (28 Tools)
+## ✅ Implemented Wrappers (27 Tools)
 
 ### Core Audit Pipeline (runs by default)
-Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase Audit/Trivy/WPScan)
+Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx probing → broad Nuclei pass (deduped live targets) → prioritized deep web scans (WhatWeb/Gobuster/Katana) (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase Audit/Trivy/WPScan)
 
 ### Recon & Discovery (9 tools)
 | Tool | Purpose | Trigger |
@@ -541,7 +548,7 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 | **httpx** | HTTP probing / alive endpoints | Auto (web ports) |
 | **subfinder** | Subdomain discovery | `tools.subfinder.enabled=true` |
 | **Dnsenum** | DNS enumeration | Auto (domain targets) |
-| **Sslscan** | SSL/TLS analysis | Auto (443/8443 ports) |
+| **Sslscan** | SSL/TLS analysis | Auto (TLS candidate ports from discovery, including non-standard ports) |
 | **Enum4linux-ng** | SMB/Samba enumeration | Auto (139/445 ports) |
 | **Netdiscover** | ARP network discovery | `--netdiscover` (private LAN) |
 
@@ -584,6 +591,7 @@ Nmap → httpx → WhatWeb → Nuclei → Gobuster (+ conditional Dnsenum/sslsca
 - **LLM integration:** litellm-based client with config-driven provider/model selection (OpenAI, Anthropic, Gemini, Mistral, Ollama, LM Studio)
 - **Chat mode:** slash commands `/scan`, `/audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state`
 - **Planner robustness:** one-time automatic replan with exclusions when candidates are already baseline-covered.
+- **Repeat/novelty guards:** tool-target reuse caps and low-signal penalties reduce redundant agentic retries.
 
 ### Reporting
 - **Formats:** Timestamped run folders under `reports/` containing JSON + Markdown reports (and optional HTML/PDF) with command traces for auditability

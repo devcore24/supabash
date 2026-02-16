@@ -58,6 +58,32 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 
 ---
 
+## 🎯 Phase 13: Signal Economy & Coverage Quality (Current)
+*Goal: keep broad reconnaissance coverage while reducing redundant low-yield actions and improving target prioritization for any host/domain.*
+
+- [x] **Fast discovery before service detection**
+    - [x] Add optional fast open-port stage (`rustscan`, `masscan` fallback) before nmap `-sV`.
+    - [x] Scope nmap service detection to discovered ports when signal is present.
+    - [x] Fall back to full nmap when fast-targeted nmap fails.
+- [x] **Broad-first web vulnerability strategy**
+    - [x] Run one broad nuclei pass over deduplicated live web targets (multi-target input).
+    - [x] Tag broad pass results and preserve traceability in report artifacts.
+    - [x] Keep per-target deep scans focused on prioritized top web targets.
+- [x] **Agentic anti-repeat hardening**
+    - [x] Add repeat-policy filtering by tool/target/low-signal history.
+    - [x] Add diminishing-returns stopping when recent novelty is low.
+    - [x] Replan once with exclusions when candidates are blocked/covered.
+- [x] **Domain expansion chain strengthening**
+    - [x] Bound `subfinder` candidate intake and promotion caps.
+    - [x] Validate promoted hosts with optional DNS resolution checks.
+    - [x] Keep promoted targets in-scope before feeding `httpx`/web tooling.
+- [ ] **Next hardening step (high ROI)**
+    - [ ] Add canonical finding dedup key (`tool/template/host/path/severity + normalized evidence`) and expose duplicate-rate metrics in run metadata.
+    - [ ] Add novelty scoring based on risk-class gain (not raw finding count) to improve stop/continue decisions.
+    - [ ] Add benchmark quality gates (time, actions, duplicate rate, CRITICAL/HIGH yield) across SOC2 + PCI regression runs.
+
+---
+
 ## 🎯 Phase 9: Readiness Report Clarity Sprint (Current)
 *Goal: make Supabash readiness reports clearer and more auditor-usable than manual experimental reports while staying deterministic.*
 
@@ -153,7 +179,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] **Subfinder:** Subdomain discovery (opt-in; best results with provider API keys).
     - [x] **HTTP Probing:** Add `httpx` wrapper to validate live web URLs before web tools run.
     - [x] **Tech Detection:** Integrate `WhatWeb` or simple HTTP header analysis.
-    - [x] **TLS Checks:** Add `sslscan` wrapper (runs when 443/8443 detected).
+    - [x] **TLS Checks:** Add `sslscan` wrapper (runs on TLS candidate ports from discovery, including non-standard ports).
     - [x] **DNS Enum:** Add `dnsenum` wrapper (runs for domain targets).
     - [x] **SMB Enum:** Add `enum4linux-ng` wrapper (runs when 139/445 detected).
 - [x] **Web Module Wrappers**
@@ -311,7 +337,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Surface compliance focus in report methodology for audit traceability.
 
 ### Next Tool Additions (Planned)
-- [x] **sslscan:** TLS configuration checks (run only when HTTPS ports are open).
+- [x] **sslscan:** TLS configuration checks (run on TLS candidate ports from discovery, not only standard HTTPS ports).
 - [x] **dnsenum:** DNS enumeration (run only for domain targets).
 - [x] **enum4linux-ng:** SMB enumeration helper (run only when 445/139 are open).
 - [x] Wire **Nikto** into the audit flow (opt-in via `--nikto`, runs on discovered web targets).
