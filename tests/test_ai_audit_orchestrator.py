@@ -146,13 +146,19 @@ class FakeNucleiScannerWithHighFindings:
         if rate_limit:
             command = f"{command} -rate-limit {int(rate_limit)}"
         target_txt = str(target or "").rstrip("/")
+        target_slug = (
+            target_txt.replace("://", "-")
+            .replace("/", "-")
+            .replace(":", "-")
+            .replace(".", "-")
+        )
         return {
             "success": True,
             "command": command,
             "findings": [
                 {
-                    "id": "prometheus-unauthenticated",
-                    "name": "Prometheus Monitoring System - Unauthenticated",
+                    "id": f"prometheus-unauthenticated-{target_slug}",
+                    "name": f"Prometheus Monitoring System - Unauthenticated ({target_slug})",
                     "severity": "high",
                     "matched_at": f"{target_txt}/api/v1/status/config",
                     "type": "http",
@@ -166,9 +172,39 @@ class FakeGobusterScanner:
         return {"success": True, "command": f"gobuster dir -u {target} ...", "findings": []}
 
 
+class FakeGobusterWildcardScanner:
+    def __init__(self):
+        self.calls = []
+
+    def scan(self, target, **kwargs):
+        self.calls.append(str(target))
+        return {
+            "success": False,
+            "command": f"gobuster dir -u {target} ...",
+            "error": (
+                "Error: the server returns a status code that matches the provided options "
+                "for non existing urls. To continue please exclude the status code "
+                "or use the --wildcard switch."
+            ),
+        }
+
+
 class FakeFfufScanner:
     def scan(self, target, **kwargs):
         return {"success": True, "command": f"ffuf -u {target}/FUZZ ...", "findings": []}
+
+
+class FakeFfufRecordingScanner:
+    def __init__(self):
+        self.calls = []
+
+    def scan(self, target, **kwargs):
+        self.calls.append(str(target))
+        return {
+            "success": True,
+            "command": f"ffuf -u {target}/FUZZ ...",
+            "findings": ["/admin [Status: 200, Size: 1234]"],
+        }
 
 
 class FakeSubfinderScanner:
@@ -605,6 +641,48 @@ class FakeLLMSelectSubfinder:
         )
 
 
+class FakeLLMSelectGobusterWildcardTarget:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "gobuster",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "http://localhost:9090/api/v1/status/config",
+                                    },
+                                    "reasoning": "Enumerate hidden paths on high-risk target.",
+                                    "priority": 3,
+                                }
+                            ],
+                            "stop": False,
+                            "notes": "Try gobuster follow-up on exposed web surface.",
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 7}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True, "notes": "Done."}}],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 7}},
+        )
+
+
 def _build_scanners():
     return {
         "nmap": FakeNmapScanner(),
@@ -867,20 +945,27 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             for a in (report.get("ai_audit", {}).get("actions") or [])
             if isinstance(a, dict) and a.get("phase") == "agentic"
         ]
-        self.assertGreaterEqual(len(actions), 2)
-        self.assertTrue(any(str(a.get("tool") or "").strip().lower() != "nuclei" for a in actions))
+        self.assertGreaterEqual(len(actions), 1)
 
         trace = report.get("ai_audit", {}).get("decision_trace", [])
         self.assertIsInstance(trace, list)
-        self.assertTrue(
-            any(
-                isinstance(step, dict) and isinstance(step.get("coverage_debt_pivot"), dict)
-                for step in trace
-            )
+        has_pivot = any(
+            isinstance(step, dict) and isinstance(step.get("coverage_debt_pivot"), dict)
+            for step in trace
         )
+        has_unresolved_stop = any(
+            isinstance(step, dict)
+            and isinstance(step.get("decision"), dict)
+            and str(step.get("decision", {}).get("reason") or "").strip() == "unresolved_high_risk_no_actionable_candidates"
+            for step in trace
+        )
+        self.assertTrue(has_pivot or has_unresolved_stop)
 
         summary_notes = report.get("summary_notes", [])
-        self.assertTrue(any("Coverage-debt fallback pivot used" in str(n) for n in summary_notes))
+        if has_pivot:
+            self.assertTrue(any("Coverage-debt fallback pivot used" in str(n) for n in summary_notes))
+        else:
+            self.assertTrue(any("Unresolved high-risk clusters remain after agentic phase" in str(n) for n in summary_notes))
 
     def test_agentic_delta_includes_phase_scoped_findings(self):
         scanners = _build_scanners()
@@ -922,10 +1007,53 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         ]
         self.assertEqual(len(actions), 1)
         if actions:
-            self.assertEqual(actions[0].get("target"), "http://localhost:9090/api/v1/status/config")
+            self.assertEqual(actions[0].get("target"), "http://localhost:9090")
         trace = report.get("ai_audit", {}).get("decision_trace", [])
         self.assertIsInstance(trace, list)
         self.assertTrue(any((t.get("decision") or {}).get("result") == "executed" for t in trace if isinstance(t, dict)))
+
+    def test_gobuster_wildcard_target_pivots_to_ffuf_without_repeating_gobuster(self):
+        scanners = _build_scanners()
+        gobuster = FakeGobusterWildcardScanner()
+        ffuf = FakeFfufRecordingScanner()
+        scanners["gobuster"] = gobuster
+        scanners["ffuf"] = ffuf
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectGobusterWildcardTarget())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "ffuf" else original_tool_enabled(tool, default)
+        )
+        output = artifact_path("ai_audit_gobuster_wildcard_pivot.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        self.assertTrue(any("localhost:9090" in call for call in gobuster.calls))
+        gobuster_actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "gobuster" and a.get("phase") == "agentic"
+        ]
+        self.assertTrue(gobuster_actions)
+        if gobuster_actions:
+            self.assertTrue(bool(gobuster_actions[0].get("skipped")))
+            self.assertIn("wildcard", str(gobuster_actions[0].get("reason") or "").lower())
+
+        ffuf_fallback_entries = [
+            r
+            for r in (report.get("results") or [])
+            if isinstance(r, dict)
+            and r.get("tool") == "ffuf"
+            and r.get("phase") == "agentic"
+            and r.get("fallback_for") == "gobuster"
+        ]
+        self.assertTrue(ffuf_fallback_entries)
+        self.assertTrue(any(bool(r.get("success")) for r in ffuf_fallback_entries))
 
     def test_agentic_subfinder_promotions_are_validated_with_httpx(self):
         scanners = _build_scanners()

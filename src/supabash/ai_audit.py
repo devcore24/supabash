@@ -952,6 +952,119 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             rate = min(rate * 2, 100)
                     return rate, threads
 
+                def _web_target_host_port_key(value: Any) -> Optional[Tuple[str, int]]:
+                    text = str(value or "").strip()
+                    if not text:
+                        return None
+                    parse_input = text if "://" in text else f"http://{text}"
+                    try:
+                        parsed = urlparse(parse_input)
+                        scheme = str(parsed.scheme or "http").strip().lower() or "http"
+                        host = str(parsed.hostname or "").strip().lower()
+                        if not host:
+                            return None
+                        port = int(parsed.port or (443 if scheme == "https" else 80))
+                        return (host, port)
+                    except Exception:
+                        return None
+
+                def _preferred_allowed_web_target(host_port: Tuple[str, int]) -> Optional[str]:
+                    candidates: List[str] = []
+                    for item in allowed_web_targets or []:
+                        item_text = str(item or "").strip()
+                        if not item_text:
+                            continue
+                        if _web_target_host_port_key(item_text) == host_port:
+                            candidates.append(item_text)
+                    if not candidates:
+                        return None
+
+                    def _rank(value: str) -> Tuple[int, int]:
+                        try:
+                            parsed = urlparse(value)
+                            path = str(parsed.path or "").strip()
+                            path_weight = 1 if path and path != "/" else 0
+                        except Exception:
+                            path_weight = 1
+                        return (path_weight, len(value))
+
+                    candidates.sort(key=_rank)
+                    return candidates[0]
+
+                def _canonicalize_web_action_target(tool: str, target: str) -> str:
+                    text = str(target or "").strip()
+                    if not text:
+                        return text
+                    tool_name = str(tool or "").strip().lower()
+                    if tool_name == "sqlmap":
+                        return text
+                    host_port = _web_target_host_port_key(text)
+                    if host_port is None:
+                        return text
+                    mapped = _preferred_allowed_web_target(host_port)
+                    if mapped:
+                        return mapped
+                    parse_input = text if "://" in text else f"http://{text}"
+                    try:
+                        parsed = urlparse(parse_input)
+                        scheme = str(parsed.scheme or "http").strip().lower() or "http"
+                        host = str(parsed.hostname or "").strip().lower()
+                        if not host:
+                            return text
+                        default_port = 443 if scheme == "https" else 80
+                        port = int(parsed.port or default_port)
+                        if port == default_port:
+                            return f"{scheme}://{host}"
+                        return f"{scheme}://{host}:{port}"
+                    except Exception:
+                        return text
+
+                def _resolve_allowed_web_target(tool: str, target: str) -> Optional[str]:
+                    text = str(target or "").strip()
+                    if not text:
+                        return None
+                    tool_name = str(tool or "").strip().lower()
+                    if tool_name == "sqlmap":
+                        if text in sqlmap_targets:
+                            return text
+                        return None
+                    if text in allowed_web_targets:
+                        return text
+                    host_port = _web_target_host_port_key(text)
+                    if host_port is None:
+                        return None
+                    return _preferred_allowed_web_target(host_port)
+
+                def _extract_result_error_text(entry: Any) -> str:
+                    if not isinstance(entry, dict):
+                        return ""
+                    pieces: List[str] = []
+                    direct_error = str(entry.get("error") or "").strip()
+                    if direct_error:
+                        pieces.append(direct_error)
+                    data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+                    data_error = str(data.get("error") or "").strip() if isinstance(data, dict) else ""
+                    if data_error and data_error not in pieces:
+                        pieces.append(data_error)
+                    reason = str(entry.get("reason") or "").strip()
+                    if reason and reason not in pieces:
+                        pieces.append(reason)
+                    return " ".join(pieces).strip().lower()
+
+                def _is_gobuster_wildcard_error(entry: Any) -> bool:
+                    text = _extract_result_error_text(entry)
+                    if not text:
+                        return False
+                    patterns = (
+                        "the server returns a status code that matches",
+                        "non existing urls",
+                        "use the --wildcard switch",
+                        "please exclude the status code",
+                        "wildcard",
+                        "soft-404",
+                    )
+                    return any(pattern in text for pattern in patterns)
+
                 def normalize_action(item: Any) -> Optional[Dict[str, Any]]:
                     if not isinstance(item, dict):
                         return None
@@ -968,6 +1081,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         profile = requested_compliance
                     filtered = {k: v for k, v in args.items() if k in allowed_argument_keys}
                     filtered["profile"] = profile
+                    raw_target = filtered.get("target")
+                    if isinstance(raw_target, str) and raw_target.strip():
+                        filtered["target"] = _canonicalize_web_action_target(tool, raw_target)
                     reasoning = str(item.get("reasoning") or "").strip()
                     hypothesis = str(item.get("hypothesis") or "").strip()
                     expected_evidence = str(item.get("expected_evidence") or "").strip()
@@ -1274,6 +1390,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     args = action["arguments"]
                     profile = action["profile"]
                     target = args.get("target") if isinstance(args.get("target"), str) else None
+                    if isinstance(target, str) and target.strip():
+                        target = _canonicalize_web_action_target(tool, target)
+                        args["target"] = target
 
                     action_target = None
                     action_port = None
@@ -1281,161 +1400,179 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if canceled():
                         entry = {"tool": tool, "success": False, "skipped": True, "reason": "Canceled"}
                     elif tool_specs.get(tool, {}).get("target_kind") == "web":
-                        action_target = target
-                        action_key = (tool, action_target or "")
+                        resolved_target = _resolve_allowed_web_target(tool, target or "")
                         if not target:
                             entry = self._skip_tool(tool, "Missing target")
-                        elif target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
+                        elif resolved_target is None:
                             entry = self._skip_tool(tool, "Target not in allowed web targets")
-                        elif action_key in baseline_success:
-                            entry = self._skip_tool(tool, "Already completed in baseline phase")
-                        elif action_key in agentic_success:
-                            entry = self._skip_tool(tool, "Already completed in agentic phase")
                         else:
-                            base_rate = int(nuclei_rate_limit or 0)
-                            base_threads = int(gobuster_threads or 10)
-                            rate_limit = args.get("rate_limit", base_rate)
-                            threads = args.get("threads", base_threads)
-                            # Keep planner-suggested rates bounded, but if a baseline/configured
-                            # nuclei rate exists, allow that value to flow through unchanged.
-                            max_rate = max(100, int(base_rate or 0))
-                            rate_limit = clamp_int(rate_limit, base_rate, 0, max_rate)
-                            threads = clamp_int(threads, base_threads, 1, 50)
-                            rate_limit, threads = apply_profile(profile, rate_limit, threads)
-                            if tool == "nuclei" and int(base_rate or 0) > 0:
-                                # Respect explicit CLI/config tuning from baseline for agentic nuclei.
-                                rate_limit = int(base_rate)
-                            proposed_wordlist = args.get("wordlist") if isinstance(args.get("wordlist"), str) else None
-                            safe_wordlist = resolve_wordlist(proposed_wordlist) or resolve_wordlist(gobuster_wordlist)
+                            if tool != "sqlmap":
+                                target = str(resolved_target)
+                                args["target"] = target
+                            action_target = target
+                            action_key = (tool, action_target or "")
+                            if action_key in baseline_success:
+                                entry = self._skip_tool(tool, "Already completed in baseline phase")
+                            elif action_key in agentic_success:
+                                entry = self._skip_tool(tool, "Already completed in agentic phase")
+                            else:
+                                base_rate = int(nuclei_rate_limit or 0)
+                                base_threads = int(gobuster_threads or 10)
+                                rate_limit = args.get("rate_limit", base_rate)
+                                threads = args.get("threads", base_threads)
+                                # Keep planner-suggested rates bounded, but if a baseline/configured
+                                # nuclei rate exists, allow that value to flow through unchanged.
+                                max_rate = max(100, int(base_rate or 0))
+                                rate_limit = clamp_int(rate_limit, base_rate, 0, max_rate)
+                                threads = clamp_int(threads, base_threads, 1, 50)
+                                rate_limit, threads = apply_profile(profile, rate_limit, threads)
+                                if tool == "nuclei" and int(base_rate or 0) > 0:
+                                    # Respect explicit CLI/config tuning from baseline for agentic nuclei.
+                                    rate_limit = int(base_rate)
+                                proposed_wordlist = args.get("wordlist") if isinstance(args.get("wordlist"), str) else None
+                                safe_wordlist = resolve_wordlist(proposed_wordlist) or resolve_wordlist(gobuster_wordlist)
 
-                            if tool == "httpx":
-                                entry = self._run_tool(
-                                    tool,
-                                    lambda: self.scanners["httpx"].scan(
-                                        [target],
-                                        cancel_event=cancel_event,
-                                        timeout_seconds=self._tool_timeout_seconds("httpx"),
-                                    ),
-                                )
-                            elif tool == "whatweb":
-                                entry = self._run_tool(
-                                    tool,
-                                    lambda: self.scanners["whatweb"].scan(
-                                        target,
-                                        cancel_event=cancel_event,
-                                        timeout_seconds=self._tool_timeout_seconds("whatweb"),
-                                    ),
-                                )
-                            elif tool == "nuclei":
-                                entry = self._run_tool(
-                                    tool,
-                                    lambda: self.scanners["nuclei"].scan(
-                                        target,
-                                        rate_limit=rate_limit or None,
-                                        tags=nuclei_tags,
-                                        severity=nuclei_severity,
-                                        cancel_event=cancel_event,
-                                        timeout_seconds=self._tool_timeout_seconds("nuclei"),
-                                    ),
-                                )
-                            elif tool == "gobuster":
-                                if safe_wordlist:
+                                if tool == "httpx":
                                     entry = self._run_tool(
                                         tool,
-                                        lambda: self.scanners["gobuster"].scan(
-                                            target,
-                                            wordlist=safe_wordlist,
-                                            threads=threads,
+                                        lambda: self.scanners["httpx"].scan(
+                                            [target],
                                             cancel_event=cancel_event,
-                                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                            timeout_seconds=self._tool_timeout_seconds("httpx"),
                                         ),
                                     )
-                                else:
+                                elif tool == "whatweb":
                                     entry = self._run_tool(
                                         tool,
-                                        lambda: self.scanners["gobuster"].scan(
+                                        lambda: self.scanners["whatweb"].scan(
                                             target,
-                                            threads=threads,
                                             cancel_event=cancel_event,
-                                            timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                            timeout_seconds=self._tool_timeout_seconds("whatweb"),
                                         ),
                                     )
-                                if (
-                                    not entry.get("success")
-                                    and self._has_scanner("ffuf")
-                                    and self._tool_enabled("ffuf", default=False)
-                                ):
-                                    ffuf_entry = self._run_tool(
-                                        "ffuf",
+                                elif tool == "nuclei":
+                                    entry = self._run_tool(
+                                        tool,
+                                        lambda: self.scanners["nuclei"].scan(
+                                            target,
+                                            rate_limit=rate_limit or None,
+                                            tags=nuclei_tags,
+                                            severity=nuclei_severity,
+                                            cancel_event=cancel_event,
+                                            timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                                        ),
+                                    )
+                                elif tool == "gobuster":
+                                    if target in gobuster_wildcard_targets:
+                                        entry = self._skip_tool(
+                                            tool,
+                                            "Wildcard/soft-404 behavior detected previously; pivoting to ffuf",
+                                        )
+                                    elif safe_wordlist:
+                                        entry = self._run_tool(
+                                            tool,
+                                            lambda: self.scanners["gobuster"].scan(
+                                                target,
+                                                wordlist=safe_wordlist,
+                                                threads=threads,
+                                                cancel_event=cancel_event,
+                                                timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                            ),
+                                        )
+                                    else:
+                                        entry = self._run_tool(
+                                            tool,
+                                            lambda: self.scanners["gobuster"].scan(
+                                                target,
+                                                threads=threads,
+                                                cancel_event=cancel_event,
+                                                timeout_seconds=self._tool_timeout_seconds("gobuster"),
+                                            ),
+                                        )
+                                    wildcard_detected = _is_gobuster_wildcard_error(entry)
+                                    if wildcard_detected:
+                                        gobuster_wildcard_targets.add(target)
+                                        entry["skipped"] = True
+                                        entry["reason"] = "Wildcard/soft-404 behavior detected; pivoting to ffuf"
+                                    if (
+                                        not entry.get("success")
+                                        and self._has_scanner("ffuf")
+                                        and self._tool_enabled("ffuf", default=False)
+                                    ):
+                                        fallback_reason = "Fallback after gobuster failure"
+                                        if "wildcard" in str(entry.get("reason") or "").lower():
+                                            fallback_reason = "Fallback for wildcard/soft-404 gobuster target"
+                                        ffuf_entry = self._run_tool(
+                                            "ffuf",
+                                            lambda: self.scanners["ffuf"].scan(
+                                                target,
+                                                wordlist=safe_wordlist,
+                                                threads=max(10, int(threads)),
+                                                cancel_event=cancel_event,
+                                                timeout_seconds=self._tool_timeout_seconds("ffuf"),
+                                            ),
+                                        )
+                                        ffuf_entry["phase"] = "agentic"
+                                        ffuf_entry["target"] = target
+                                        ffuf_entry["profile"] = profile
+                                        ffuf_entry["fallback_for"] = "gobuster"
+                                        ffuf_entry["reason"] = fallback_reason
+                                        entry["_extra_results"] = [ffuf_entry]
+                                        if ffuf_entry.get("success"):
+                                            agentic_success.add(("ffuf", target))
+                                elif tool == "ffuf":
+                                    entry = self._run_tool(
+                                        tool,
                                         lambda: self.scanners["ffuf"].scan(
                                             target,
                                             wordlist=safe_wordlist,
-                                            threads=max(10, int(threads)),
+                                            threads=threads,
                                             cancel_event=cancel_event,
                                             timeout_seconds=self._tool_timeout_seconds("ffuf"),
                                         ),
                                     )
-                                    ffuf_entry["phase"] = "agentic"
-                                    ffuf_entry["target"] = target
-                                    ffuf_entry["profile"] = profile
-                                    ffuf_entry["fallback_for"] = "gobuster"
-                                    ffuf_entry["reason"] = "Fallback after gobuster failure"
-                                    entry["_extra_results"] = [ffuf_entry]
-                                    if ffuf_entry.get("success"):
-                                        agentic_success.add(("ffuf", target))
-                            elif tool == "ffuf":
-                                entry = self._run_tool(
-                                    tool,
-                                    lambda: self.scanners["ffuf"].scan(
-                                        target,
-                                        wordlist=safe_wordlist,
-                                        threads=threads,
-                                        cancel_event=cancel_event,
-                                        timeout_seconds=self._tool_timeout_seconds("ffuf"),
-                                    ),
-                                )
-                            elif tool == "katana":
-                                entry = self._run_tool(
-                                    tool,
-                                    lambda: self.scanners["katana"].crawl(
-                                        target,
-                                        depth=int(self._tool_config("katana").get("depth", 3) or 3),
-                                        concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
-                                        cancel_event=cancel_event,
-                                        timeout_seconds=self._tool_timeout_seconds("katana"),
-                                    ),
-                                )
-                            elif tool == "nikto":
-                                try:
-                                    u = urlparse(target)
-                                    host = u.hostname or target
-                                    port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
-                                except Exception:
-                                    host = target
-                                    port = 80
-                                entry = self._run_tool(
-                                    tool,
-                                    lambda: self.scanners["nikto"].scan(
-                                        host,
-                                        port=port,
-                                        cancel_event=cancel_event,
-                                        timeout_seconds=self._tool_timeout_seconds("nikto"),
-                                    ),
-                                )
-                            elif tool == "sqlmap":
-                                if "?" not in target:
-                                    entry = self._skip_tool(tool, "No parameterized URL provided")
-                                else:
+                                elif tool == "katana":
                                     entry = self._run_tool(
                                         tool,
-                                        lambda: self.scanners["sqlmap"].scan(
+                                        lambda: self.scanners["katana"].crawl(
                                             target,
+                                            depth=int(self._tool_config("katana").get("depth", 3) or 3),
+                                            concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
                                             cancel_event=cancel_event,
-                                            timeout_seconds=self._tool_timeout_seconds("sqlmap"),
+                                            timeout_seconds=self._tool_timeout_seconds("katana"),
                                         ),
                                     )
-                            else:
-                                entry = self._skip_tool(tool, "Unsupported agentic action")
+                                elif tool == "nikto":
+                                    try:
+                                        u = urlparse(target)
+                                        host = u.hostname or target
+                                        port = int(u.port or (443 if (u.scheme or "").lower() == "https" else 80))
+                                    except Exception:
+                                        host = target
+                                        port = 80
+                                    entry = self._run_tool(
+                                        tool,
+                                        lambda: self.scanners["nikto"].scan(
+                                            host,
+                                            port=port,
+                                            cancel_event=cancel_event,
+                                            timeout_seconds=self._tool_timeout_seconds("nikto"),
+                                        ),
+                                    )
+                                elif tool == "sqlmap":
+                                    if "?" not in target:
+                                        entry = self._skip_tool(tool, "No parameterized URL provided")
+                                    else:
+                                        entry = self._run_tool(
+                                            tool,
+                                            lambda: self.scanners["sqlmap"].scan(
+                                                target,
+                                                cancel_event=cancel_event,
+                                                timeout_seconds=self._tool_timeout_seconds("sqlmap"),
+                                            ),
+                                        )
+                                else:
+                                    entry = self._skip_tool(tool, "Unsupported agentic action")
                     elif tool == "dnsenum":
                         action_target = scan_host
                         action_key = (tool, action_target or "")
@@ -1560,6 +1697,21 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 planner_blocked_candidates: List[Dict[str, Any]] = []
                 coverage_debt_pivot_count = 0
                 coverage_debt_pivot_cap = 2
+                gobuster_wildcard_targets: Set[str] = set()
+
+                for baseline_entry in agg.get("results", []) or []:
+                    if not isinstance(baseline_entry, dict):
+                        continue
+                    if str(baseline_entry.get("tool") or "").strip().lower() != "gobuster":
+                        continue
+                    baseline_target = str(baseline_entry.get("target") or "").strip()
+                    if not baseline_target:
+                        continue
+                    if not _is_gobuster_wildcard_error(baseline_entry):
+                        continue
+                    normalized_target = _canonicalize_web_action_target("gobuster", baseline_target)
+                    resolved_target = _resolve_allowed_web_target("gobuster", normalized_target)
+                    gobuster_wildcard_targets.add(resolved_target or normalized_target)
 
                 def _target_on_allowed_web_surface(target: str) -> bool:
                     text = str(target or "").strip()
@@ -1602,14 +1754,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     target = args.get("target") if isinstance(args.get("target"), str) else None
                     if not target:
                         return True
-                    if target not in allowed_web_targets and (tool != "sqlmap" or target not in sqlmap_targets):
-                        # Allow endpoint-level targets on an already discovered host:port surface.
-                        # This keeps agentic follow-up actions generic (not localhost-specific) while
-                        # still preventing out-of-scope host expansion.
-                        if str(tool or "").strip().lower() != "sqlmap" and _target_on_allowed_web_surface(target):
-                            pass
-                        else:
-                            return True
+                    resolved_target = _resolve_allowed_web_target(str(tool or "").strip().lower(), target)
+                    if resolved_target is None:
+                        return True
+                    if str(tool or "").strip().lower() != "sqlmap":
+                        target = resolved_target
                     return (tool, target) in baseline_success or (tool, target) in agentic_success
 
                 def _covered_action_exclusions(extra_actions: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
@@ -2374,6 +2523,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                     if tool == "sslscan" and _resolve_sslscan_port_for_action(action) is None:
                         return "invalid_sslscan_target"
+
+                    if tool == "gobuster" and target in gobuster_wildcard_targets:
+                        return "gobuster_wildcard_target"
 
                     if (
                         tool in ("nuclei", "sslscan", "gobuster", "ffuf", "katana", "nikto", "sqlmap")
