@@ -40,7 +40,15 @@ supabash audit "http://127.0.0.1:3001" --yes
 supabash audit "http://127.0.0.1:3002" --yes
 supabash audit "http://127.0.0.1:3003/WebGoat" --yes
 # or agentic mode
+export BROWSER_USE_API_KEY=your_browser_use_cloud_key
 supabash ai-audit "http://127.0.0.1:3003/WebGoat" --compliance soc2 --mode normal --yes
+```
+
+If `browser_use` reports missing API/LLM configuration during agentic runs, reset browser-use sessions and retry in the same shell:
+
+```bash
+browser-use --json close --all
+browser-use --json run 'Open http://127.0.0.1:3003/WebGoat and stop.' --max-steps 1
 ```
 
 ## 2b) Compare report coverage against WebGoat baseline

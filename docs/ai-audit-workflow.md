@@ -39,6 +39,7 @@ The agentic phase only allows tools that:
 - Match the target type (web, domain, SMB, TLS, container, etc.)
 - Respect opt‑in flags (e.g., `nikto`)
 - Respect runtime gates (for example `browser_use` is allowed by default when available, and can be disabled with `--no-browser-use`)
+- Respect tool credentials/runtime requirements (for `browser_use`, set `BROWSER_USE_API_KEY` in the same shell/session running `supabash`)
 
 ### 3) Tool calls are schema‑constrained
 The LLM must respond using the `propose_actions` tool schema:

@@ -142,6 +142,11 @@ Notes:
 - If browser-use is missing after install, run: `pipx install browser-use && pipx ensurepath && browser-use install`
 - `browser-use` may not support `--version` on all releases; validate with `browser-use --help` (or `pipx list | grep browser-use`).
 - If runtime setup fails with `uvx` errors, install `uv` first: `pipx install --force uv` and rerun `browser-use install`.
+- For agentic browser tasks, export your Browser-Use key in the same shell before running Supabash:
+  - `export BROWSER_USE_API_KEY=your_browser_use_cloud_key`
+- If `browser-use run` still says no LLM/API key, close stale sessions and retry:
+  - `browser-use --json close --all`
+  - `browser-use --json run 'Open https://example.com and stop.' --max-steps 1`
 
 ### Optional: PDF/HTML Report Export (WeasyPrint)
 
@@ -179,6 +184,7 @@ supabash doctor --verbose
     pipx install browser-use
     pipx ensurepath
     browser-use install
+    export BROWSER_USE_API_KEY=your_browser_use_cloud_key
     ```
 
 ## 🧪 Integration Testing (Optional)
@@ -542,6 +548,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Optionally scope Nuclei templates with `tools.nuclei.tags` or `tools.nuclei.severity` for faster audits.
 - Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
 - Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.headless`, `tools.browser_use.command`, `tools.browser_use.model`.
+- Browser-use credential requirement: set `BROWSER_USE_API_KEY` in your shell/session for non-interactive agentic runs that invoke `browser_use`.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
