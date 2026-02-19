@@ -1231,6 +1231,13 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             if isinstance(f, dict) and str(f.get("tool") or "").strip().lower() == "browser_use"
         ]
         self.assertTrue(browser_findings)
+        first_call = browser.calls[0]
+        task = str(first_call.get("kwargs", {}).get("task") or "")
+        self.assertIn("Target URL:", task)
+        self.assertIn("Execution guidance:", task)
+        self.assertIn("Output requirements:", task)
+        self.assertEqual(first_call.get("kwargs", {}).get("require_done"), True)
+        self.assertEqual(first_call.get("kwargs", {}).get("min_steps_success"), 1)
 
     def test_agentic_browser_use_skipped_when_disabled(self):
         scanners = _build_scanners()
@@ -1259,6 +1266,62 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             if isinstance(a, dict) and a.get("tool") == "browser_use" and a.get("phase") == "agentic"
         ]
         self.assertFalse(actions)
+
+    def test_agentic_browser_use_uses_configured_session_profile_and_auth_context(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseScanner()
+        scanners["browser_use"] = browser
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        original_tool_config = orchestrator._tool_config
+
+        def _tool_config_override(name):
+            if str(name or "").strip().lower() == "browser_use":
+                return {
+                    "enabled": True,
+                    "timeout_seconds": 900,
+                    "max_steps": 25,
+                    "headless": True,
+                    "session": "supabash-session",
+                    "profile": "supabash-profile",
+                    "auth": {
+                        "enabled": True,
+                        "login_url": "http://localhost:9090/login",
+                        "notes": "Use approved QA account only.",
+                    },
+                }
+            return original_tool_config(name)
+
+        orchestrator._tool_config = _tool_config_override
+        output = artifact_path("ai_audit_browser_use_auth_context.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        self.assertTrue(browser.calls)
+        call = browser.calls[0]
+        kwargs = call.get("kwargs", {})
+        self.assertEqual(kwargs.get("session"), "supabash-session")
+        self.assertEqual(kwargs.get("profile"), "supabash-profile")
+        task = str(kwargs.get("task") or "")
+        self.assertIn("Authentication context is configured for this run.", task)
+        self.assertIn("Preferred login URL: http://localhost:9090/login", task)
+        self.assertIn("Auth notes: Use approved QA account only.", task)
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "browser_use" and a.get("phase") == "agentic"
+        ]
+        self.assertTrue(actions)
 
 
 if __name__ == "__main__":

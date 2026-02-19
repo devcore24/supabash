@@ -547,8 +547,9 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Set a default Nuclei throttling rate via `tools.nuclei.rate_limit` (overridden by `--nuclei-rate`).
 - Optionally scope Nuclei templates with `tools.nuclei.tags` or `tools.nuclei.severity` for faster audits.
 - Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
-- Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.headless`, `tools.browser_use.command`, `tools.browser_use.model`.
+- Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.min_steps_success`, `tools.browser_use.require_done`, `tools.browser_use.headless`, `tools.browser_use.session`, `tools.browser_use.profile`, `tools.browser_use.command`, `tools.browser_use.model`, `tools.browser_use.auth.{enabled,login_url,notes,username_env,password_env,cookie_env,include_secrets_in_task}`.
 - Browser-use credential requirement: set `BROWSER_USE_API_KEY` in your shell/session for non-interactive agentic runs that invoke `browser_use`.
+- Agentic browser-use tasks are evidence-aware: Supabash now passes prior findings + rationale/hypothesis into each browser run, then feeds browser observations back into planner context for the next step.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
@@ -602,7 +603,7 @@ Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx 
 | **Nikto** | Web server scanning | `--nikto` flag |
 | **Sqlmap** | SQL injection detection | Auto (parameterized URLs) |
 | **katana** | Web crawling/spidering | `tools.katana.enabled=true` |
-| **browser-use** | Browser-driven authenticated checks | Agentic phase (default on; disable with `--no-browser-use`) |
+| **browser-use** | Browser-driven workflow checks (unauth/auth-context) | Agentic phase (default on; disable with `--no-browser-use`) |
 | **Searchsploit** | Offline exploit references | `tools.searchsploit.enabled=true` |
 | **WPScan** | WordPress security scanner | Auto (WordPress detected) |
 

@@ -95,9 +95,29 @@ DEFAULT_CONFIG = {
             "enabled": True,
             "timeout_seconds": 900,
             "max_steps": 25,
+            "min_steps_success": 1,
+            "require_done": True,
             "headless": True,
+            # Optional browser-use session/profile for authenticated workflows.
+            "session": "",
+            "profile": "",
+            # Optional auth guidance for browser tasks (kept generic by default).
+            "auth": {
+                "enabled": False,
+                "login_url": "",
+                "notes": "",
+                # Optional direct values (discouraged) or env-backed values.
+                "username": "",
+                "password": "",
+                "cookie": "",
+                "username_env": "",
+                "password_env": "",
+                "cookie_env": "",
+                # When false (default), secrets are never injected into the task text.
+                "include_secrets_in_task": False,
+            },
             # Optional command template override, supports placeholders:
-            # {target}, {task}, {max_steps}, {headless}, {model}
+            # {target}, {task}, {max_steps}, {headless}, {model}, {session}, {profile}
             "command": "",
             "model": "",
         },

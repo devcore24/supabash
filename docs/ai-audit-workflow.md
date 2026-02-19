@@ -40,6 +40,7 @@ The agentic phase only allows tools that:
 - Respect opt‑in flags (e.g., `nikto`)
 - Respect runtime gates (for example `browser_use` is allowed by default when available, and can be disabled with `--no-browser-use`)
 - Respect tool credentials/runtime requirements (for `browser_use`, set `BROWSER_USE_API_KEY` in the same shell/session running `supabash`)
+- Respect browser-use runtime controls (`tools.browser_use.require_done`, `tools.browser_use.min_steps_success`) so incomplete browser runs are rejected
 
 ### 3) Tool calls are schema‑constrained
 The LLM must respond using the `propose_actions` tool schema:
@@ -72,6 +73,14 @@ Even if the model proposes a tool:
 - Targets are validated against allowed lists
 - Threads/rate limits are clamped
 - Compliance profiles can override aggressive settings
+
+### 4.1) Browser-use tasking and feedback loop
+For `browser_use` actions, Supabash composes an evidence-aware task brief that includes:
+- Planner rationale/hypothesis/expected evidence
+- Target-specific prior findings (when available)
+- Optional configured auth context hints (`tools.browser_use.auth.*`)
+
+After execution, browser observations (completion status, steps, findings/URLs) are added back to run state so the next planner iteration sees what was already tried and what evidence was produced.
 
 ### 5) Graceful fallback is built‑in
 If tool‑calling fails or isn’t supported, Supabash skips the agentic phase and still writes the baseline report.

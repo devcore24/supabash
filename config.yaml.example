@@ -91,6 +91,27 @@ tools:
     timeout_seconds: 1800
     depth: 3
     concurrency: 10
+  browser_use:
+    enabled: true
+    timeout_seconds: 900
+    max_steps: 25
+    min_steps_success: 1
+    require_done: true
+    headless: true
+    session: ""
+    profile: ""
+    model: ""
+    # Optional command template supports placeholders:
+    # {target}, {task}, {max_steps}, {headless}, {model}, {session}, {profile}
+    command: ""
+    auth:
+      enabled: false
+      login_url: ""
+      notes: ""
+      username_env: ""
+      password_env: ""
+      cookie_env: ""
+      include_secrets_in_task: false
   sqlmap:
     enabled: true
     timeout_seconds: 1800

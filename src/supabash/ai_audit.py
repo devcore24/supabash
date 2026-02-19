@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -917,7 +918,57 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     "max_steps",
                     "headless",
                     "model",
+                    "browser_session",
+                    "browser_profile",
                 }
+
+                def _as_bool(value: Any, default: bool = False) -> bool:
+                    if isinstance(value, bool):
+                        return value
+                    if isinstance(value, str):
+                        txt = value.strip().lower()
+                        if txt in {"1", "true", "yes", "on"}:
+                            return True
+                        if txt in {"0", "false", "no", "off"}:
+                            return False
+                    return bool(default)
+
+                def _resolve_secret(value: Any, env_name: Any = None) -> str:
+                    if isinstance(env_name, str) and env_name.strip():
+                        env_val = os.getenv(env_name.strip())
+                        if isinstance(env_val, str) and env_val.strip():
+                            return env_val.strip()
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()
+                    return ""
+
+                def _browser_use_auth_context(cfg: Dict[str, Any]) -> Dict[str, Any]:
+                    auth_cfg = cfg.get("auth") if isinstance(cfg.get("auth"), dict) else {}
+                    enabled = _as_bool(auth_cfg.get("enabled"), False)
+                    include_secrets = _as_bool(auth_cfg.get("include_secrets_in_task"), False)
+                    login_url = str(auth_cfg.get("login_url") or "").strip()
+                    notes = str(auth_cfg.get("notes") or "").strip()
+                    username = _resolve_secret(auth_cfg.get("username"), auth_cfg.get("username_env"))
+                    password = _resolve_secret(auth_cfg.get("password"), auth_cfg.get("password_env"))
+                    cookie = _resolve_secret(auth_cfg.get("cookie"), auth_cfg.get("cookie_env"))
+                    has_creds = bool(username and password)
+                    has_cookie = bool(cookie)
+                    return {
+                        "enabled": bool(enabled),
+                        "include_secrets_in_task": bool(include_secrets),
+                        "login_url": login_url,
+                        "notes": notes,
+                        "credentials_configured": bool(has_creds),
+                        "cookie_configured": bool(has_cookie),
+                        "has_auth_context": bool(enabled and (login_url or has_creds or has_cookie or notes)),
+                        "username": username if include_secrets else "",
+                        "password": password if include_secrets else "",
+                        "cookie": cookie if include_secrets else "",
+                    }
+
+                browser_default_session = str(browser_use_cfg.get("session") or "").strip() or None
+                browser_default_profile = str(browser_use_cfg.get("profile") or "").strip() or None
+                browser_auth_default = _browser_use_auth_context(browser_use_cfg)
                 if not isinstance(ai_obj.get("planner_context_history"), list):
                     ai_obj["planner_context_history"] = []
                 planner_context_history: List[Dict[str, Any]] = ai_obj.get("planner_context_history") or []
@@ -953,6 +1004,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                                         "max_steps": {"type": "integer"},
                                                         "headless": {"type": "boolean"},
                                                         "model": {"type": "string"},
+                                                        "browser_session": {"type": "string"},
+                                                        "browser_profile": {"type": "string"},
                                                     },
                                                     "required": ["profile"],
                                                     "additionalProperties": False,
@@ -1157,6 +1210,121 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     )
                     return any(pattern in text for pattern in patterns)
 
+                def _target_related_findings_for_browser(target_url: str, limit: int = 6) -> List[Dict[str, str]]:
+                    selected: List[Dict[str, str]] = []
+                    seen: Set[str] = set()
+                    host_port = _web_target_host_port_key(target_url)
+                    host = host_port[0] if host_port else ""
+                    findings_all: List[Dict[str, Any]] = []
+                    try:
+                        collected = self._collect_findings(agg)
+                        findings_all = collected if isinstance(collected, list) else []
+                    except Exception:
+                        findings_all = []
+
+                    for item in reversed(findings_all):
+                        if not isinstance(item, dict):
+                            continue
+                        title = str(item.get("title") or "").strip()
+                        evidence = str(item.get("evidence") or "").strip()
+                        severity = str(item.get("severity") or "INFO").strip().upper()
+                        risk_class = str(item.get("risk_class") or "").strip().lower()
+                        text = f"{title} {evidence}".lower()
+                        if host and host not in text and target_url.lower() not in text:
+                            continue
+                        key = f"{severity}|{title}|{risk_class}"
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        selected.append(
+                            {
+                                "severity": severity,
+                                "title": title[:120],
+                                "evidence": evidence[:200],
+                                "risk_class": risk_class[:60],
+                            }
+                        )
+                        if len(selected) >= max(1, int(limit)):
+                            break
+                    selected.reverse()
+                    return selected
+
+                def _build_browser_use_task(
+                    action: Dict[str, Any],
+                    *,
+                    target_url: str,
+                    proposed_task: Optional[str],
+                    auth_ctx: Dict[str, Any],
+                ) -> str:
+                    reasoning = str(action.get("reasoning") or "").strip()
+                    hypothesis = str(action.get("hypothesis") or "").strip()
+                    expected = str(action.get("expected_evidence") or "").strip()
+                    prior_findings = _target_related_findings_for_browser(target_url, limit=6)
+
+                    lines: List[str] = [
+                        "Perform a focused browser-driven security validation.",
+                        f"Target URL: {target_url}",
+                    ]
+                    if proposed_task:
+                        lines.append(f"Planner objective: {proposed_task}")
+                    if reasoning:
+                        lines.append(f"Rationale: {reasoning}")
+                    if hypothesis:
+                        lines.append(f"Hypothesis: {hypothesis}")
+                    if expected:
+                        lines.append(f"Expected evidence: {expected}")
+
+                    if prior_findings:
+                        lines.append("Prior findings to validate:")
+                        for item in prior_findings:
+                            sev = str(item.get("severity") or "INFO")
+                            title = str(item.get("title") or "").strip()
+                            ev = str(item.get("evidence") or "").strip()
+                            lines.append(f"- [{sev}] {title}: {ev}")
+
+                    lines.extend(
+                        [
+                            "Execution guidance:",
+                            "- Start at the target URL and map reachable same-origin paths/forms.",
+                            "- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.",
+                            "- Do not brute-force credentials or run destructive actions.",
+                            "- Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.",
+                        ]
+                    )
+
+                    if bool(auth_ctx.get("has_auth_context")):
+                        lines.append("Authentication context is configured for this run.")
+                        login_url = str(auth_ctx.get("login_url") or "").strip()
+                        notes = str(auth_ctx.get("notes") or "").strip()
+                        if login_url:
+                            lines.append(f"- Preferred login URL: {login_url}")
+                        if bool(auth_ctx.get("credentials_configured")):
+                            if bool(auth_ctx.get("include_secrets_in_task")):
+                                username = str(auth_ctx.get("username") or "").strip()
+                                password = str(auth_ctx.get("password") or "").strip()
+                                if username:
+                                    lines.append(f"- Username: {username}")
+                                if password:
+                                    lines.append(f"- Password: {password}")
+                            else:
+                                lines.append("- Credentials are configured (not included here); use configured auth context safely.")
+                        if bool(auth_ctx.get("cookie_configured")):
+                            if bool(auth_ctx.get("include_secrets_in_task")):
+                                cookie = str(auth_ctx.get("cookie") or "").strip()
+                                if cookie:
+                                    lines.append(f"- Session cookie: {cookie}")
+                            else:
+                                lines.append("- Session cookie context is configured (not included here).")
+                        if notes:
+                            lines.append(f"- Auth notes: {notes}")
+                    else:
+                        lines.append("Run unauthenticated workflow validation only.")
+
+                    lines.append(
+                        "Output requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose."
+                    )
+                    return "\n".join(lines)[:5000]
+
                 def normalize_action(item: Any) -> Optional[Dict[str, Any]]:
                     if not isinstance(item, dict):
                         return None
@@ -1288,14 +1456,29 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     for r in agg.get("results", []) or []:
                         if not isinstance(r, dict):
                             continue
-                        results_summary.append(
-                            {
-                                "tool": r.get("tool"),
-                                "success": r.get("success"),
-                                "skipped": r.get("skipped"),
-                                "phase": r.get("phase"),
-                            }
-                        )
+                        item_summary: Dict[str, Any] = {
+                            "tool": r.get("tool"),
+                            "success": r.get("success"),
+                            "skipped": r.get("skipped"),
+                            "phase": r.get("phase"),
+                        }
+                        data_block = r.get("data") if isinstance(r.get("data"), dict) else {}
+                        if isinstance(data_block, dict):
+                            if isinstance(data_block.get("observation"), dict):
+                                obs = data_block.get("observation") or {}
+                                item_summary["observation"] = {
+                                    "done": obs.get("done"),
+                                    "steps": obs.get("steps"),
+                                    "findings_count": obs.get("findings_count"),
+                                    "urls_count": obs.get("urls_count"),
+                                }
+                            if str(r.get("tool") or "").strip().lower() == "browser_use":
+                                item_summary["browser"] = {
+                                    "completed": data_block.get("completed"),
+                                    "urls": len(data_block.get("urls") or []),
+                                    "findings": len(data_block.get("findings") or []),
+                                }
+                        results_summary.append(item_summary)
 
                     all_findings: List[Dict[str, Any]] = []
                     try:
@@ -1417,6 +1600,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "nikto_opt_in": bool(run_nikto),
                             "browser_use_enabled": bool(run_browser_use),
                             "browser_use_available": bool(browser_use_available),
+                            "browser_use_session_configured": bool(browser_default_session),
+                            "browser_use_profile_configured": bool(browser_default_profile),
+                            "browser_use_auth_context_enabled": bool(browser_auth_default.get("enabled")),
+                            "browser_use_auth_context_available": bool(browser_auth_default.get("has_auth_context")),
+                            "browser_use_auth_login_url": str(browser_auth_default.get("login_url") or ""),
                             "trivy_requires_container": bool(container_image),
                             "tls_ports_detected": tls_ports,
                             "smb_ports_detected": bool(smb_ports),
@@ -1531,9 +1719,28 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 except Exception:
                                     browser_default_steps = 25
                                 browser_default_steps = max(1, min(browser_default_steps, 100))
-                                browser_task = str(args.get("task") or "").strip() or None
+                                planner_browser_task = str(args.get("task") or "").strip() or None
                                 browser_model = str(args.get("model") or browser_cfg_local.get("model") or "").strip() or None
                                 browser_command = str(browser_cfg_local.get("command") or "").strip() or None
+                                browser_session = (
+                                    str(args.get("browser_session") or browser_cfg_local.get("session") or "").strip() or None
+                                )
+                                browser_profile = (
+                                    str(args.get("browser_profile") or browser_cfg_local.get("profile") or "").strip() or None
+                                )
+                                browser_auth_ctx = _browser_use_auth_context(browser_cfg_local)
+                                browser_task = planner_browser_task
+                                if tool == "browser_use":
+                                    browser_task = _build_browser_use_task(
+                                        action,
+                                        target_url=target,
+                                        proposed_task=planner_browser_task,
+                                        auth_ctx=browser_auth_ctx,
+                                    )
+                                browser_require_done = _as_bool(browser_cfg_local.get("require_done"), True)
+                                browser_min_steps_success = clamp_int(
+                                    browser_cfg_local.get("min_steps_success"), 1, 0, 100
+                                )
                                 raw_headless = args.get("headless", browser_cfg_local.get("headless", True))
                                 if isinstance(raw_headless, str):
                                     browser_headless = raw_headless.strip().lower() in {"1", "true", "yes", "on"}
@@ -1660,7 +1867,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                             max_steps=browser_steps,
                                             headless=browser_headless,
                                             model=browser_model,
+                                            session=browser_session,
+                                            profile=browser_profile,
                                             command=browser_command,
+                                            require_done=browser_require_done,
+                                            min_steps_success=browser_min_steps_success,
                                             cancel_event=cancel_event,
                                             timeout_seconds=self._tool_timeout_seconds("browser_use"),
                                         ),
