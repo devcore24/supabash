@@ -29,7 +29,6 @@ Example: [reports](example_reports/)
 Requirements:
 Supabash requires Linux (Kali, Ubuntu, Debian) or WSL2.  
 macOS: manual/experimental setup only, untested.  
-(Built with OpenAI's Codex gpt5.1-5.2 high / xhigh)
 
 
 ---
