@@ -1,0 +1,17 @@
+id: supabash-webgoat-min
+info:
+  name: WebGoat Minimal Reachability Check
+  author: supabash
+  severity: high
+  description: Minimal template used to keep WebGoat integration tests fast.
+  tags: exposure,misconfig,default-login
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/"
+      - "{{BaseURL}}/WebGoat"
+    matchers:
+      - type: status
+        status:
+          - 200
+          - 302

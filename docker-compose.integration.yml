@@ -18,3 +18,17 @@ services:
     volumes:
       - ./tests/fixtures/supabase_mock/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./tests/fixtures/supabase_mock:/usr/share/nginx/html:ro
+
+  webgoat:
+    image: webgoat/webgoat:latest
+    ports:
+      - "${WEBGOAT_HOST_HTTP:-3003}:8080"
+      - "${WEBGOAT_HOST_AUX:-9093}:9090"
+    environment:
+      - TZ=${WEBGOAT_TZ:-UTC}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/WebGoat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s

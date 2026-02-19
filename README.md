@@ -21,7 +21,7 @@
 > **⚠️ Development Status:** Supabash is in active development. Core CLI and baseline audit workflows are production-usable, while some agentic planning paths, cloud posture checks, and Supabase heuristics remain **beta**. Coverage is improving and behavior may change as reliability and compliance mapping mature.  
 > **Status:** **Beta (stabilization + coverage expansion in progress)**
 
-**Supabash** is an agentic AI security audit tool that generates evidence-backed **Supabash Audit** reports.  
+**Supabash** is an AI-powered agentic security audit tool that generates evidence-backed **Supabash Audit** reports.  
 It can also be used to prepare for compliance assessments and certifications such as **SOC 2 / ISO 27001 / PCI DSS / DORA / NIS2 / GDPR / BSI**.
 
 Example: [reports](example_reports/)
@@ -29,6 +29,8 @@ Example: [reports](example_reports/)
 Requirements:
 Supabash requires Linux (Kali, Ubuntu, Debian) or WSL2.  
 macOS: manual/experimental setup only, untested.  
+(Built with OpenAI's Codex gpt5.1-5.2 high / xhigh)
+
 
 ---
 
@@ -173,7 +175,15 @@ supabash doctor --verbose
 
 - Docker-based harness: `docker-compose.integration.yml`
 - Guide: `docs/integration-testing.md`
-  - Targets: OWASP Juice Shop (`:3002`) + DVWA (`:3001`) + Supabase mock (`:4001`)
+  - Targets: OWASP Juice Shop (`:3002`) + DVWA (`:3001`) + Supabase mock (`:4001`) + WebGoat (`:3003`/`:9093`)
+
+Start only WebGoat for focused benchmarking:
+```bash
+docker compose -f docker-compose.integration.yml up -d webgoat
+# optional timezone (for some lessons)
+WEBGOAT_TZ=America/Boise docker compose -f docker-compose.integration.yml up -d webgoat
+```
+Open WebGoat at `http://127.0.0.1:3003/WebGoat` and WebWolf at `http://127.0.0.1:9093/WebWolf` (root `/` returns `404` by design).
 
 Enable the opt-in integration tests (skipped unless `SUPABASH_INTEGRATION=1`):
 ```bash
