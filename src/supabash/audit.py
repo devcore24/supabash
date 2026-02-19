@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Sequence, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 import time
@@ -2427,15 +2427,254 @@ class AuditOrchestrator:
           - scan_host: host/IP for nmap
           - base_url: base URL for web tooling if target is a URL
           - sqlmap_url: full URL (only when it contains query params)
+          - is_url: True when input target is a URL
+          - scheme/host/port/path: parsed URL components (best-effort)
         """
         if "://" not in target:
-            return {"scan_host": target, "base_url": None, "sqlmap_url": None}
+            return {
+                "scan_host": target,
+                "base_url": None,
+                "sqlmap_url": None,
+                "is_url": False,
+                "scheme": None,
+                "host": None,
+                "port": None,
+                "path": None,
+            }
         parsed = urlparse(target)
         host = parsed.hostname or target
         netloc = parsed.netloc
         base = f"{parsed.scheme}://{netloc}" if parsed.scheme and netloc else None
         sqlmap_url = target if "?" in target else None
-        return {"scan_host": host, "base_url": base, "sqlmap_url": sqlmap_url}
+        path = str(parsed.path or "/").strip() or "/"
+        return {
+            "scan_host": host,
+            "base_url": base,
+            "sqlmap_url": sqlmap_url,
+            "is_url": True,
+            "scheme": str(parsed.scheme or "").strip().lower() or None,
+            "host": str(parsed.hostname or "").strip().lower() or None,
+            "port": parsed.port,
+            "path": path,
+        }
+
+    def _web_target_host_port(self, value: Any) -> Optional[Tuple[str, int]]:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        parse_input = text if "://" in text else f"http://{text}"
+        try:
+            parsed = urlparse(parse_input)
+            scheme = str(parsed.scheme or "http").strip().lower() or "http"
+            host = str(parsed.hostname or "").strip().lower()
+            if not host:
+                return None
+            default_port = 443 if scheme == "https" else 80
+            port = int(parsed.port or default_port)
+            return (host, port)
+        except Exception:
+            return None
+
+    def _scope_web_targets_for_target(
+        self,
+        normalized_target: Dict[str, Any],
+        web_targets: Sequence[Any],
+        *,
+        expand_web_scope: bool = False,
+    ) -> List[str]:
+        """
+        Keep web targets aligned with explicit URL scope when the user provided a URL target.
+
+        Default behavior:
+          - Host must match URL host.
+          - If URL contains an explicit port, keep only that port.
+        Optional:
+          - expand_web_scope=True relaxes to host-only scope (port expansion allowed).
+        """
+        raw_candidates = [str(u).strip() for u in (web_targets or []) if isinstance(u, str) and str(u).strip()]
+        if not bool(normalized_target.get("is_url")):
+            # Preserve explicit scheme ordering for host/IP target runs.
+            out: List[str] = []
+            seen = set()
+            for item in raw_candidates:
+                if item in seen:
+                    continue
+                seen.add(item)
+                out.append(item)
+            return out
+        candidates = self._dedupe_web_targets_prefer_https(raw_candidates)
+
+        base_url = str(normalized_target.get("base_url") or "").strip()
+        scoped_host = str(normalized_target.get("host") or "").strip().lower()
+        explicit_port = normalized_target.get("port")
+        try:
+            explicit_port = int(explicit_port) if explicit_port is not None else None
+        except Exception:
+            explicit_port = None
+
+        scoped: List[str] = []
+        for item in candidates:
+            host_port = self._web_target_host_port(item)
+            if host_port is None:
+                continue
+            host, port = host_port
+            if scoped_host and host != scoped_host:
+                continue
+            if (not expand_web_scope) and explicit_port is not None and port != explicit_port:
+                continue
+            scoped.append(item)
+
+        scoped = self._dedupe_web_targets_prefer_https(scoped)
+        if base_url and base_url not in scoped:
+            scoped.insert(0, base_url)
+        if not scoped and base_url:
+            scoped = [base_url]
+        return scoped
+
+    def _extract_urls_from_text(self, value: Any) -> List[str]:
+        text = str(value or "").strip()
+        if not text:
+            return []
+        urls: List[str] = []
+        if text.startswith(("http://", "https://")):
+            urls.append(text)
+        for m in re.finditer(r"https?://[^\s'\"<>]+", text):
+            raw = str(m.group(0) or "").strip()
+            if not raw:
+                continue
+            urls.append(raw.rstrip("),.;]}>"))
+        # preserve order with dedup
+        out: List[str] = []
+        seen = set()
+        for u in urls:
+            if u and u not in seen:
+                out.append(u)
+                seen.add(u)
+        return out
+
+    def _harvest_parameterized_urls_from_results(
+        self,
+        results: Sequence[Any],
+        *,
+        allowed_hosts: Optional[Sequence[str]] = None,
+        max_urls: int = 20,
+    ) -> List[str]:
+        host_scope = {str(h).strip().lower() for h in (allowed_hosts or []) if str(h).strip()}
+        seen = set()
+        out: List[str] = []
+        max_urls = max(1, min(int(max_urls), 200))
+
+        def _normalize_candidate(url: str) -> Optional[str]:
+            try:
+                parsed = urlparse(str(url or "").strip())
+            except Exception:
+                return None
+            scheme = str(parsed.scheme or "").strip().lower()
+            if scheme not in ("http", "https"):
+                return None
+            host = str(parsed.hostname or "").strip().lower()
+            if not host:
+                return None
+            if host_scope and host not in host_scope:
+                return None
+            query = str(parsed.query or "").strip()
+            if not query or "=" not in query:
+                return None
+            default_port = 443 if scheme == "https" else 80
+            port = parsed.port
+            if port is not None and int(port) != default_port:
+                netloc = f"{host}:{int(port)}"
+            else:
+                netloc = host
+            path = str(parsed.path or "/") or "/"
+            return urlunparse((scheme, netloc, path, "", query, ""))
+
+        text_candidates: List[str] = []
+        for entry in results or []:
+            if not isinstance(entry, dict):
+                continue
+            data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+            for key in ("url", "target", "evidence"):
+                v = entry.get(key)
+                if isinstance(v, str) and v.strip():
+                    text_candidates.append(v)
+            if isinstance(data, dict):
+                for key in ("urls", "findings"):
+                    values = data.get(key)
+                    if not isinstance(values, list):
+                        continue
+                    for item in values:
+                        if isinstance(item, str):
+                            text_candidates.append(item)
+                        elif isinstance(item, dict):
+                            for k in ("url", "matched_at", "endpoint", "evidence"):
+                                v = item.get(k)
+                                if isinstance(v, str) and v.strip():
+                                    text_candidates.append(v)
+                ffuf_results = data.get("results")
+                ffuf_rows = ffuf_results.get("results") if isinstance(ffuf_results, dict) else None
+                if isinstance(ffuf_rows, list):
+                    for row in ffuf_rows:
+                        if not isinstance(row, dict):
+                            continue
+                        for k in ("url", "redirectlocation"):
+                            v = row.get(k)
+                            if isinstance(v, str) and v.strip():
+                                text_candidates.append(v)
+
+        for text in text_candidates:
+            if len(out) >= max_urls:
+                break
+            if not isinstance(text, str):
+                continue
+            if "http" not in text and "?" not in text:
+                continue
+            for candidate in self._extract_urls_from_text(text):
+                normalized = _normalize_candidate(candidate)
+                if not normalized or normalized in seen:
+                    continue
+                seen.add(normalized)
+                out.append(normalized)
+                if len(out) >= max_urls:
+                    break
+        return out
+
+    def _build_sqlmap_targets(
+        self,
+        normalized_target: Dict[str, Any],
+        *,
+        web_targets: Sequence[Any],
+        results: Sequence[Any],
+        max_targets: int = 2,
+    ) -> List[str]:
+        max_targets = max(1, min(int(max_targets), 8))
+        allowed_hosts: List[str] = []
+        host = str(normalized_target.get("host") or "").strip().lower()
+        if host:
+            allowed_hosts.append(host)
+        for u in web_targets or []:
+            host_port = self._web_target_host_port(u)
+            if host_port is None:
+                continue
+            h, _p = host_port
+            if h and h not in allowed_hosts:
+                allowed_hosts.append(h)
+
+        explicit = str(normalized_target.get("sqlmap_url") or "").strip()
+        targets: List[str] = []
+        if explicit:
+            targets.append(explicit)
+        harvested = self._harvest_parameterized_urls_from_results(
+            results,
+            allowed_hosts=allowed_hosts,
+            max_urls=max(4, max_targets * 3),
+        )
+        for item in harvested:
+            if item not in targets:
+                targets.append(item)
+            if len(targets) >= max_targets:
+                break
+        return targets[:max_targets]
 
     def _web_targets_from_nmap(self, scan_host: str, nmap_data: Dict[str, Any]) -> List[str]:
         """
@@ -3055,6 +3294,13 @@ class AuditOrchestrator:
         nmap_cfg = self._tool_config("nmap")
         fast_discovery_flag = nmap_cfg.get("fast_discovery")
         fast_discovery_enabled = bool(fast_discovery_flag) if fast_discovery_flag is not None else True
+        expand_scope_raw = nmap_cfg.get("url_target_expand_web_scope")
+        if isinstance(expand_scope_raw, str):
+            url_target_expand_web_scope = expand_scope_raw.strip().lower() in {"1", "true", "yes", "on"}
+        elif expand_scope_raw is None:
+            url_target_expand_web_scope = False
+        else:
+            url_target_expand_web_scope = bool(expand_scope_raw)
         fast_discovery_ports = str(nmap_cfg.get("fast_discovery_ports") or "1-65535").strip()
         if not fast_discovery_ports:
             fast_discovery_ports = "1-65535"
@@ -3079,6 +3325,7 @@ class AuditOrchestrator:
                 "nmap_fast_discovery": bool(fast_discovery_enabled),
                 "nmap_fast_discovery_ports": fast_discovery_ports,
                 "nmap_fast_discovery_max_ports": int(fast_discovery_max_ports),
+                "nmap_url_target_expand_web_scope": bool(url_target_expand_web_scope),
                 "nikto_enabled": bool(run_nikto),
                 "hydra_enabled": bool(run_hydra),
                 "hydra_services": hydra_services,
@@ -3156,7 +3403,7 @@ class AuditOrchestrator:
             """
             if not fast_discovery_enabled:
                 return [], [], None
-            if lock_web_targets or normalized["base_url"]:
+            if lock_web_targets or (normalized["base_url"] and not bool(url_target_expand_web_scope)):
                 return [], [], None
 
             discovered_ports: List[int] = []
@@ -4003,13 +4250,26 @@ class AuditOrchestrator:
         # Recon & web scans (optional parallel overlap)
         nmap_entry: Optional[Dict[str, Any]] = None
         web_targets: List[str] = []
+        url_scope_locked = bool(normalized.get("is_url")) and not bool(url_target_expand_web_scope)
         lock_web_targets = False
         if web_targets_override:
             web_targets = [str(u).strip() for u in list(web_targets_override) if str(u).strip()]
             lock_web_targets = bool(web_targets)
         if not web_targets and normalized["base_url"]:
             web_targets = [normalized["base_url"]]
-        agg["web_targets"] = web_targets
+        if url_scope_locked and web_targets:
+            lock_web_targets = True
+
+        def apply_web_scope() -> None:
+            nonlocal web_targets
+            web_targets = self._scope_web_targets_for_target(
+                normalized,
+                web_targets,
+                expand_web_scope=bool(url_target_expand_web_scope),
+            )
+            agg["web_targets"] = web_targets
+
+        apply_web_scope()
 
         llm_enabled = bool(use_llm) and self._llm_enabled(default=True)
         if not llm_enabled:
@@ -4090,7 +4350,7 @@ class AuditOrchestrator:
                         for u in promoted.get("urls", []):
                             if isinstance(u, str) and u.strip() and u not in web_targets:
                                 web_targets.append(u)
-                        agg["web_targets"] = web_targets
+                        apply_web_scope()
                         stats = promoted.get("stats", {}) if isinstance(promoted.get("stats"), dict) else {}
                         if stats:
                             agg.setdefault("summary_notes", []).append(
@@ -4260,6 +4520,7 @@ class AuditOrchestrator:
                             for u in promoted.get("urls", []):
                                 if isinstance(u, str) and u.strip() and u not in web_targets:
                                     web_targets.append(u)
+                            apply_web_scope()
                             stats = promoted.get("stats", {}) if isinstance(promoted.get("stats"), dict) else {}
                             if stats:
                                 agg.setdefault("summary_notes", []).append(
@@ -4276,7 +4537,7 @@ class AuditOrchestrator:
                     for u in derived:
                         if u not in web_targets:
                             web_targets.append(u)
-                    agg["web_targets"] = web_targets
+                    apply_web_scope()
 
             # Probe derived web targets (best-effort) to avoid false-positives from service detection.
             if web_targets and self._has_scanner("httpx"):
@@ -4297,7 +4558,7 @@ class AuditOrchestrator:
                         # Keep both http:// and https:// variants if they are truly reachable;
                         # deep-scan selection will de-duplicate by host:port to avoid double work.
                         web_targets = [str(x).strip() for x in alive if isinstance(x, str) and str(x).strip()]
-                        agg["web_targets"] = web_targets
+                        apply_web_scope()
 
             # Post-recon conditional modules
             if nmap_entry.get("success"):
@@ -4481,28 +4742,65 @@ class AuditOrchestrator:
             agg["results"].append(readiness_entry)
             note("tool_end", "readiness_probe", "Finished readiness probes")
 
-        if normalized["sqlmap_url"]:
-            if canceled():
-                agg["canceled"] = True
-                agg["finished_at"] = time.time()
-                return agg
-            note("tool_start", "sqlmap", "Running sqlmap")
-            sqlmap_entry = self._run_tool_if_enabled(
-                "sqlmap",
-                lambda: self.scanners["sqlmap"].scan(
-                    normalized["sqlmap_url"],
-                    cancel_event=cancel_event,
-                    timeout_seconds=self._tool_timeout_seconds("sqlmap"),
-                ),
-            )
-            agg["results"].append(sqlmap_entry)
-            note("tool_end", "sqlmap", "Finished sqlmap")
-            if canceled() or (isinstance(sqlmap_entry.get("data"), dict) and sqlmap_entry["data"].get("canceled")):
-                agg["canceled"] = True
-                agg["finished_at"] = time.time()
-                return agg
+        sqlmap_cfg = self._tool_config("sqlmap")
+        try:
+            sqlmap_max_targets = int(sqlmap_cfg.get("max_targets", 2))
+        except Exception:
+            sqlmap_max_targets = 2
+        sqlmap_max_targets = max(1, min(sqlmap_max_targets, 8))
+        sqlmap_targets = self._build_sqlmap_targets(
+            normalized,
+            web_targets=web_targets,
+            results=agg.get("results", []),
+            max_targets=sqlmap_max_targets,
+        )
+        agg["sqlmap_targets"] = list(sqlmap_targets)
+        explicit_sqlmap_target = str(normalized.get("sqlmap_url") or "").strip()
+
+        if sqlmap_targets:
+            harvested_count = 0
+            if explicit_sqlmap_target:
+                harvested_count = sum(1 for u in sqlmap_targets if u != explicit_sqlmap_target)
+            else:
+                harvested_count = len(sqlmap_targets)
+            if harvested_count > 0:
+                agg.setdefault("summary_notes", []).append(
+                    (
+                        "SQLMap parameter target harvesting discovered "
+                        f"{len(sqlmap_targets)} candidate URL(s); executing up to {len(sqlmap_targets)} check(s)."
+                    )
+                )
+
+            for sql_target in sqlmap_targets:
+                if canceled():
+                    agg["canceled"] = True
+                    agg["finished_at"] = time.time()
+                    return agg
+                note("tool_start", "sqlmap", f"Running sqlmap on {sql_target}")
+                sqlmap_entry = self._run_tool_if_enabled(
+                    "sqlmap",
+                    lambda sql_target=sql_target: self.scanners["sqlmap"].scan(
+                        sql_target,
+                        cancel_event=cancel_event,
+                        timeout_seconds=self._tool_timeout_seconds("sqlmap"),
+                    ),
+                )
+                sqlmap_entry["target"] = sql_target
+                sqlmap_entry["target_scope"] = (
+                    "explicit_input" if explicit_sqlmap_target and sql_target == explicit_sqlmap_target else "harvested"
+                )
+                agg["results"].append(sqlmap_entry)
+                note("tool_end", "sqlmap", f"Finished sqlmap on {sql_target}")
+                if canceled() or (
+                    isinstance(sqlmap_entry.get("data"), dict) and sqlmap_entry["data"].get("canceled")
+                ):
+                    agg["canceled"] = True
+                    agg["finished_at"] = time.time()
+                    return agg
         else:
-            agg["results"].append(self._skip_tool("sqlmap", "No parameterized URL provided (include '?' in target URL)"))
+            agg["results"].append(
+                self._skip_tool("sqlmap", "No parameterized URL detected in input/discovered endpoints")
+            )
 
         # Supabase security audit (URLs/keys/RPC exposure)
         if web_targets and self._has_scanner("supabase_audit"):

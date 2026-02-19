@@ -730,31 +730,44 @@ class AIAuditOrchestrator(AuditOrchestrator):
         if not isinstance(web_targets, list):
             web_targets = []
         web_targets = [str(u).strip() for u in web_targets if isinstance(u, str) and u.strip()]
-        lock_web_targets = bool(web_targets) if normalized.get("base_url") else False
+        nmap_cfg = self._tool_config("nmap")
+        expand_scope_raw = nmap_cfg.get("url_target_expand_web_scope")
+        if isinstance(expand_scope_raw, str):
+            url_target_expand_web_scope = expand_scope_raw.strip().lower() in {"1", "true", "yes", "on"}
+        elif expand_scope_raw is None:
+            url_target_expand_web_scope = False
+        else:
+            url_target_expand_web_scope = bool(expand_scope_raw)
+        lock_web_targets = bool(web_targets) if (normalized.get("base_url") and not url_target_expand_web_scope) else False
+        scan_host = str(agg.get("scan_host") or target).strip()
 
-        # Even when the user passes a URL, nmap can discover additional HTTP(S) ports.
-        # Merge derived web targets so the agentic expansion can cover them.
-        try:
-            scan_host = str(agg.get("scan_host") or target).strip()
-            scan_data = None
-            for entry in agg.get("results", []) or []:
-                if not isinstance(entry, dict):
-                    continue
-                if entry.get("tool") != "nmap" or not entry.get("success"):
-                    continue
-                data = entry.get("data")
-                if not isinstance(data, dict):
-                    continue
-                maybe_scan = data.get("scan_data")
-                if isinstance(maybe_scan, dict):
-                    scan_data = maybe_scan
-                    break
-            if isinstance(scan_data, dict) and scan_data:
-                for u in self._web_targets_from_nmap(scan_host, scan_data):
-                    if u not in web_targets:
-                        web_targets.append(u)
-        except Exception:
-            pass
+        # Optionally merge nmap-derived web targets when URL scope lock is not active.
+        if not lock_web_targets:
+            try:
+                scan_data = None
+                for entry in agg.get("results", []) or []:
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("tool") != "nmap" or not entry.get("success"):
+                        continue
+                    data = entry.get("data")
+                    if not isinstance(data, dict):
+                        continue
+                    maybe_scan = data.get("scan_data")
+                    if isinstance(maybe_scan, dict):
+                        scan_data = maybe_scan
+                        break
+                if isinstance(scan_data, dict) and scan_data:
+                    for u in self._web_targets_from_nmap(scan_host, scan_data):
+                        if u not in web_targets:
+                            web_targets.append(u)
+            except Exception:
+                pass
+        web_targets = self._scope_web_targets_for_target(
+            normalized,
+            web_targets,
+            expand_web_scope=bool(url_target_expand_web_scope),
+        )
         agg["web_targets"] = web_targets
 
         baseline_web = web_targets[0] if web_targets else None
@@ -765,6 +778,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
         # Agentic tool-calling phase (bounded).
         agentic_enabled = bool(llm_plan)
+        coverage_debt_pivot_count = 0
         ai_obj["planner"]["type"] = "tool_calling" if agentic_enabled else "disabled"
 
         if not agentic_enabled:
@@ -794,9 +808,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
             smb_ports = [p for p in open_ports if p in (139, 445)]
 
             allowed_web_targets = [u for u in web_targets if isinstance(u, str) and u.strip()]
-            sqlmap_targets = [u for u in allowed_web_targets if "?" in u]
-            if normalized.get("sqlmap_url") and normalized["sqlmap_url"] not in sqlmap_targets:
-                sqlmap_targets.insert(0, normalized["sqlmap_url"])
+            sqlmap_cfg = self._tool_config("sqlmap")
+            try:
+                sqlmap_max_targets = int(sqlmap_cfg.get("max_targets", 2))
+            except Exception:
+                sqlmap_max_targets = 2
+            sqlmap_max_targets = max(1, min(sqlmap_max_targets, 8))
+            sqlmap_targets = self._build_sqlmap_targets(
+                normalized,
+                web_targets=allowed_web_targets,
+                results=agg.get("results", []),
+                max_targets=sqlmap_max_targets,
+            )
 
             tool_specs = {
                 "httpx": {"target_kind": "web", "enabled_default": True},
@@ -823,8 +846,6 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 if spec.get("opt_in") is False:
                     continue
                 if tool in ("dnsenum", "subfinder") and not self._should_run_dnsenum(scan_host):
-                    continue
-                if tool == "sqlmap" and not sqlmap_targets:
                     continue
                 if tool == "sslscan" and not tls_ports:
                     continue
@@ -1027,7 +1048,27 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if tool_name == "sqlmap":
                         if text in sqlmap_targets:
                             return text
-                        return None
+                        parse_input = text if "://" in text else f"http://{text}"
+                        try:
+                            parsed = urlparse(parse_input)
+                            scheme = str(parsed.scheme or "").strip().lower()
+                            host = str(parsed.hostname or "").strip().lower()
+                            query = str(parsed.query or "").strip()
+                        except Exception:
+                            return None
+                        if scheme not in ("http", "https") or not host or not query or "=" not in query:
+                            return None
+                        host_scope = set()
+                        normalized_host = str(normalized.get("host") or "").strip().lower()
+                        if normalized_host:
+                            host_scope.add(normalized_host)
+                        for item in allowed_web_targets or []:
+                            hp = _web_target_host_port_key(item)
+                            if hp is not None and hp[0]:
+                                host_scope.add(hp[0])
+                        if host_scope and host not in host_scope:
+                            return None
+                        return parse_input
                     if text in allowed_web_targets:
                         return text
                     host_port = _web_target_host_port_key(text)
@@ -2590,6 +2631,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 while actions_executed < int(max_actions):
                     if canceled():
                         break
+                    sqlmap_targets = self._build_sqlmap_targets(
+                        normalized,
+                        web_targets=allowed_web_targets,
+                        results=agg.get("results", []),
+                        max_targets=sqlmap_max_targets,
+                    )
                     remaining = int(max_actions) - actions_executed
                     open_high_risk_clusters = _open_high_risk_clusters_now()
                     coverage_debt_open_count = len(open_high_risk_clusters)
@@ -3033,8 +3080,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if action["tool"] == "httpx" and entry.get("success"):
                         alive = entry.get("data", {}).get("alive")
                         if isinstance(alive, list) and alive:
-                            allowed_web_targets = [str(x) for x in alive if str(x).strip()]
-                            web_targets = allowed_web_targets
+                            scoped_alive = self._scope_web_targets_for_target(
+                                normalized,
+                                [str(x).strip() for x in alive if str(x).strip()],
+                                expand_web_scope=bool(url_target_expand_web_scope),
+                            )
+                            allowed_web_targets = [str(x) for x in scoped_alive if str(x).strip()]
+                            web_targets = list(allowed_web_targets)
                             agg["web_targets"] = web_targets
                     if action["tool"] == "subfinder" and entry.get("success") and not lock_web_targets:
                         hosts = entry.get("data", {}).get("hosts")
@@ -3120,6 +3172,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 if u not in allowed_web_targets:
                                     allowed_web_targets.append(u)
                                     web_targets.append(u)
+                            allowed_web_targets = self._scope_web_targets_for_target(
+                                normalized,
+                                allowed_web_targets,
+                                expand_web_scope=bool(url_target_expand_web_scope),
+                            )
+                            web_targets = list(allowed_web_targets)
                             if isinstance(entry.get("data"), dict):
                                 entry["data"]["promoted_urls"] = [str(u) for u in promoted_urls if str(u).strip()]
                                 entry["data"]["validated_urls"] = [str(u) for u in validated_urls if str(u).strip()]

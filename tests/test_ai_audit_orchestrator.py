@@ -768,6 +768,23 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             self.assertEqual(action.get("hypothesis"), "")
             self.assertEqual(action.get("expected_evidence"), "")
 
+    def test_url_target_scope_does_not_merge_unrelated_nmap_web_ports(self):
+        orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=FakeLLMStopWithAction())
+        output = artifact_path("ai_audit_url_scope_no_nmap_merge.json")
+        report = orchestrator.run(
+            "http://127.0.0.1:3003/WebGoat",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        web_targets = report.get("web_targets") if isinstance(report.get("web_targets"), list) else []
+        self.assertIn("http://127.0.0.1:3003", web_targets)
+        self.assertNotIn("http://localhost:9090", web_targets)
+        self.assertNotIn("http://localhost:8080", web_targets)
+
     def test_progress_callback_includes_live_planner_decision_and_critique(self):
         orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=FakeLLMIterative())
         output = artifact_path("ai_audit_progress_stream.json")

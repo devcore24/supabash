@@ -134,6 +134,104 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertIn("http://localhost:3000", urls)
         self.assertIn("http://localhost:5050", urls)
 
+    def test_url_target_scope_keeps_explicit_port_by_default(self):
+        class FakeNmapMultiPort:
+            def scan(self, target, ports=None, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 3003, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 9090, "protocol": "tcp", "state": "open", "service": "http"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxEcho:
+            def scan(self, targets, **kwargs):
+                return {"success": True, "command": "httpx test", "alive": [str(t) for t in (targets or [])]}
+
+        scanners = {
+            "nmap": FakeNmapMultiPort(),
+            "httpx": FakeHttpxEcho(),
+            "whatweb": FakeScanner("whatweb"),
+            "nuclei": FakeScanner("nuclei"),
+            "gobuster": FakeScanner("gobuster"),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+
+        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        output = artifact_path("audit_url_scope_explicit_port.json")
+        report = orch.run("http://127.0.0.1:3003/WebGoat", output, use_llm=False)
+
+        targets = report.get("web_targets") if isinstance(report.get("web_targets"), list) else []
+        self.assertIn("http://127.0.0.1:3003", targets)
+        self.assertNotIn("http://127.0.0.1:9090", targets)
+        cleanup_artifact(output)
+
+    def test_sqlmap_targets_include_harvested_parameterized_urls(self):
+        class FakeNmapSinglePort:
+            def scan(self, target, ports=None, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 3003, "protocol": "tcp", "state": "open", "service": "http"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxEcho:
+            def scan(self, targets, **kwargs):
+                return {"success": True, "command": "httpx test", "alive": [str(t) for t in (targets or [])]}
+
+        class FakeKatanaWithQuery:
+            def crawl(self, target, **kwargs):
+                base = str(target).rstrip("/")
+                urls = [f"{base}/search?query=test"]
+                return {"success": True, "command": "katana test", "urls": urls, "findings": urls}
+
+        class CaptureSqlmap:
+            def __init__(self):
+                self.calls = []
+
+            def scan(self, target, **kwargs):
+                self.calls.append(str(target))
+                return {"success": True, "command": f"sqlmap -u {target}", "findings": []}
+
+        sqlmap_scanner = CaptureSqlmap()
+        scanners = {
+            "nmap": FakeNmapSinglePort(),
+            "httpx": FakeHttpxEcho(),
+            "whatweb": FakeScanner("whatweb"),
+            "nuclei": FakeScanner("nuclei"),
+            "gobuster": FakeScanner("gobuster"),
+            "katana": FakeKatanaWithQuery(),
+            "sqlmap": sqlmap_scanner,
+        }
+
+        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        orch._tool_enabled = lambda _tool, default=True: True
+        output = artifact_path("audit_sqlmap_harvest_targets.json")
+        report = orch.run("http://127.0.0.1:3003/WebGoat", output, use_llm=False)
+
+        sqlmap_targets = report.get("sqlmap_targets") if isinstance(report.get("sqlmap_targets"), list) else []
+        self.assertTrue(sqlmap_targets)
+        self.assertTrue(any("?" in str(t) for t in sqlmap_targets))
+        self.assertTrue(any("search?query=test" in str(t) for t in sqlmap_targets))
+        self.assertTrue(any("search?query=test" in str(c) for c in sqlmap_scanner.calls))
+        cleanup_artifact(output)
+
     def test_tls_candidate_ports_include_nonstandard_tls_ports(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
         ports = orch._tls_candidate_ports_from_nmap(
