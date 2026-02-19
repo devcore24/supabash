@@ -43,6 +43,22 @@ supabash audit "http://127.0.0.1:3003/WebGoat" --yes
 supabash ai-audit "http://127.0.0.1:3003/WebGoat" --compliance soc2 --mode normal --yes
 ```
 
+## 2b) Compare report coverage against WebGoat baseline
+
+After an `ai-audit` run, compare the generated report JSON against:
+`tests/fixtures/webgoat/webgoat-main-exploits.json`
+
+```bash
+./venv/bin/python -m supabash.webgoat_compare \
+  --report reports/ai-audit-soc2-YYYYmmdd-HHMMSS/ai-audit-soc2-YYYYmmdd-HHMMSS.json
+```
+
+This writes:
+- `...-webgoat-compare.json`
+- `...-webgoat-compare.md`
+
+in the same report folder.
+
 ## 3) Optional automated test
 
 ```bash
