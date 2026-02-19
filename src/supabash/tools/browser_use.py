@@ -1,3 +1,4 @@
+import json
 import re
 import shlex
 import shutil
@@ -91,6 +92,16 @@ class BrowserUseScanner:
                 "command": result.command,
             }
 
+        status = self._extract_cli_status(combined_output)
+        if isinstance(status, dict) and status.get("ok") is False:
+            return {
+                "success": False,
+                "error": str(status.get("error") or "browser-use reported unsuccessful run"),
+                "canceled": False,
+                "raw_output": combined_output,
+                "command": result.command,
+            }
+
         parsed = self._parse_output(combined_output, target_url)
         return {
             "success": True,
@@ -139,11 +150,13 @@ class BrowserUseScanner:
         if not binary:
             return None
 
-        command = [binary, "run", task, "--max-steps", str(int(max_steps))]
-        if headless:
-            command.append("--headless")
-        if isinstance(model, str) and model.strip():
-            command.extend(["--model", model.strip()])
+        command = [binary, "--json"]
+        # browser-use CLI exposes --headed (no --headless flag).
+        if not headless:
+            command.append("--headed")
+        # Keep model handling to command_override; native CLI doesn't expose --model.
+        _ = model
+        command.extend(["run", task, "--max-steps", str(int(max_steps))])
         return command
 
     def _parse_output(self, output: str, target: str) -> Dict[str, Any]:
@@ -151,6 +164,45 @@ class BrowserUseScanner:
         urls = self._extract_urls(text, target=target)
         findings = self._extract_findings(text)
         return {"urls": urls, "findings": findings}
+
+    def _extract_cli_status(self, output: str) -> Optional[Dict[str, Any]]:
+        text = str(output or "").strip()
+        payload = self._parse_json_payload(text)
+        if isinstance(payload, dict):
+            data = payload.get("data")
+            if isinstance(data, dict) and "success" in data and not bool(data.get("success")):
+                return {"ok": False, "error": str(data.get("error") or "").strip()}
+            if "success" in payload and not bool(payload.get("success")):
+                return {"ok": False, "error": str(payload.get("error") or "").strip()}
+            return {"ok": True}
+
+        if re.search(r"\bsuccess\s*:\s*false\b", text, flags=re.IGNORECASE):
+            m = re.search(r"\berror\s*:\s*(.+)$", text, flags=re.IGNORECASE | re.DOTALL)
+            err = m.group(1).strip() if m else "browser-use reported unsuccessful run"
+            return {"ok": False, "error": err}
+        return None
+
+    def _parse_json_payload(self, text: str) -> Optional[Dict[str, Any]]:
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        for line in reversed(text.splitlines()):
+            line = str(line or "").strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                continue
+        return None
 
     def _extract_urls(self, text: str, *, target: str) -> List[str]:
         out: List[str] = []
