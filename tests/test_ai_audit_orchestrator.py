@@ -1238,6 +1238,8 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertIn("Output requirements:", task)
         self.assertEqual(first_call.get("kwargs", {}).get("require_done"), True)
         self.assertEqual(first_call.get("kwargs", {}).get("min_steps_success"), 1)
+        self.assertEqual(first_call.get("kwargs", {}).get("allow_deterministic_fallback"), True)
+        self.assertEqual(first_call.get("kwargs", {}).get("deterministic_max_paths"), 8)
 
     def test_agentic_browser_use_skipped_when_disabled(self):
         scanners = _build_scanners()
@@ -1322,6 +1324,32 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             if isinstance(a, dict) and a.get("tool") == "browser_use" and a.get("phase") == "agentic"
         ]
         self.assertTrue(actions)
+
+    def test_agentic_browser_use_auto_session_when_not_configured(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseScanner()
+        scanners["browser_use"] = browser
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        output = artifact_path("ai_audit_browser_use_auto_session.json")
+        orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        self.assertTrue(browser.calls)
+        call = browser.calls[0]
+        kwargs = call.get("kwargs", {})
+        session_name = str(kwargs.get("session") or "")
+        self.assertTrue(session_name.startswith("supabash-"))
 
 
 if __name__ == "__main__":

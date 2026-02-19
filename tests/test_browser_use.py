@@ -1,4 +1,5 @@
 import unittest
+from typing import List
 
 from supabash.runner import CommandResult
 from supabash.tools.browser_use import BrowserUseScanner
@@ -12,6 +13,24 @@ class _FakeRunner:
     def run(self, command, **kwargs):
         self.last_command = list(command or [])
         return self._result
+
+
+class _SequenceRunner:
+    def __init__(self, results: List[CommandResult]):
+        self._results = list(results or [])
+        self.calls = []
+
+    def run(self, command, **kwargs):
+        self.calls.append(list(command or []))
+        if self._results:
+            return self._results.pop(0)
+        return CommandResult(
+            command=" ".join(str(x) for x in (command or [])),
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
 
 
 class BrowserUseScannerTests(unittest.TestCase):
@@ -124,6 +143,8 @@ class BrowserUseScannerTests(unittest.TestCase):
         obs = out.get("observation") if isinstance(out, dict) else {}
         self.assertEqual(obs.get("done"), False)
         self.assertEqual(obs.get("steps"), 0)
+        self.assertEqual(int(obs.get("findings_count") or 0), 0)
+        self.assertEqual(int(obs.get("evidence_score") or 0), 0)
 
     def test_scan_success_returns_observation_when_done_and_steps_positive(self):
         cli_json = (
@@ -149,6 +170,78 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertEqual(observation.get("done"), True)
         self.assertEqual(observation.get("steps"), 3)
         self.assertGreaterEqual(int(observation.get("evidence_score") or 0), 1)
+
+    def test_scan_uses_deterministic_probe_when_run_is_incomplete(self):
+        run_incomplete = CommandResult(
+            command="browser-use --json run task --max-steps 2",
+            return_code=0,
+            stdout=(
+                '{"id":"x4","success":true,"data":{"success":true,'
+                '"task":"Inspect target","steps":0,"done":false,"result":null}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        open_ok = CommandResult(
+            command="browser-use --json open http://example.test",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        state_ok = CommandResult(
+            command="browser-use --json state",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        title_root = CommandResult(
+            command="browser-use --json get title",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"title":"WebGoat"}}',
+            stderr="",
+            success=True,
+        )
+        html_root = CommandResult(
+            command="browser-use --json get html",
+            return_code=0,
+            stdout=(
+                '{"success":true,"data":{"success":true,'
+                '"html":"<html><body><form action=\\"/login\\"></form>'
+                'javax.servlet.ServletException</body></html>"}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        open_login = CommandResult(
+            command="browser-use --json open http://example.test/login",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        title_login = CommandResult(
+            command="browser-use --json get title",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"title":"Login"}}',
+            stderr="",
+            success=True,
+        )
+
+        runner = _SequenceRunner([run_incomplete, open_ok, state_ok, title_root, html_root, open_login, title_login])
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+
+        out = scanner.scan("http://example.test", task="Inspect target", max_steps=2, deterministic_max_paths=1)
+
+        self.assertTrue(out.get("success"))
+        self.assertEqual(out.get("completed"), False)
+        obs = out.get("observation") if isinstance(out, dict) else {}
+        self.assertEqual(obs.get("fallback_mode"), "deterministic_probe")
+        self.assertGreaterEqual(int(obs.get("fallback_findings_count") or 0), 1)
+        findings = out.get("findings") if isinstance(out.get("findings"), list) else []
+        self.assertTrue(any("Form attack surface" in str(f.get("title") or "") for f in findings if isinstance(f, dict)))
 
 
 if __name__ == "__main__":

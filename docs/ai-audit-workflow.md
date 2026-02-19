@@ -79,8 +79,10 @@ For `browser_use` actions, Supabash composes an evidence-aware task brief that i
 - Planner rationale/hypothesis/expected evidence
 - Target-specific prior findings (when available)
 - Optional configured auth context hints (`tools.browser_use.auth.*`)
+- Optional auto-session isolation (`tools.browser_use.auto_session=true`) when no explicit session is configured
 
 After execution, browser observations (completion status, steps, findings/URLs) are added back to run state so the next planner iteration sees what was already tried and what evidence was produced.
+If browser-use returns an incomplete run (`done=false`), Supabash can perform deterministic browser probes (`open/state/get`) as a fallback (`tools.browser_use.allow_deterministic_fallback`) and merge that evidence back into planner context.
 
 ### 5) Graceful fallback is built‑in
 If tool‑calling fails or isn’t supported, Supabash skips the agentic phase and still writes the baseline report.

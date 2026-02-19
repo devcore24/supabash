@@ -966,9 +966,35 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "cookie": cookie if include_secrets else "",
                     }
 
+                def _auto_browser_session_name(target_url: str) -> str:
+                    text = str(target_url or "").strip()
+                    host = ""
+                    if text:
+                        parse_input = text if "://" in text else f"http://{text}"
+                        try:
+                            parsed = urlparse(parse_input)
+                            host = str(parsed.hostname or "").strip().lower()
+                        except Exception:
+                            host = ""
+                    host = re.sub(r"[^a-z0-9]+", "-", host).strip("-") if host else "target"
+                    if not host:
+                        host = "target"
+                    return f"supabash-{host}-{int(time.time())}"
+
                 browser_default_session = str(browser_use_cfg.get("session") or "").strip() or None
                 browser_default_profile = str(browser_use_cfg.get("profile") or "").strip() or None
                 browser_auth_default = _browser_use_auth_context(browser_use_cfg)
+                browser_auto_session_default = _as_bool(browser_use_cfg.get("auto_session"), True)
+                browser_allow_fallback_default = _as_bool(
+                    browser_use_cfg.get("allow_deterministic_fallback"), True
+                )
+                try:
+                    browser_deterministic_max_paths_default = int(browser_use_cfg.get("deterministic_max_paths", 8))
+                except Exception:
+                    browser_deterministic_max_paths_default = 8
+                browser_deterministic_max_paths_default = max(
+                    1, min(int(browser_deterministic_max_paths_default), 24)
+                )
                 if not isinstance(ai_obj.get("planner_context_history"), list):
                     ai_obj["planner_context_history"] = []
                 planner_context_history: List[Dict[str, Any]] = ai_obj.get("planner_context_history") or []
@@ -1286,6 +1312,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         [
                             "Execution guidance:",
                             "- Start at the target URL and map reachable same-origin paths/forms.",
+                            "- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.",
+                            "- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.",
                             "- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.",
                             "- Do not brute-force credentials or run destructive actions.",
                             "- Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.",
@@ -1602,9 +1630,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "browser_use_available": bool(browser_use_available),
                             "browser_use_session_configured": bool(browser_default_session),
                             "browser_use_profile_configured": bool(browser_default_profile),
+                            "browser_use_auto_session": bool(browser_auto_session_default),
                             "browser_use_auth_context_enabled": bool(browser_auth_default.get("enabled")),
                             "browser_use_auth_context_available": bool(browser_auth_default.get("has_auth_context")),
                             "browser_use_auth_login_url": str(browser_auth_default.get("login_url") or ""),
+                            "browser_use_allow_deterministic_fallback": bool(browser_allow_fallback_default),
+                            "browser_use_deterministic_max_paths": int(browser_deterministic_max_paths_default),
                             "trivy_requires_container": bool(container_image),
                             "tls_ports_detected": tls_ports,
                             "smb_ports_detected": bool(smb_ports),
@@ -1725,10 +1756,19 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 browser_session = (
                                     str(args.get("browser_session") or browser_cfg_local.get("session") or "").strip() or None
                                 )
+                                browser_auto_session = _as_bool(browser_cfg_local.get("auto_session"), True)
+                                if tool == "browser_use" and not browser_session and browser_auto_session:
+                                    browser_session = _auto_browser_session_name(target)
                                 browser_profile = (
                                     str(args.get("browser_profile") or browser_cfg_local.get("profile") or "").strip() or None
                                 )
                                 browser_auth_ctx = _browser_use_auth_context(browser_cfg_local)
+                                browser_allow_fallback = _as_bool(
+                                    browser_cfg_local.get("allow_deterministic_fallback"), True
+                                )
+                                browser_deterministic_max_paths = clamp_int(
+                                    browser_cfg_local.get("deterministic_max_paths"), 8, 1, 24
+                                )
                                 browser_task = planner_browser_task
                                 if tool == "browser_use":
                                     browser_task = _build_browser_use_task(
@@ -1872,6 +1912,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                             command=browser_command,
                                             require_done=browser_require_done,
                                             min_steps_success=browser_min_steps_success,
+                                            allow_deterministic_fallback=browser_allow_fallback,
+                                            deterministic_max_paths=browser_deterministic_max_paths,
                                             cancel_event=cancel_event,
                                             timeout_seconds=self._tool_timeout_seconds("browser_use"),
                                         ),

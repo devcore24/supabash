@@ -97,10 +97,13 @@ tools:
     max_steps: 25
     min_steps_success: 1
     require_done: true
+    auto_session: true
     headless: true
     session: ""
     profile: ""
     model: ""
+    allow_deterministic_fallback: true
+    deterministic_max_paths: 8
     # Optional command template supports placeholders:
     # {target}, {task}, {max_steps}, {headless}, {model}, {session}, {profile}
     command: ""
