@@ -216,6 +216,30 @@ class FakeSubfinderScanner:
         }
 
 
+class FakeBrowserUseScanner:
+    def __init__(self):
+        self.calls = []
+
+    def is_available(self, command_override=None):
+        return True
+
+    def scan(self, target, **kwargs):
+        self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+        return {
+            "success": True,
+            "command": f"browser-use run 'scan {target}' --max-steps 12",
+            "urls": [f"{str(target).rstrip('/')}/login"],
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Potential authentication bypass signal",
+                    "evidence": f"{target}/login accepted weak session workflow",
+                    "type": "browser_observation",
+                }
+            ],
+        }
+
+
 class FakeLLMIterative:
     def __init__(self):
         self.plan_calls = 0
@@ -294,6 +318,50 @@ class FakeLLMNormalization:
         return (
             [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
             {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMSelectBrowserUse:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "browser_use",
+                                    "arguments": {
+                                        "profile": "standard",
+                                        "target": "http://localhost:9090",
+                                        "max_steps": 12,
+                                    },
+                                    "reasoning": "Use browser-driven validation on exposed web surface.",
+                                    "hypothesis": "Interactive workflow may expose weak auth behavior.",
+                                    "expected_evidence": "Browser-observed auth/session weakness on login path.",
+                                    "priority": 3,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-browser-use-planner", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-browser-use-planner", "usage": {"total_tokens": 4}},
         )
 
     def chat_with_meta(self, messages, temperature=0.2):
@@ -1129,6 +1197,68 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             self.assertIsInstance(data.get("validated_urls"), list)
         notes = report.get("summary_notes", [])
         self.assertTrue(any("validated URLs" in str(n) for n in notes))
+
+    def test_agentic_browser_use_executes_when_enabled(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseScanner()
+        scanners["browser_use"] = browser
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        output = artifact_path("ai_audit_browser_use_enabled.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        self.assertTrue(browser.calls)
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "browser_use" and a.get("phase") == "agentic"
+        ]
+        self.assertTrue(actions)
+        browser_findings = [
+            f
+            for f in (report.get("findings") or [])
+            if isinstance(f, dict) and str(f.get("tool") or "").strip().lower() == "browser_use"
+        ]
+        self.assertTrue(browser_findings)
+
+    def test_agentic_browser_use_skipped_when_disabled(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseScanner()
+        scanners["browser_use"] = browser
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        output = artifact_path("ai_audit_browser_use_disabled.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=False,
+        )
+
+        self.assertFalse(browser.calls)
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "browser_use" and a.get("phase") == "agentic"
+        ]
+        self.assertFalse(actions)
 
 
 if __name__ == "__main__":

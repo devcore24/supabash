@@ -25,6 +25,7 @@ from .crackmapexec import CrackMapExecScanner
 from .medusa import MedusaRunner
 from .scoutsuite import ScoutSuiteScanner
 from .prowler import ProwlerScanner
+from .browser_use import BrowserUseScanner
 
 __all__ = [
     "NmapScanner",
@@ -54,4 +55,5 @@ __all__ = [
     "MedusaRunner",
     "ScoutSuiteScanner",
     "ProwlerScanner",
+    "BrowserUseScanner",
 ]

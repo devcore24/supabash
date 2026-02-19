@@ -38,6 +38,7 @@ The agentic phase only allows tools that:
 - Are enabled in config
 - Match the target type (web, domain, SMB, TLS, container, etc.)
 - Respect opt‑in flags (e.g., `nikto`)
+- Respect runtime gates (for example `browser_use` is allowed by default when available, and can be disabled with `--no-browser-use`)
 
 ### 3) Tool calls are schema‑constrained
 The LLM must respond using the `propose_actions` tool schema:

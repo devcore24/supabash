@@ -47,6 +47,7 @@ from supabash.tools import (
     MedusaRunner,
     ScoutSuiteScanner,
     ProwlerScanner,
+    BrowserUseScanner,
 )
 from supabash.llm import LLMClient
 from supabash import prompts
@@ -199,6 +200,7 @@ EVIDENCE_VERSION_COMMANDS: Dict[str, List[List[str]]] = {
     "hydra": [["hydra", "-h"]],
     "medusa": [["medusa", "-h"]],
     "nikto": [["nikto", "-Version"]],
+    "browser_use": [["browser-use", "--version"], ["browser_use", "--version"]],
 }
 
 
@@ -241,6 +243,7 @@ class AuditOrchestrator:
             "medusa": MedusaRunner(),
             "scoutsuite": ScoutSuiteScanner(),
             "prowler": ProwlerScanner(),
+            "browser_use": BrowserUseScanner(),
         }
         self.llm = llm_client or LLMClient()
 
@@ -1435,7 +1438,7 @@ class AuditOrchestrator:
         if any(k in joined for k in ("missing security headers", "misconfig", "configuration", "default")):
             return "security_misconfiguration"
 
-        if tool in ("sqlmap", "nuclei", "trivy", "wpscan"):
+        if tool in ("sqlmap", "nuclei", "trivy", "wpscan", "browser_use"):
             return "vulnerability_signal"
         if tool in ("hydra", "medusa", "crackmapexec"):
             return "credential_access"
@@ -1665,6 +1668,31 @@ class AuditOrchestrator:
                             "title": "Discovered endpoint",
                             "evidence": str(url),
                             "tool": "katana",
+                        }
+                    )
+            # browser_use browser-driven observations
+            if tool == "browser_use":
+                for item in (data.get("findings") or [])[:120]:
+                    if not isinstance(item, dict):
+                        continue
+                    findings.append(
+                        {
+                            "severity": str(item.get("severity") or "MEDIUM").strip().upper(),
+                            "title": str(item.get("title") or "Browser-driven security signal"),
+                            "evidence": str(item.get("evidence") or ""),
+                            "tool": "browser_use",
+                            "type": str(item.get("type") or "browser_observation"),
+                            "recommendation": str(item.get("recommendation") or "").strip() or None,
+                        }
+                    )
+                for url in (data.get("urls") or [])[:80]:
+                    findings.append(
+                        {
+                            "severity": "INFO",
+                            "title": "Browser-discovered endpoint",
+                            "evidence": str(url),
+                            "tool": "browser_use",
+                            "type": "browser_discovery",
                         }
                     )
             # Internal readiness probes (deterministic low-noise posture checks)
@@ -2302,7 +2330,7 @@ class AuditOrchestrator:
             ):
                 add_mapping(finding, "access_control", "high")
 
-            if tool in ("nuclei", "nikto", "ffuf", "gobuster", "katana"):
+            if tool in ("nuclei", "nikto", "ffuf", "gobuster", "katana", "browser_use"):
                 # Avoid broad false mapping on generic informational records (for example CAA).
                 if "caa record" in title:
                     pass
@@ -3189,6 +3217,7 @@ class AuditOrchestrator:
         gobuster_threads: int = 10,
         gobuster_wordlist: Optional[str] = None,
         run_nikto: bool = False,
+        run_browser_use: bool = True,
         run_hydra: bool = False,
         hydra_usernames: Optional[str] = None,
         hydra_passwords: Optional[str] = None,
@@ -3327,6 +3356,7 @@ class AuditOrchestrator:
                 "nmap_fast_discovery_max_ports": int(fast_discovery_max_ports),
                 "nmap_url_target_expand_web_scope": bool(url_target_expand_web_scope),
                 "nikto_enabled": bool(run_nikto),
+                "browser_use_enabled": bool(run_browser_use),
                 "hydra_enabled": bool(run_hydra),
                 "hydra_services": hydra_services,
                 "hydra_threads": int(hydra_threads),

@@ -109,6 +109,30 @@ warn() {
     echo -e "\033[33m[WARN]${RESET} $1"
 }
 
+invoking_user() {
+    if [ -n "${SUDO_USER:-}" ] && [ "${SUDO_USER}" != "root" ]; then
+        echo "${SUDO_USER}"
+    else
+        id -un
+    fi
+}
+
+invoking_home() {
+    local user
+    user="$(invoking_user)"
+    getent passwd "$user" | cut -d: -f6
+}
+
+run_as_invoking_user() {
+    local user
+    user="$(invoking_user)"
+    if [ "$user" = "$(id -un)" ]; then
+        "$@"
+    else
+        sudo -u "$user" -H "$@"
+    fi
+}
+
 # 1. OS Detection
 detect_os() {
     if [ -f /etc/os-release ]; then
@@ -728,6 +752,74 @@ HARVESTER_EOF
         fi
     else
         info "Prowler is already installed."
+    fi
+
+    # Install browser-use CLI (browser-driven authenticated checks in agentic mode)
+    # Use --force so reruns can repair/update a stale/broken installation.
+    local browser_user browser_home
+    browser_user="$(invoking_user)"
+    browser_home="$(invoking_home)"
+
+    info "Installing/updating browser-use CLI..."
+    $SUDO apt-get install -y python3-pip python3-venv python3-dev pipx || true
+
+    # Ensure pipx is available and configured
+    if ! run_as_invoking_user bash -lc "command -v pipx >/dev/null 2>&1"; then
+        info "Installing pipx..."
+        $SUDO apt-get install -y pipx || run_as_invoking_user python3 -m pip install --user pipx || true
+    fi
+    if run_as_invoking_user bash -lc "command -v pipx >/dev/null 2>&1"; then
+        run_as_invoking_user pipx ensurepath 2>/dev/null || true
+        export PATH="$PATH:${browser_home}/.local/bin:/root/.local/bin"
+    fi
+
+    if run_as_invoking_user bash -lc "command -v pipx >/dev/null 2>&1"; then
+        if run_as_invoking_user pipx install --force browser-use; then
+            success "browser-use installed/updated via pipx."
+        else
+            warn "pipx install --force browser-use failed. Trying pip3 fallback..."
+            run_as_invoking_user python3 -m pip install --user "browser-use[cli]" || true
+        fi
+    else
+        info "pipx not available for user ${browser_user}, trying pip --user..."
+        run_as_invoking_user python3 -m pip install --user "browser-use[cli]" || true
+    fi
+
+    # browser-use runtime bootstrap expects uv/uvx.
+    if ! run_as_invoking_user bash -lc "command -v uvx >/dev/null 2>&1"; then
+        info "Installing uv/uvx (required by browser-use install)..."
+        if run_as_invoking_user bash -lc "command -v pipx >/dev/null 2>&1"; then
+            if run_as_invoking_user pipx install --force uv; then
+                success "uv/uvx installed via pipx."
+            else
+                warn "pipx install --force uv failed. Trying pip3 fallback..."
+                run_as_invoking_user python3 -m pip install --user uv || true
+            fi
+        else
+            run_as_invoking_user python3 -m pip install --user uv || true
+        fi
+    fi
+
+    # Install browser runtime assets for browser-use (best-effort; can be heavy).
+    if run_as_invoking_user bash -lc "command -v browser-use >/dev/null 2>&1"; then
+        info "Installing browser-use runtime assets (this may take a while)..."
+        if ! run_as_invoking_user browser-use install >/tmp/supabash-browser-use-install.log 2>&1; then
+            warn "browser-use runtime install failed. See /tmp/supabash-browser-use-install.log"
+            warn "Run manually: browser-use install"
+        fi
+    elif run_as_invoking_user bash -lc "command -v browser_use >/dev/null 2>&1"; then
+        info "Installing browser_use runtime assets (this may take a while)..."
+        if ! run_as_invoking_user browser_use install >/tmp/supabash-browser-use-install.log 2>&1; then
+            warn "browser_use runtime install failed. See /tmp/supabash-browser-use-install.log"
+            warn "Run manually: browser_use install"
+        fi
+    fi
+
+    if run_as_invoking_user bash -lc "command -v browser-use >/dev/null 2>&1 || command -v browser_use >/dev/null 2>&1"; then
+        success "browser-use CLI available."
+    else
+        warn "browser-use install attempted, but command was not found on PATH."
+        warn "Try: pipx install browser-use && pipx ensurepath && browser-use install"
     fi
 
     # Install enum4linux-ng (optional SMB enumeration helper)

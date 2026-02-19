@@ -47,7 +47,7 @@ macOS: manual/experimental setup only, untested.
 
 ## 🛠️ The Arsenal (Toolset)
 
-Supabash orchestrates the following security tools. **27 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
+Supabash orchestrates the following security tools. **28 wrappers are currently implemented** (✅). Planned tools are marked with 🔜.
 
 ### 🔍 Recon & Discovery
 *   ✅ **Nmap** (Network mapping & service detection)
@@ -66,6 +66,7 @@ Supabash orchestrates the following security tools. **27 wrappers are currently 
 *   ✅ **Gobuster** (Directory & file brute-forcing)
 *   ✅ **ffuf** (Fast content discovery / fuzzing)
 *   ✅ **katana** (Crawling / spidering)
+*   ✅ **browser-use** (Browser-driven authenticated workflow checks)
 *   ✅ **Nikto** (Web server scanning)
 *   ✅ **WPScan** (WordPress security scanner)
 *   ✅ **Nuclei** (Template-based vulnerability scanning)
@@ -137,6 +138,10 @@ git clone https://github.com/yourusername/supabash.git && cd supabash && chmod +
 Notes:
 - The installer can update **Nuclei templates** for your (non-root) user after installing `nuclei` (recommended). Disable with `SUPABASH_UPDATE_NUCLEI_TEMPLATES=0 sudo ./install.sh`.
 - If Nuclei ever fails due to missing templates, run `nuclei -update-templates`.
+- The installer now attempts to install **browser-use** (`browser-use` CLI) and runs `browser-use install` (best effort) so agentic authenticated browser checks can run by default.
+- If browser-use is missing after install, run: `pipx install browser-use && pipx ensurepath && browser-use install`
+- `browser-use` may not support `--version` on all releases; validate with `browser-use --help` (or `pipx list | grep browser-use`).
+- If runtime setup fails with `uvx` errors, install `uv` first: `pipx install --force uv` and rerun `browser-use install`.
 
 ### Optional: PDF/HTML Report Export (WeasyPrint)
 
@@ -168,7 +173,13 @@ supabash doctor --verbose
 2.  Install Python libraries:
     ```bash
     pip3 install -r requirements.txt
-```
+    ```
+3.  (Recommended for agentic authenticated web workflows) install browser-use:
+    ```bash
+    pipx install browser-use
+    pipx ensurepath
+    browser-use install
+    ```
 
 ## 🧪 Integration Testing (Optional)
 
@@ -443,6 +454,7 @@ supabash audit [OPTIONS] TARGET
   - `--no-llm` — disable LLM for this run
   - `--agentic` — agentic audit mode (baseline + bounded expansion)
   - `--llm-plan/--no-llm-plan` — tool-calling LLM planning for agentic expansion (only with `--agentic`)
+  - `--no-browser-use` — disable browser-use actions in agentic phase (enabled by default when available)
   - `--max-actions` (default: `10`) — cap agentic expansion length (only with `--agentic`)
   - `--max-remediations` (default: `5`) — cost control
   - `--min-remediation-severity` (default: `MEDIUM`) — `CRITICAL|HIGH|MEDIUM|LOW|INFO`
@@ -462,6 +474,7 @@ supabash ai-audit [OPTIONS] TARGET
   - `--status/--no-status` (default: `--status`) — print live progress
   - `--status-file` — write JSON status updates while running
   - `--llm-plan/--no-llm-plan` — tool-calling LLM planning for agentic expansion
+  - `--no-browser-use` — disable browser-use actions in agentic phase (enabled by default when available)
   - `--max-actions` (default: `10`) — cap agentic expansion length
 </details>
 
@@ -528,6 +541,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Set a default Nuclei throttling rate via `tools.nuclei.rate_limit` (overridden by `--nuclei-rate`).
 - Optionally scope Nuclei templates with `tools.nuclei.tags` or `tools.nuclei.severity` for faster audits.
 - Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
+- Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.headless`, `tools.browser_use.command`, `tools.browser_use.model`.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
@@ -553,7 +567,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 
 ---
 
-## ✅ Implemented Wrappers (27 Tools)
+## ✅ Implemented Wrappers (28 Tools)
 
 ### Core Audit Pipeline (runs by default)
 Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx probing → broad Nuclei pass (deduped live targets) → prioritized deep web scans (WhatWeb/Gobuster/Katana) (+ conditional Dnsenum/sslscan/enum4linux-ng, and optional Sqlmap/Supabase Audit/Trivy/WPScan)
@@ -571,7 +585,7 @@ Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx 
 | **Enum4linux-ng** | SMB/Samba enumeration | Auto (139/445 ports) |
 | **Netdiscover** | ARP network discovery | `--netdiscover` (private LAN) |
 
-### Web & Vulnerability (9 tools)
+### Web & Vulnerability (10 tools)
 | Tool | Purpose | Trigger |
 |------|---------|---------|
 | **WhatWeb** | Technology detection | Auto (web ports) |
@@ -581,6 +595,7 @@ Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx 
 | **Nikto** | Web server scanning | `--nikto` flag |
 | **Sqlmap** | SQL injection detection | Auto (parameterized URLs) |
 | **katana** | Web crawling/spidering | `tools.katana.enabled=true` |
+| **browser-use** | Browser-driven authenticated checks | Agentic phase (default on; disable with `--no-browser-use`) |
 | **Searchsploit** | Offline exploit references | `tools.searchsploit.enabled=true` |
 | **WPScan** | WordPress security scanner | Auto (WordPress detected) |
 

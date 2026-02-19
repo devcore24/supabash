@@ -11,7 +11,10 @@ runner = CliRunner()
 
 
 class FakeAIAuditOrchestrator:
+    last_kwargs = None
+
     def run(self, target, output, **kwargs):
+        FakeAIAuditOrchestrator.last_kwargs = dict(kwargs)
         out_path = Path(output)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text("{}", encoding="utf-8")
@@ -82,6 +85,24 @@ class TestAIAuditCLI(unittest.TestCase):
                 md_reports = list(Path("reports").glob("ai-audit-pci-*/*.md"))
                 self.assertTrue(json_reports)
                 self.assertTrue(md_reports)
+        finally:
+            core["report_exports"] = exports_prev
+
+    def test_ai_audit_no_browser_use_flag_is_forwarded(self):
+        core = main_module.config_manager.config.setdefault("core", {})
+        exports_prev = dict(core.get("report_exports", {}) or {})
+        core["report_exports"] = {"html": False, "pdf": False}
+        FakeAIAuditOrchestrator.last_kwargs = None
+        try:
+            with runner.isolated_filesystem():
+                with patch.object(main_module, "AIAuditOrchestrator", FakeAIAuditOrchestrator):
+                    result = runner.invoke(
+                        main_module.app,
+                        ["ai-audit", "localhost", "--no-browser-use", "--force", "--yes"],
+                    )
+                self.assertEqual(result.exit_code, 0, result.stdout)
+                self.assertIsInstance(FakeAIAuditOrchestrator.last_kwargs, dict)
+                self.assertEqual(FakeAIAuditOrchestrator.last_kwargs.get("run_browser_use"), False)
         finally:
             core["report_exports"] = exports_prev
 

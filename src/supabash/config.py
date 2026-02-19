@@ -90,6 +90,17 @@ DEFAULT_CONFIG = {
         "ffuf": {"enabled": False, "timeout_seconds": 1800},
         # Crawling/spidering (attack-surface expansion; opt-in for noise control)
         "katana": {"enabled": False, "timeout_seconds": 1800, "depth": 3, "concurrency": 10},
+        # Browser-driven exploration (agentic tool only; enabled by default but auto-skips when CLI is unavailable).
+        "browser_use": {
+            "enabled": True,
+            "timeout_seconds": 900,
+            "max_steps": 25,
+            "headless": True,
+            # Optional command template override, supports placeholders:
+            # {target}, {task}, {max_steps}, {headless}, {model}
+            "command": "",
+            "model": "",
+        },
         "sqlmap": {"enabled": True, "timeout_seconds": 1800},
         # Slow/noisy: keep opt-in by default
         "nikto": {"enabled": False, "timeout_seconds": 1200},

@@ -454,6 +454,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
         parallel_web: bool = False,
         max_workers: int = 3,
         run_nikto: bool = False,
+        run_browser_use: bool = True,
         run_hydra: bool = False,
         hydra_usernames: Optional[str] = None,
         hydra_passwords: Optional[str] = None,
@@ -557,6 +558,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
             gobuster_threads=gobuster_threads,
             gobuster_wordlist=gobuster_wordlist,
             run_nikto=run_nikto,
+            run_browser_use=run_browser_use,
             run_hydra=run_hydra,
             hydra_usernames=hydra_usernames,
             hydra_passwords=hydra_passwords,
@@ -828,6 +830,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 "gobuster": {"target_kind": "web", "enabled_default": True},
                 "ffuf": {"target_kind": "web", "enabled_default": False},
                 "katana": {"target_kind": "web", "enabled_default": False},
+                "browser_use": {"target_kind": "web", "enabled_default": True},
                 "nikto": {"target_kind": "web", "enabled_default": False, "opt_in": bool(run_nikto)},
                 "sqlmap": {"target_kind": "web", "enabled_default": True, "requires_param": True},
                 "dnsenum": {"target_kind": "domain", "enabled_default": True},
@@ -836,6 +839,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 "enum4linux-ng": {"target_kind": "host", "enabled_default": True, "requires_smb": True},
                 "trivy": {"target_kind": "container", "enabled_default": True},
             }
+
+            browser_use_cfg = self._tool_config("browser_use")
+            browser_use_command = str(browser_use_cfg.get("command") or "").strip()
+            browser_use_available = False
+            if self._has_scanner("browser_use"):
+                browser_use_scanner = self.scanners.get("browser_use")
+                checker = getattr(browser_use_scanner, "is_available", None)
+                if callable(checker):
+                    try:
+                        browser_use_available = bool(checker(command_override=browser_use_command or None))
+                    except Exception:
+                        browser_use_available = False
 
             allowed_tools: List[str] = []
             for tool, spec in tool_specs.items():
@@ -853,41 +868,56 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     continue
                 if tool == "trivy" and not container_image:
                     continue
+                if tool == "browser_use" and not run_browser_use:
+                    continue
+                if tool == "browser_use" and (not allowed_web_targets or not browser_use_available):
+                    continue
                 allowed_tools.append(tool)
 
-                baseline_success: set[tuple] = set()
-                baseline_broad_nuclei_targets: Set[str] = set()
-                for entry in agg.get("results", []) or []:
-                    if not isinstance(entry, dict) or not entry.get("success"):
-                        continue
-                    tool = entry.get("tool")
-                    if tool_specs.get(tool, {}).get("target_kind") != "web":
-                        continue
-                    if tool == "httpx":
-                        alive = entry.get("data", {}).get("alive")
-                        if isinstance(alive, list):
-                            for u in alive:
-                                u = str(u).strip()
-                                if u:
-                                    baseline_success.add((tool, u))
-                    targets = entry.get("targets")
-                    if isinstance(targets, list):
-                        for u in targets:
-                            v = str(u).strip()
-                            if v:
-                                if tool == "nuclei" and str(entry.get("target_scope") or "").strip().lower() == "broad":
-                                    baseline_broad_nuclei_targets.add(v)
-                                    continue
-                                baseline_success.add((tool, v))
-                    target = entry.get("target")
-                    if isinstance(target, str) and target.strip():
-                        baseline_success.add((tool, target.strip()))
+            baseline_success: set[tuple] = set()
+            baseline_broad_nuclei_targets: Set[str] = set()
+            for entry in agg.get("results", []) or []:
+                if not isinstance(entry, dict) or not entry.get("success"):
+                    continue
+                entry_tool = str(entry.get("tool") or "").strip().lower()
+                if tool_specs.get(entry_tool, {}).get("target_kind") != "web":
+                    continue
+                if entry_tool == "httpx":
+                    alive = entry.get("data", {}).get("alive")
+                    if isinstance(alive, list):
+                        for u in alive:
+                            u = str(u).strip()
+                            if u:
+                                baseline_success.add((entry_tool, u))
+                targets = entry.get("targets")
+                if isinstance(targets, list):
+                    for u in targets:
+                        v = str(u).strip()
+                        if v:
+                            if entry_tool == "nuclei" and str(entry.get("target_scope") or "").strip().lower() == "broad":
+                                baseline_broad_nuclei_targets.add(v)
+                                continue
+                            baseline_success.add((entry_tool, v))
+                target = entry.get("target")
+                if isinstance(target, str) and target.strip():
+                    baseline_success.add((entry_tool, target.strip()))
 
             if not allowed_tools:
                 ai_obj["planner"]["warning"] = "No eligible tools available for agentic phase."
                 ai_obj["agentic_skipped"] = True
             else:
-                allowed_argument_keys = {"profile", "target", "port", "rate_limit", "threads", "wordlist"}
+                allowed_argument_keys = {
+                    "profile",
+                    "target",
+                    "port",
+                    "rate_limit",
+                    "threads",
+                    "wordlist",
+                    "task",
+                    "max_steps",
+                    "headless",
+                    "model",
+                }
                 if not isinstance(ai_obj.get("planner_context_history"), list):
                     ai_obj["planner_context_history"] = []
                 planner_context_history: List[Dict[str, Any]] = ai_obj.get("planner_context_history") or []
@@ -919,6 +949,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                                         "rate_limit": {"type": "integer"},
                                                         "threads": {"type": "integer"},
                                                         "wordlist": {"type": "string"},
+                                                        "task": {"type": "string"},
+                                                        "max_steps": {"type": "integer"},
+                                                        "headless": {"type": "boolean"},
+                                                        "model": {"type": "string"},
                                                     },
                                                     "required": ["profile"],
                                                     "additionalProperties": False,
@@ -1017,7 +1051,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if not text:
                         return text
                     tool_name = str(tool or "").strip().lower()
-                    if tool_name == "sqlmap":
+                    if tool_name in ("sqlmap", "browser_use"):
                         return text
                     host_port = _web_target_host_port_key(text)
                     if host_port is None:
@@ -1045,6 +1079,23 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if not text:
                         return None
                     tool_name = str(tool or "").strip().lower()
+                    if tool_name == "browser_use":
+                        if text in allowed_web_targets:
+                            return text
+                        parse_input = text if "://" in text else f"http://{text}"
+                        try:
+                            parsed = urlparse(parse_input)
+                            scheme = str(parsed.scheme or "").strip().lower()
+                            host = str(parsed.hostname or "").strip().lower()
+                            if scheme not in ("http", "https") or not host:
+                                return None
+                            port = int(parsed.port or (443 if scheme == "https" else 80))
+                        except Exception:
+                            return None
+                        host_port = (host, port)
+                        if _preferred_allowed_web_target(host_port) is None:
+                            return None
+                        return parse_input
                     if tool_name == "sqlmap":
                         if text in sqlmap_targets:
                             return text
@@ -1364,6 +1415,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "profile_enum": list(profile_values),
                             "sqlmap_requires_parameterized_url": True,
                             "nikto_opt_in": bool(run_nikto),
+                            "browser_use_enabled": bool(run_browser_use),
+                            "browser_use_available": bool(browser_use_available),
                             "trivy_requires_container": bool(container_image),
                             "tls_ports_detected": tls_ports,
                             "smb_ports_detected": bool(smb_ports),
@@ -1472,6 +1525,21 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     rate_limit = int(base_rate)
                                 proposed_wordlist = args.get("wordlist") if isinstance(args.get("wordlist"), str) else None
                                 safe_wordlist = resolve_wordlist(proposed_wordlist) or resolve_wordlist(gobuster_wordlist)
+                                browser_cfg_local = self._tool_config("browser_use")
+                                try:
+                                    browser_default_steps = int(browser_cfg_local.get("max_steps", 25))
+                                except Exception:
+                                    browser_default_steps = 25
+                                browser_default_steps = max(1, min(browser_default_steps, 100))
+                                browser_task = str(args.get("task") or "").strip() or None
+                                browser_model = str(args.get("model") or browser_cfg_local.get("model") or "").strip() or None
+                                browser_command = str(browser_cfg_local.get("command") or "").strip() or None
+                                raw_headless = args.get("headless", browser_cfg_local.get("headless", True))
+                                if isinstance(raw_headless, str):
+                                    browser_headless = raw_headless.strip().lower() in {"1", "true", "yes", "on"}
+                                else:
+                                    browser_headless = bool(raw_headless)
+                                browser_steps = clamp_int(args.get("max_steps"), browser_default_steps, 1, 100)
 
                                 if tool == "httpx":
                                     entry = self._run_tool(
@@ -1581,6 +1649,20 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                             concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
                                             cancel_event=cancel_event,
                                             timeout_seconds=self._tool_timeout_seconds("katana"),
+                                        ),
+                                    )
+                                elif tool == "browser_use":
+                                    entry = self._run_tool(
+                                        tool,
+                                        lambda: self.scanners["browser_use"].scan(
+                                            target,
+                                            task=browser_task,
+                                            max_steps=browser_steps,
+                                            headless=browser_headless,
+                                            model=browser_model,
+                                            command=browser_command,
+                                            cancel_event=cancel_event,
+                                            timeout_seconds=self._tool_timeout_seconds("browser_use"),
                                         ),
                                     )
                                 elif tool == "nikto":
@@ -2546,6 +2628,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         }
                     if t in ("whatweb", "gobuster", "ffuf", "katana"):
                         return {"max_per_pair": 1, "max_total": 3, "max_low_signal": 2}
+                    if t == "browser_use":
+                        return {"max_per_pair": 1, "max_total": 2, "max_low_signal": 1}
                     return {"max_per_pair": 2, "max_total": 5, "max_low_signal": 3}
 
                 def _repeat_block_reason(action: Dict[str, Any]) -> Optional[str]:
@@ -2569,7 +2653,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return "gobuster_wildcard_target"
 
                     if (
-                        tool in ("nuclei", "sslscan", "gobuster", "ffuf", "katana", "nikto", "sqlmap")
+                        tool in ("nuclei", "sslscan", "gobuster", "ffuf", "katana", "browser_use", "nikto", "sqlmap")
                         and tool_count >= 1
                         and novelty <= 0
                         and gain_score <= 0

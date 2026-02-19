@@ -433,6 +433,7 @@ class ChatSession:
         llm_plan: bool = True,
         max_actions: int = 10,
         no_llm: bool = False,
+        run_browser_use: bool = True,
         compliance_profile: Optional[str] = None,
         container_image: Optional[str] = None,
         mode: str = "normal",
@@ -490,6 +491,7 @@ class ChatSession:
             "cancel_event": cancel_event,
             "progress_cb": progress_cb,
             "use_llm": not bool(no_llm),
+            "run_browser_use": bool(run_browser_use),
         }
         if agentic:
             run_kwargs["llm_plan"] = bool(llm_plan)
@@ -546,6 +548,7 @@ class ChatSession:
         llm_plan: bool = True,
         max_actions: int = 10,
         no_llm: bool = False,
+        run_browser_use: bool = True,
         compliance_profile: Optional[str] = None,
         container_image: Optional[str] = None,
         mode: str = "normal",
@@ -590,6 +593,7 @@ class ChatSession:
                 llm_plan=llm_plan,
                 max_actions=max_actions,
                 no_llm=no_llm,
+                run_browser_use=run_browser_use,
                 compliance_profile=compliance_profile,
                 container_image=container_image,
                 mode=mode,
@@ -1134,7 +1138,7 @@ class ChatSession:
                 # long options with values
                 if token.startswith("--"):
                     if cmd in ("/audit", "/ai-audit"):
-                        if token in ("--agentic", "--llm-plan", "--no-llm-plan", "--no-llm", "--parallel-web", "--nikto", "--remediate", "--allow-public", "--bg"):
+                        if token in ("--agentic", "--llm-plan", "--no-llm-plan", "--no-llm", "--no-browser-use", "--parallel-web", "--nikto", "--remediate", "--allow-public", "--bg"):
                             options.append(token)
                             i += 1
                             continue

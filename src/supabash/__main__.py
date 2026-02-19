@@ -465,6 +465,11 @@ def audit(
     aircrack_channel: Optional[str] = typer.Option(None, "--aircrack-channel", help="WiFi channel to lock during capture"),
     aircrack_args: Optional[str] = typer.Option(None, "--aircrack-args", help="Extra airodump-ng CLI args"),
     aircrack_airmon: bool = typer.Option(False, "--aircrack-airmon", help="Auto start/stop monitor mode with airmon-ng"),
+    no_browser_use: bool = typer.Option(
+        False,
+        "--no-browser-use",
+        help="Disable browser-use agentic actions (browser_use is enabled by default when available).",
+    ),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
     agentic: bool = typer.Option(False, "--agentic", help="Run an agentic audit (baseline + tool-calling expansion)"),
@@ -673,6 +678,7 @@ def audit(
         aircrack_channel=aircrack_channel,
         aircrack_args=aircrack_args,
         aircrack_airmon=aircrack_airmon,
+        run_browser_use=not bool(no_browser_use),
         remediate=remediate,
         use_llm=not no_llm,
         max_remediations=max_remediations,
@@ -806,6 +812,11 @@ def ai_audit(
     aircrack_channel: Optional[str] = typer.Option(None, "--aircrack-channel", help="WiFi channel to lock during capture"),
     aircrack_args: Optional[str] = typer.Option(None, "--aircrack-args", help="Extra airodump-ng CLI args"),
     aircrack_airmon: bool = typer.Option(False, "--aircrack-airmon", help="Auto start/stop monitor mode with airmon-ng"),
+    no_browser_use: bool = typer.Option(
+        False,
+        "--no-browser-use",
+        help="Disable browser-use agentic actions (browser_use is enabled by default when available).",
+    ),
     llm_plan: bool = typer.Option(
         True,
         "--llm-plan/--no-llm-plan",
@@ -887,6 +898,7 @@ def ai_audit(
         aircrack_channel=aircrack_channel,
         aircrack_args=aircrack_args,
         aircrack_airmon=aircrack_airmon,
+        no_browser_use=no_browser_use,
         agentic=True,
         llm_plan=llm_plan,
         max_actions=max_actions,
@@ -1478,6 +1490,7 @@ def chat():
             llm_plan = True
             max_actions = 10
             no_llm = False
+            no_browser_use = False
             nuclei_rate = 0
             gobuster_threads = 10
             gobuster_wordlist = None
@@ -1522,6 +1535,10 @@ def chat():
                     continue
                 if token == "--no-llm":
                     no_llm = True
+                    i += 1
+                    continue
+                if token == "--no-browser-use":
+                    no_browser_use = True
                     i += 1
                     continue
                 if token == "--nuclei-rate" and i + 1 < len(parts):
@@ -1590,6 +1607,7 @@ def chat():
                 console.print(
                     "[red]Usage:[/red] /audit <target> [--mode normal|stealth|aggressive] "
                     "[--agentic] [--compliance PROFILE] [--llm-plan|--no-llm-plan] [--max-actions N] [--no-llm] "
+                    "[--no-browser-use] "
                     "[--nuclei-rate N] [--gobuster-threads N] [--gobuster-wordlist PATH] "
                     "[--parallel-web] [--max-workers N] "
                     "[--container-image IMG] [--nikto] [--remediate] [--max-remediations N] [--min-remediation-severity SEV] "
@@ -1627,6 +1645,7 @@ def chat():
                         llm_plan=llm_plan,
                         max_actions=max_actions,
                         no_llm=no_llm,
+                        run_browser_use=not no_browser_use,
                         compliance_profile=compliance,
                         mode=mode,
                         nuclei_rate_limit=nuclei_rate,
@@ -1671,6 +1690,7 @@ def chat():
                         llm_plan=llm_plan,
                         max_actions=max_actions,
                         no_llm=no_llm,
+                        run_browser_use=not no_browser_use,
                         compliance_profile=compliance,
                         mode=mode,
                         nuclei_rate_limit=nuclei_rate,

@@ -81,6 +81,7 @@ class TestChatAudit(unittest.TestCase):
                 llm_plan=False,
                 max_actions=2,
                 no_llm=True,
+                run_browser_use=False,
                 compliance_profile="soc2",
             )
 
@@ -90,6 +91,7 @@ class TestChatAudit(unittest.TestCase):
         self.assertEqual(kwargs.get("llm_plan"), False)
         self.assertEqual(kwargs.get("max_actions"), 2)
         self.assertEqual(kwargs.get("use_llm"), False)
+        self.assertEqual(kwargs.get("run_browser_use"), False)
         self.assertEqual(kwargs.get("compliance_profile"), "soc2")
 
 
