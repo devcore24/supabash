@@ -600,6 +600,7 @@ class BrowserUseScanner:
         html_cache: Dict[str, str] = {}
         meaningful_artifacts = 0
         focus_hits = 0
+        focused_endpoint_artifacts = 0
 
         open_root = self._run_cli_json(base_cmd + ["open", target_url], cancel_event=cancel_event, timeout=timeout)
         probe_steps += 1
@@ -666,6 +667,19 @@ class BrowserUseScanner:
             page_title = str(self._extract_text_from_payload(title_out.get("payload")) or "").strip()
             if page_title:
                 meaningful_artifacts += 1
+                if candidate in focus_url_set:
+                    focused_endpoint_artifacts += 1
+                    self._append_browser_finding(
+                        findings,
+                        seen_findings,
+                        severity="MEDIUM",
+                        title="Focused endpoint rendered in browser workflow",
+                        evidence=(
+                            f"{candidate} rendered a browser page without explicit pre-auth steps; "
+                            f"title={page_title[:180]}"
+                        ),
+                        confidence="high",
+                    )
                 low_title = page_title.lower()
                 if any(token in low_title for token in ("login", "sign in", "authenticate", "password")):
                     self._append_browser_finding(
@@ -676,6 +690,14 @@ class BrowserUseScanner:
                         evidence=f"{candidate} title={page_title[:180]}",
                         confidence="medium",
                     )
+            html_out = self._run_cli_json(base_cmd + ["get", "html"], cancel_event=cancel_event, timeout=timeout)
+            probe_steps += 1
+            page_html = str(self._extract_text_from_payload(html_out.get("payload")) or "").strip()
+            if page_html:
+                html_cache[candidate] = page_html
+                meaningful_artifacts += 1
+                if candidate in focus_url_set:
+                    focused_endpoint_artifacts += 1
 
         for u, html in list(html_cache.items()):
             self._extract_html_signals(u, html, findings, seen_findings)
@@ -693,7 +715,9 @@ class BrowserUseScanner:
             evidence_score += 1
 
         confidence = "low"
-        if focus_hits > 0 and findings:
+        if focused_endpoint_artifacts > 0 and findings:
+            confidence = "high"
+        elif focus_hits > 0 and findings:
             confidence = "high"
         elif findings:
             confidence = "medium"
@@ -711,6 +735,7 @@ class BrowserUseScanner:
                 "probe_mode": "deterministic",
                 "focus_urls_count": len(focus_urls),
                 "focus_hits": int(focus_hits),
+                "focused_endpoint_artifacts": int(focused_endpoint_artifacts),
                 "confidence": confidence,
             },
         }
@@ -766,17 +791,9 @@ class BrowserUseScanner:
             candidate = str(url or "").strip()
             if not candidate:
                 return
-            try:
-                parsed = urlparse(candidate)
-            except Exception:
+            normalized = self._normalize_same_origin_url(candidate, parsed_base=parsed_base)
+            if not normalized:
                 return
-            if parsed.scheme not in ("http", "https"):
-                return
-            if parsed.netloc != parsed_base.netloc:
-                return
-            normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/'}"
-            if parsed.query:
-                normalized = f"{normalized}?{parsed.query}"
             if normalized in seen:
                 return
             seen.add(normalized)
@@ -792,6 +809,12 @@ class BrowserUseScanner:
         for m in re.finditer(r"(?<![A-Za-z0-9])(/[A-Za-z0-9._~!$&'()*+,;=:@%/\-?]+)", str(objective_text or "")):
             rel = str(m.group(1) or "").strip().rstrip("),.;]}>")
             if not rel or rel == "/":
+                continue
+            if rel.startswith("//"):
+                # Avoid treating scheme-relative authority components as same-origin paths.
+                continue
+            if self._looks_like_embedded_authority_path(rel):
+                # Ignore malformed artifacts like "/127.0.0.1:3003/WebGoat".
                 continue
             absolute = f"{origin}{rel}"
             _add(absolute)
@@ -819,14 +842,11 @@ class BrowserUseScanner:
             candidate = str(item or "").strip()
             if not candidate or candidate in seen:
                 continue
-            try:
-                parsed = urlparse(candidate)
-                if parsed.scheme not in ("http", "https") or parsed.netloc != parsed_base.netloc:
-                    continue
-            except Exception:
+            normalized = self._normalize_same_origin_url(candidate, parsed_base=parsed_base)
+            if not normalized:
                 continue
-            seen.add(candidate)
-            out.append(candidate)
+            seen.add(normalized)
+            out.append(normalized)
             if len(out) >= max_paths:
                 return out[:max_paths]
 
@@ -861,14 +881,9 @@ class BrowserUseScanner:
                 if not raw or raw.startswith(("javascript:", "mailto:", "#")):
                     continue
                 absolute = urljoin(base_url, raw)
-                parsed = urlparse(absolute)
-                if parsed.scheme not in ("http", "https"):
+                normalized = self._normalize_same_origin_url(absolute, parsed_base=parsed_base)
+                if not normalized:
                     continue
-                if parsed.netloc != parsed_base.netloc:
-                    continue
-                normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/'}"
-                if parsed.query:
-                    normalized = f"{normalized}?{parsed.query}"
                 if normalized in seen:
                     continue
                 seen.add(normalized)
@@ -912,6 +927,21 @@ class BrowserUseScanner:
                 evidence=f"{url} indicates session cookies without explicit HttpOnly markers in observed HTML/headers.",
                 confidence="medium",
             )
+        if (
+            "/api/v1/status/config" in str(url or "").lower()
+            and any(token in low for token in ("scrape_configs", "prometheus", "remote_write", "alertmanagers"))
+        ):
+            self._append_browser_finding(
+                findings,
+                seen_findings,
+                severity="HIGH",
+                title="Unauthenticated configuration exposure verified in browser workflow",
+                evidence=(
+                    f"{url} returned configuration-like content (e.g., scrape_configs/prometheus) "
+                    "without explicit authentication workflow."
+                ),
+                confidence="high",
+            )
 
     def _append_browser_finding(
         self,
@@ -941,3 +971,43 @@ class BrowserUseScanner:
                 "confidence": str(confidence or "medium").strip().lower()[:16] or "medium",
             }
         )
+
+    def _looks_like_embedded_authority_path(self, path: str) -> bool:
+        text = str(path or "").strip()
+        if not text.startswith("/"):
+            return False
+        head = text[1:].split("/", 1)[0].strip().lower()
+        if not head:
+            return False
+        if head.startswith("http:") or head.startswith("https:"):
+            return True
+        if ":" not in head:
+            return False
+        host_part, maybe_port = head.rsplit(":", 1)
+        if not maybe_port.isdigit():
+            return False
+        if "." not in host_part and host_part not in {"localhost"} and ":" not in host_part:
+            return False
+        if not re.fullmatch(r"[a-z0-9.\-\[\]:]+", host_part):
+            return False
+        return True
+
+    def _normalize_same_origin_url(self, candidate: str, *, parsed_base) -> Optional[str]:
+        text = str(candidate or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = urlparse(text)
+        except Exception:
+            return None
+        if parsed.scheme not in ("http", "https"):
+            return None
+        if parsed.netloc != parsed_base.netloc:
+            return None
+        path = re.sub(r"/{2,}", "/", str(parsed.path or "/"))
+        if self._looks_like_embedded_authority_path(path):
+            return None
+        normalized = f"{parsed.scheme}://{parsed.netloc}{path}"
+        if parsed.query:
+            normalized = f"{normalized}?{parsed.query}"
+        return normalized

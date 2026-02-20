@@ -305,6 +305,36 @@ class BrowserUseScannerTests(unittest.TestCase):
         obs = out.get("observation") if isinstance(out, dict) else {}
         self.assertGreaterEqual(int(obs.get("focus_urls_count") or 0), 1)
 
+    def test_extract_task_focus_urls_skips_embedded_authority_path_artifacts(self):
+        scanner = BrowserUseScanner()
+        base = "http://127.0.0.1:3003/WebGoat"
+        objective = (
+            "Validate http://127.0.0.1:3003/WebGoat/api/v1/status/config and "
+            "/WebGoat/login while avoiding malformed URLs."
+        )
+        urls = scanner._extract_task_focus_urls(base, objective, max_urls=8)
+        self.assertTrue(any(u.endswith("/WebGoat/api/v1/status/config") for u in urls))
+        self.assertFalse(any(":3003/127.0.0.1:3003/" in u for u in urls))
+
+    def test_extract_html_signals_detects_config_exposure_marker(self):
+        scanner = BrowserUseScanner()
+        findings = []
+        seen = set()
+        scanner._extract_html_signals(
+            "http://127.0.0.1:3003/WebGoat/api/v1/status/config",
+            "<html><body>prometheus scrape_configs remote_write</body></html>",
+            findings,
+            seen,
+        )
+        self.assertTrue(
+            any(
+                isinstance(f, dict)
+                and "Unauthenticated configuration exposure verified in browser workflow"
+                in str(f.get("title") or "")
+                for f in findings
+            )
+        )
+
     def test_scan_retries_without_session_after_socket_timeout(self):
         run_timeout = CommandResult(
             command="browser-use --json --session audit-session run task --max-steps 2",

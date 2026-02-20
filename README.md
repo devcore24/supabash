@@ -22,7 +22,7 @@
 > **Status:** **Beta (stabilization + coverage expansion in progress)**
 
 **Supabash** is an AI-powered agentic security audit tool that generates evidence-backed **Supabash Audit** reports.  
-It can also be used to prepare for compliance assessments and certifications such as **SOC 2 / ISO 27001 / PCI DSS / DORA / NIS2 / GDPR / BSI**.
+It can be used to prepare for compliance assessments and certifications such as **SOC 2 / ISO 27001 / PCI DSS / DORA / NIS2 / GDPR / BSI**.
 
 Example: [reports](example_reports/)
 

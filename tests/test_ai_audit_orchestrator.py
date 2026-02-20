@@ -319,6 +319,42 @@ class FakeBrowserUseFallbackScanner:
         }
 
 
+class FakeBrowserUseCorrelationScanner:
+    def __init__(self):
+        self.calls = []
+
+    def is_available(self, command_override=None):
+        return True
+
+    def scan(self, target, **kwargs):
+        self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+        base = str(target).rstrip("/")
+        return {
+            "success": True,
+            "command": f"browser-use run 'scan {target}' --max-steps 8",
+            "urls": [f"{base}/api/v1/status/config"],
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Unauthenticated configuration exposure verified in browser workflow",
+                    "evidence": (
+                        f"{base}/api/v1/status/config returned configuration-like content "
+                        "without authentication workflow."
+                    ),
+                    "type": "browser_observation",
+                    "confidence": "high",
+                }
+            ],
+            "completed": True,
+            "observation": {
+                "done": True,
+                "steps": 3,
+                "focus_hits": 1,
+                "focused_endpoint_artifacts": 1,
+            },
+        }
+
+
 class FakeLLMIterative:
     def __init__(self):
         self.plan_calls = 0
@@ -479,6 +515,50 @@ class FakeLLMRepeatBrowserUse:
                 }
             ],
             {"provider": "fake", "model": "fake-browser-use-repeat", "usage": {"total_tokens": 7}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMSelectBrowserUse8080:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "browser_use",
+                                    "arguments": {
+                                        "profile": "standard",
+                                        "target": "http://localhost:8080",
+                                        "max_steps": 10,
+                                    },
+                                    "reasoning": "Corroborate high-risk unauthenticated config signal on same host:port.",
+                                    "hypothesis": "Agentic browser evidence should close matching high-risk cluster.",
+                                    "expected_evidence": "Endpoint evidence with unauthenticated config disclosure language.",
+                                    "priority": 2,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-browser-use-planner", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-browser-use-planner", "usage": {"total_tokens": 4}},
         )
 
     def chat_with_meta(self, messages, temperature=0.2):
@@ -1242,12 +1322,13 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             and str(step.get("decision", {}).get("reason") or "").strip() == "unresolved_high_risk_no_actionable_candidates"
             for step in trace
         )
-        self.assertTrue(has_pivot or has_unresolved_stop)
+        open_high_after = int(report.get("finding_cluster_overview", {}).get("open_high_risk_cluster_count", 0))
+        self.assertTrue(has_pivot or has_unresolved_stop or open_high_after == 0)
 
         summary_notes = report.get("summary_notes", [])
         if has_pivot:
             self.assertTrue(any("Coverage-debt fallback pivot used" in str(n) for n in summary_notes))
-        else:
+        elif open_high_after > 0:
             self.assertTrue(any("Unresolved high-risk clusters remain after agentic phase" in str(n) for n in summary_notes))
 
     def test_agentic_delta_includes_phase_scoped_findings(self):
@@ -1484,6 +1565,32 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             ("browser_use_fallback_no_cluster_closure" in filtered_reasons)
             or ("all_candidates_already_covered" in replan_reasons)
         )
+
+    def test_high_risk_cluster_closes_when_agentic_evidence_matches_risk_class_and_host(self):
+        scanners = _build_scanners()
+        scanners["nuclei"] = FakeNucleiScannerWithHighFindings()
+        scanners["browser_use"] = FakeBrowserUseCorrelationScanner()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse8080())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        output = artifact_path("ai_audit_browser_use_cluster_closure.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        unresolved = report.get("unresolved_high_risk_clusters", [])
+        self.assertIsInstance(unresolved, list)
+        self.assertEqual(len(unresolved), 0)
+        cluster_overview = report.get("finding_cluster_overview", {})
+        self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 0)
 
     def test_agentic_browser_use_skipped_when_disabled(self):
         scanners = _build_scanners()

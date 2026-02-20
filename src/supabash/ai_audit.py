@@ -2703,7 +2703,106 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                 def _cluster_findings_for_planner(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
                     by_key: Dict[str, Dict[str, Any]] = {}
+                    agentic_risk_host_ports: Dict[str, Set[str]] = {}
+                    agentic_risk_hosts: Dict[str, Set[str]] = {}
                     total = 0
+
+                    def _host_port_keys_from_labels(labels: List[str]) -> Set[str]:
+                        out: Set[str] = set()
+
+                        def _normalize_host(value: str) -> str:
+                            host_text = str(value or "").strip().lower().strip("[]")
+                            if host_text in {"localhost", "::1"}:
+                                return "127.0.0.1"
+                            return host_text
+
+                        for raw in labels or []:
+                            text = str(raw or "").strip().rstrip(".,;")
+                            if not text:
+                                continue
+                            try:
+                                parsed = urlparse(text)
+                                if parsed.scheme:
+                                    host = _normalize_host(parsed.hostname or "")
+                                    if host:
+                                        port = int(parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80))
+                                        out.add(f"{host}:{port}")
+                                    continue
+                            except Exception:
+                                pass
+                            host_part = _normalize_host(str(text).split("/", 1)[0])
+                            if ":" not in host_part:
+                                continue
+                            host_txt, port_txt = host_part.rsplit(":", 1)
+                            if not host_txt:
+                                continue
+                            try:
+                                out.add(f"{host_txt}:{int(port_txt)}")
+                            except Exception:
+                                continue
+                        return out
+
+                    def _host_keys_from_labels(labels: List[str]) -> Set[str]:
+                        out: Set[str] = set()
+                        for raw in labels or []:
+                            text = str(raw or "").strip().rstrip(".,;")
+                            if not text:
+                                continue
+                            try:
+                                parsed = urlparse(text)
+                                if parsed.scheme:
+                                    host = str(parsed.hostname or "").strip().lower().strip("[]")
+                                    if host in {"localhost", "::1"}:
+                                        host = "127.0.0.1"
+                                    if host:
+                                        out.add(host)
+                                    continue
+                            except Exception:
+                                pass
+                            host_part = str(text).split("/", 1)[0].strip().lower().strip("[]")
+                            if not host_part:
+                                continue
+                            if ":" in host_part:
+                                host_part = host_part.rsplit(":", 1)[0].strip()
+                            if host_part in {"localhost", "::1"}:
+                                host_part = "127.0.0.1"
+                            if host_part:
+                                out.add(host_part)
+                        return out
+
+                    def _risk_match_classes(
+                        risk_class: str,
+                        title_text: str,
+                        evidence_text: str,
+                    ) -> Set[str]:
+                        classes: Set[str] = set()
+                        rc = str(risk_class or "").strip().lower()
+                        if rc:
+                            classes.add(rc)
+                        joined = f"{str(title_text or '')} {str(evidence_text or '')}".strip().lower()
+                        if any(k in joined for k in ("service role key", "secret", "token", "password", "credential", "api key")):
+                            classes.add("secret_exposure")
+                        if any(k in joined for k in ("sql injection", "xss", "rce", "cve", "vulnerability", "auth bypass")):
+                            classes.add("known_vulnerability")
+                        if any(
+                            k in joined
+                            for k in ("without authentication", "unauthenticated", "publicly accessible", "exposed", "open port")
+                        ):
+                            classes.add("unauthenticated_exposure")
+                        if any(k in joined for k in ("tls", "ssl", "cipher", "certificate", "cleartext", "https")):
+                            classes.add("transport_security")
+                        if any(k in joined for k in ("redis", "postgres", "database", "rest api", "rpc", "rls")):
+                            classes.add("data_plane_exposure")
+                        if any(k in joined for k in ("missing security headers", "misconfig", "configuration", "default")):
+                            classes.add("security_misconfiguration")
+                        if "known_vulnerability" in classes:
+                            classes.add("vulnerability_signal")
+                        if "vulnerability_signal" in classes:
+                            classes.add("known_vulnerability")
+                        if not classes:
+                            classes.add("general_security_signal")
+                        return classes
+
                     for finding in findings or []:
                         if not isinstance(finding, dict):
                             continue
@@ -2754,6 +2853,27 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             cluster["targets"].add(host)
                         if evidence and len(cluster["evidence_samples"]) < 3:
                             cluster["evidence_samples"].append(evidence[:220])
+                        if phase == "agentic":
+                            signal_labels: List[str] = []
+                            if target_label:
+                                signal_labels.append(target_label)
+                            if host:
+                                signal_labels.append(host)
+                            if evidence:
+                                signal_labels.extend(
+                                    str(u).rstrip(".,;")
+                                    for u in re.findall(r"https?://[^\s)>'\"`]+", evidence, flags=re.IGNORECASE)
+                                )
+                            host_ports = _host_port_keys_from_labels(signal_labels)
+                            hosts_only = _host_keys_from_labels(signal_labels)
+                            if host_ports:
+                                risk_classes = _risk_match_classes(risk_class, title, evidence)
+                                for rc in risk_classes:
+                                    agentic_risk_host_ports.setdefault(rc, set()).update(host_ports)
+                            if hosts_only:
+                                risk_classes = _risk_match_classes(risk_class, title, evidence)
+                                for rc in risk_classes:
+                                    agentic_risk_hosts.setdefault(rc, set()).update(hosts_only)
 
                     clusters: List[Dict[str, Any]] = []
                     for item in by_key.values():
@@ -2774,6 +2894,56 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "seen_in_agentic": "agentic" in phases,
                         }
                         clusters.append(cluster)
+
+                    # Cross-tool closure: if agentic findings cover same risk-class and host:port
+                    # surface, treat baseline-only high-risk clusters as covered evidence.
+                    for cluster in clusters:
+                        if bool(cluster.get("seen_in_agentic")):
+                            continue
+                        if int(cluster.get("severity_rank", 0)) < 4:
+                            continue
+                        rc = str(cluster.get("risk_class") or "").strip().lower() or "general_security_signal"
+                        cluster_host_ports = _host_port_keys_from_labels(cluster.get("targets", []) or [])
+                        evidence_blob = " ".join(str(x or "") for x in (cluster.get("evidence_samples") or []))
+                        if evidence_blob:
+                            cluster_host_ports.update(
+                                _host_port_keys_from_labels(
+                                    [
+                                        str(u).rstrip(".,;")
+                                        for u in re.findall(r"https?://[^\s)>'\"`]+", evidence_blob, flags=re.IGNORECASE)
+                                    ]
+                                )
+                            )
+                        cluster_hosts = _host_keys_from_labels(cluster.get("targets", []) or [])
+                        if evidence_blob:
+                            cluster_hosts.update(
+                                _host_keys_from_labels(
+                                    [
+                                        str(u).rstrip(".,;")
+                                        for u in re.findall(r"https?://[^\s)>'\"`]+", evidence_blob, flags=re.IGNORECASE)
+                                    ]
+                                )
+                            )
+                        if not cluster_host_ports and not cluster_hosts:
+                            continue
+                        candidate_risk_classes = _risk_match_classes(
+                            rc,
+                            str(cluster.get("title") or ""),
+                            evidence_blob,
+                        )
+                        matched = False
+                        for risk_name in candidate_risk_classes:
+                            seen_ports = agentic_risk_host_ports.get(risk_name, set())
+                            seen_hosts = agentic_risk_hosts.get(risk_name, set())
+                            if seen_ports and cluster_host_ports and (cluster_host_ports & seen_ports):
+                                matched = True
+                                break
+                            if seen_hosts and cluster_hosts and (cluster_hosts & seen_hosts):
+                                matched = True
+                                break
+                        if matched:
+                            cluster["seen_in_agentic"] = True
+                            cluster["seen_in_agentic_via_correlation"] = True
 
                     clusters.sort(
                         key=lambda c: (
@@ -3623,6 +3793,36 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     new_agentic_keys = post_agentic_keys - pre_agentic_keys
                     agentic_net_new_unique_delta = len(new_agentic_keys - pre_all_keys)
                     agentic_reconfirmed_unique_delta = len(new_agentic_keys & pre_all_keys)
+                    post_items = post_findings_state.get("items", []) if isinstance(post_findings_state, dict) else []
+                    post_items_by_key: Dict[str, Dict[str, Any]] = {}
+                    for row in post_items if isinstance(post_items, list) else []:
+                        if not isinstance(row, dict):
+                            continue
+                        key = str(row.get("dedup_key") or "").strip()
+                        if not key:
+                            key = self._finding_dedup_key(row)
+                        if key and key not in post_items_by_key:
+                            post_items_by_key[key] = row
+                    new_agentic_items = [
+                        post_items_by_key[k]
+                        for k in new_agentic_keys
+                        if k in post_items_by_key and isinstance(post_items_by_key.get(k), dict)
+                    ]
+                    browser_discovery_unique_delta = 0
+                    browser_observation_unique_delta = 0
+                    browser_security_unique_delta = 0
+                    for row in new_agentic_items:
+                        tool_name = str(row.get("tool") or "").strip().lower()
+                        if tool_name != "browser_use":
+                            continue
+                        finding_type = str(row.get("type") or "").strip().lower()
+                        sev_rank = int(self._severity_rank(row.get("severity") or "INFO"))
+                        if finding_type == "browser_discovery":
+                            browser_discovery_unique_delta += 1
+                        else:
+                            browser_observation_unique_delta += 1
+                            if sev_rank >= 3:
+                                browser_security_unique_delta += 1
                     open_high_risk_cluster_delta = max(
                         0, pre_open_high_risk_cluster_count - post_open_high_risk_cluster_count
                     )
@@ -3671,6 +3871,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     browser_fallback_mode = ""
                     browser_focus_hits = 0
                     browser_fallback_confidence = ""
+                    browser_focused_endpoint_artifacts = 0
                     if chosen_tool == "browser_use":
                         data_block = entry.get("data") if isinstance(entry.get("data"), dict) else {}
                         observation = data_block.get("observation") if isinstance(data_block.get("observation"), dict) else {}
@@ -3679,8 +3880,24 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             browser_focus_hits = int(observation.get("focus_hits") or 0)
                         except Exception:
                             browser_focus_hits = 0
+                        try:
+                            browser_focused_endpoint_artifacts = int(observation.get("focused_endpoint_artifacts") or 0)
+                        except Exception:
+                            browser_focused_endpoint_artifacts = 0
                         browser_fallback_confidence = str(observation.get("fallback_confidence") or "").strip().lower()
                         completed = bool(data_block.get("completed"))
+                        if browser_discovery_unique_delta > 0 and open_high_risk_cluster_delta <= 0:
+                            # Browser-discovery endpoint churn is useful for scope expansion but should not dominate
+                            # gain when it does not reduce unresolved high-risk coverage debt.
+                            gain_score -= min(8, int(browser_discovery_unique_delta))
+                        if (
+                            browser_discovery_unique_delta > 0
+                            and browser_observation_unique_delta <= 0
+                            and open_high_risk_cluster_delta <= 0
+                        ):
+                            gain_score = min(gain_score, 0)
+                            if chosen_target:
+                                browser_use_fallback_block_targets.add(chosen_target)
                         if browser_fallback_mode and not completed and open_high_risk_cluster_delta <= 0:
                             if browser_focus_hits <= 0:
                                 # Discovery-only fallback evidence can create many low-value unique findings.
@@ -3693,6 +3910,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     browser_use_fallback_block_targets.add(chosen_target)
                             else:
                                 gain_score -= 1
+                        if browser_focus_hits > 0 and browser_focused_endpoint_artifacts <= 0 and status == "success":
+                            signal_note = (
+                                "Browser action found focus URLs but lacked concrete endpoint artifacts; "
+                                "prefer non-browser pivots next."
+                            )
+                        if browser_security_unique_delta > 0 and open_high_risk_cluster_delta <= 0:
+                            signal = "high"
+                            signal_note = "Browser action produced net-new security observations."
                         if browser_fallback_mode and browser_focus_hits <= 0 and open_high_risk_cluster_delta <= 0:
                             signal = "medium" if findings_delta > 0 else "low"
                             signal_note = (
@@ -3758,7 +3983,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "gain_score": int(gain_score),
                         "browser_fallback_mode": browser_fallback_mode,
                         "browser_focus_hits": int(browser_focus_hits),
+                        "browser_focused_endpoint_artifacts": int(browser_focused_endpoint_artifacts),
                         "browser_fallback_confidence": browser_fallback_confidence,
+                        "browser_discovery_unique_delta": int(browser_discovery_unique_delta),
+                        "browser_observation_unique_delta": int(browser_observation_unique_delta),
+                        "browser_security_unique_delta": int(browser_security_unique_delta),
                         "started_at": started_at,
                         "finished_at": finished_at,
                     }
@@ -3807,7 +4036,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "tool_low_signal_count": int(agentic_low_signal_tool_counts.get(chosen_tool, 0)),
                         "browser_fallback_mode": browser_fallback_mode,
                         "browser_focus_hits": int(browser_focus_hits),
+                        "browser_focused_endpoint_artifacts": int(browser_focused_endpoint_artifacts),
                         "browser_fallback_confidence": browser_fallback_confidence,
+                        "browser_discovery_unique_delta": int(browser_discovery_unique_delta),
+                        "browser_observation_unique_delta": int(browser_observation_unique_delta),
+                        "browser_security_unique_delta": int(browser_security_unique_delta),
                     }
                     trace_item["critique"] = {
                         "signal": signal,
