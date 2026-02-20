@@ -140,6 +140,7 @@ class BrowserUseScanner:
                     fallback_session = None if session_retry_attempted or self._is_socket_timeout_error(err) else session
                     fallback = self._run_deterministic_probe(
                         target_url=target_url,
+                        objective_text=task_text,
                         session=fallback_session,
                         profile=profile,
                         headless=bool(headless),
@@ -165,6 +166,9 @@ class BrowserUseScanner:
                         "fallback_steps": int(fallback_observation.get("steps") or 0),
                         "fallback_urls_count": len(fallback_urls),
                         "fallback_findings_count": len(fallback_findings),
+                        "focus_urls_count": int(fallback_observation.get("focus_urls_count") or 0),
+                        "focus_hits": int(fallback_observation.get("focus_hits") or 0),
+                        "fallback_confidence": str(fallback_observation.get("confidence") or "low"),
                     }
                     return {
                         "success": True,
@@ -224,6 +228,7 @@ class BrowserUseScanner:
             if bool(allow_deterministic_fallback) and not (isinstance(command, str) and command.strip()):
                 fallback = self._run_deterministic_probe(
                     target_url=target_url,
+                    objective_text=task_text,
                     session=session,
                     profile=profile,
                     headless=bool(headless),
@@ -248,6 +253,9 @@ class BrowserUseScanner:
                                 int(fallback_observation.get("evidence_score") or 0),
                             )
                         ),
+                        "focus_urls_count": int(fallback_observation.get("focus_urls_count") or 0),
+                        "focus_hits": int(fallback_observation.get("focus_hits") or 0),
+                        "fallback_confidence": str(fallback_observation.get("confidence") or "low"),
                     }
                 )
                 return {
@@ -565,6 +573,7 @@ class BrowserUseScanner:
         self,
         *,
         target_url: str,
+        objective_text: Optional[str],
         session: Optional[str],
         profile: Optional[str],
         headless: bool,
@@ -590,6 +599,7 @@ class BrowserUseScanner:
         probe_steps = 0
         html_cache: Dict[str, str] = {}
         meaningful_artifacts = 0
+        focus_hits = 0
 
         open_root = self._run_cli_json(base_cmd + ["open", target_url], cancel_event=cancel_event, timeout=timeout)
         probe_steps += 1
@@ -621,9 +631,21 @@ class BrowserUseScanner:
                 severity="INFO",
                 title="Browser page title observed",
                 evidence=f"{target_url} title={root_title[:180]}",
+                confidence="low",
             )
 
-        candidates = self._derive_probe_urls(target_url, root_html, max_paths=max_paths)
+        focus_urls = self._extract_task_focus_urls(
+            target_url,
+            objective_text or "",
+            max_urls=max(2, min(int(max_paths), 24)),
+        )
+        focus_url_set = set(focus_urls)
+        candidates = self._derive_probe_urls(
+            target_url,
+            root_html,
+            max_paths=max_paths,
+            prioritized_urls=focus_urls,
+        )
         for candidate in candidates:
             if cancel_event is not None:
                 try:
@@ -635,6 +657,8 @@ class BrowserUseScanner:
             probe_steps += 1
             if not open_out.get("success"):
                 continue
+            if candidate in focus_url_set:
+                focus_hits += 1
             if candidate not in visited_urls:
                 visited_urls.append(candidate)
             title_out = self._run_cli_json(base_cmd + ["get", "title"], cancel_event=cancel_event, timeout=timeout)
@@ -650,6 +674,7 @@ class BrowserUseScanner:
                         severity="MEDIUM",
                         title="Authentication surface discovered",
                         evidence=f"{candidate} title={page_title[:180]}",
+                        confidence="medium",
                     )
 
         for u, html in list(html_cache.items()):
@@ -667,6 +692,12 @@ class BrowserUseScanner:
         if state_payload.get("success") and meaningful_artifacts > 0:
             evidence_score += 1
 
+        confidence = "low"
+        if focus_hits > 0 and findings:
+            confidence = "high"
+        elif findings:
+            confidence = "medium"
+
         return {
             "success": bool(meaningful_artifacts > 0 and (findings or len(visited_urls) > 1)),
             "urls": visited_urls[:100],
@@ -678,6 +709,9 @@ class BrowserUseScanner:
                 "urls_count": len(visited_urls),
                 "findings_count": len(findings),
                 "probe_mode": "deterministic",
+                "focus_urls_count": len(focus_urls),
+                "focus_hits": int(focus_hits),
+                "confidence": confidence,
             },
         }
 
@@ -721,11 +755,81 @@ class BrowserUseScanner:
                 return val.strip()
         return ""
 
-    def _derive_probe_urls(self, base_url: str, root_html: str, *, max_paths: int) -> List[str]:
+    def _extract_task_focus_urls(self, base_url: str, objective_text: str, *, max_urls: int = 12) -> List[str]:
+        out: List[str] = []
+        seen: Set[str] = set()
+        parsed_base = urlparse(base_url)
+        origin = f"{parsed_base.scheme}://{parsed_base.netloc}".rstrip("/")
+        max_urls = max(1, min(int(max_urls or 12), 40))
+
+        def _add(url: str) -> None:
+            candidate = str(url or "").strip()
+            if not candidate:
+                return
+            try:
+                parsed = urlparse(candidate)
+            except Exception:
+                return
+            if parsed.scheme not in ("http", "https"):
+                return
+            if parsed.netloc != parsed_base.netloc:
+                return
+            normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/'}"
+            if parsed.query:
+                normalized = f"{normalized}?{parsed.query}"
+            if normalized in seen:
+                return
+            seen.add(normalized)
+            out.append(normalized)
+
+        for m in re.finditer(r"https?://[^\s'\"<>`]+", str(objective_text or ""), flags=re.IGNORECASE):
+            raw = str(m.group(0) or "").strip().rstrip("),.;]}>")
+            if raw:
+                _add(raw)
+                if len(out) >= max_urls:
+                    return out[:max_urls]
+
+        for m in re.finditer(r"(?<![A-Za-z0-9])(/[A-Za-z0-9._~!$&'()*+,;=:@%/\-?]+)", str(objective_text or "")):
+            rel = str(m.group(1) or "").strip().rstrip("),.;]}>")
+            if not rel or rel == "/":
+                continue
+            absolute = f"{origin}{rel}"
+            _add(absolute)
+            if len(out) >= max_urls:
+                return out[:max_urls]
+        return out[:max_urls]
+
+    def _derive_probe_urls(
+        self,
+        base_url: str,
+        root_html: str,
+        *,
+        max_paths: int,
+        prioritized_urls: Optional[List[str]] = None,
+    ) -> List[str]:
         out: List[str] = []
         seen: Set[str] = set()
         parsed_base = urlparse(base_url)
         base_origin = f"{parsed_base.scheme}://{parsed_base.netloc}".rstrip("/")
+        base_path_prefix = str(parsed_base.path or "").strip().rstrip("/")
+        if base_path_prefix == "/":
+            base_path_prefix = ""
+
+        for item in prioritized_urls or []:
+            candidate = str(item or "").strip()
+            if not candidate or candidate in seen:
+                continue
+            try:
+                parsed = urlparse(candidate)
+                if parsed.scheme not in ("http", "https") or parsed.netloc != parsed_base.netloc:
+                    continue
+            except Exception:
+                continue
+            seen.add(candidate)
+            out.append(candidate)
+            if len(out) >= max_paths:
+                return out[:max_paths]
+
         seed_paths = [
             "/login",
             "/signin",
@@ -740,10 +844,17 @@ class BrowserUseScanner:
             "/metrics",
         ]
         for rel in seed_paths:
-            candidate = f"{base_origin}{rel}"
-            if candidate not in seen:
-                seen.add(candidate)
-                out.append(candidate)
+            prefixed = f"{base_origin}{base_path_prefix}{rel}" if base_path_prefix else ""
+            for candidate in [prefixed, f"{base_origin}{rel}"]:
+                if not candidate:
+                    continue
+                if candidate not in seen:
+                    seen.add(candidate)
+                    out.append(candidate)
+                if len(out) >= max_paths:
+                    break
+            if len(out) >= max_paths:
+                break
         if root_html:
             for match in re.finditer(r"""(?:href|action)\s*=\s*["']([^"']+)["']""", root_html, flags=re.IGNORECASE):
                 raw = str(match.group(1) or "").strip()
@@ -781,6 +892,7 @@ class BrowserUseScanner:
                 severity="MEDIUM",
                 title="Form attack surface discovered",
                 evidence=f"{url} contains HTML forms; validate input handling and backend API coupling.",
+                confidence="medium",
             )
         if any(token in low for token in ("exception", "stack trace", "traceback", "javax.servlet", "org.apache")):
             self._append_browser_finding(
@@ -789,6 +901,7 @@ class BrowserUseScanner:
                 severity="HIGH",
                 title="Verbose error disclosure in browser workflow",
                 evidence=f"{url} response includes stack-trace/exception-style content.",
+                confidence="high",
             )
         if any(token in low for token in ("set-cookie", "jsessionid")) and "httponly" not in low:
             self._append_browser_finding(
@@ -797,6 +910,7 @@ class BrowserUseScanner:
                 severity="MEDIUM",
                 title="Session security header weakness",
                 evidence=f"{url} indicates session cookies without explicit HttpOnly markers in observed HTML/headers.",
+                confidence="medium",
             )
 
     def _append_browser_finding(
@@ -807,6 +921,7 @@ class BrowserUseScanner:
         severity: str,
         title: str,
         evidence: str,
+        confidence: str = "medium",
     ) -> None:
         sev = str(severity or "INFO").strip().upper()
         ttl = str(title or "Browser observation").strip()
@@ -823,5 +938,6 @@ class BrowserUseScanner:
                 "title": ttl,
                 "evidence": ev[:400],
                 "type": "browser_observation",
+                "confidence": str(confidence or "medium").strip().lower()[:16] or "medium",
             }
         )

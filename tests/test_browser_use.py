@@ -240,8 +240,70 @@ class BrowserUseScannerTests(unittest.TestCase):
         obs = out.get("observation") if isinstance(out, dict) else {}
         self.assertEqual(obs.get("fallback_mode"), "deterministic_probe")
         self.assertGreaterEqual(int(obs.get("fallback_findings_count") or 0), 1)
+        self.assertIn(str(obs.get("fallback_confidence") or ""), {"medium", "high"})
         findings = out.get("findings") if isinstance(out.get("findings"), list) else []
         self.assertTrue(any("Form attack surface" in str(f.get("title") or "") for f in findings if isinstance(f, dict)))
+        self.assertTrue(all("confidence" in f for f in findings if isinstance(f, dict)))
+
+    def test_deterministic_probe_prioritizes_task_focus_endpoints(self):
+        run_incomplete = CommandResult(
+            command="browser-use --json run task --max-steps 2",
+            return_code=0,
+            stdout=(
+                '{"id":"x6","success":true,"data":{"success":true,'
+                '"task":"Inspect target","steps":0,"done":false,"result":null}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        open_ok = CommandResult(
+            command="browser-use --json open http://example.test/WebGoat",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        state_ok = CommandResult(
+            command="browser-use --json state",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        title_root = CommandResult(
+            command="browser-use --json get title",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"title":"WebGoat"}}',
+            stderr="",
+            success=True,
+        )
+        html_root = CommandResult(
+            command="browser-use --json get html",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"html":"<html></html>"}}',
+            stderr="",
+            success=True,
+        )
+
+        runner = _SequenceRunner([run_incomplete, open_ok, state_ok, title_root, html_root])
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+
+        task = (
+            "Validate endpoint /WebGoat/api/v1/status/config and collect evidence. "
+            "Also verify auth behavior."
+        )
+        out = scanner.scan(
+            "http://example.test/WebGoat",
+            task=task,
+            max_steps=2,
+            deterministic_max_paths=2,
+        )
+        self.assertTrue(out.get("success"))
+        open_calls = [" ".join(c) for c in runner.calls if isinstance(c, list) and len(c) >= 2 and c[-2] == "open"]
+        self.assertTrue(any("/WebGoat/api/v1/status/config" in c for c in open_calls))
+        obs = out.get("observation") if isinstance(out, dict) else {}
+        self.assertGreaterEqual(int(obs.get("focus_urls_count") or 0), 1)
 
     def test_scan_retries_without_session_after_socket_timeout(self):
         run_timeout = CommandResult(

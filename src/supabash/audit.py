@@ -1672,6 +1672,15 @@ class AuditOrchestrator:
                     )
             # browser_use browser-driven observations
             if tool == "browser_use":
+                observation = data.get("observation") if isinstance(data.get("observation"), dict) else {}
+                fallback_mode = str(observation.get("fallback_mode") or "").strip().lower()
+                try:
+                    focus_hits = int(observation.get("focus_hits") or 0)
+                except Exception:
+                    focus_hits = 0
+                endpoint_confidence = "medium"
+                if fallback_mode and focus_hits <= 0:
+                    endpoint_confidence = "low"
                 for item in (data.get("findings") or [])[:120]:
                     if not isinstance(item, dict):
                         continue
@@ -1682,6 +1691,7 @@ class AuditOrchestrator:
                             "evidence": str(item.get("evidence") or ""),
                             "tool": "browser_use",
                             "type": str(item.get("type") or "browser_observation"),
+                            "confidence": str(item.get("confidence") or "medium").strip().lower()[:16] or "medium",
                             "recommendation": str(item.get("recommendation") or "").strip() or None,
                         }
                     )
@@ -1693,6 +1703,7 @@ class AuditOrchestrator:
                             "evidence": str(url),
                             "tool": "browser_use",
                             "type": "browser_discovery",
+                            "confidence": endpoint_confidence,
                         }
                     )
             # Internal readiness probes (deterministic low-noise posture checks)

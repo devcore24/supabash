@@ -2121,6 +2121,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 coverage_debt_pivot_count = 0
                 coverage_debt_pivot_cap = 2
                 gobuster_wildcard_targets: Set[str] = set()
+                browser_use_fallback_block_targets: Set[str] = set()
 
                 for baseline_entry in agg.get("results", []) or []:
                     if not isinstance(baseline_entry, dict):
@@ -2957,6 +2958,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if tool == "gobuster" and target in gobuster_wildcard_targets:
                         return "gobuster_wildcard_target"
 
+                    if tool == "browser_use":
+                        resolved_target = _resolve_allowed_web_target("browser_use", target or "")
+                        if target and (target in browser_use_fallback_block_targets):
+                            return "browser_use_fallback_no_cluster_closure"
+                        if resolved_target and resolved_target in browser_use_fallback_block_targets:
+                            return "browser_use_fallback_no_cluster_closure"
+
                     if (
                         tool in ("nuclei", "sslscan", "gobuster", "ffuf", "katana", "browser_use", "nikto", "sqlmap")
                         and tool_count >= 1
@@ -3658,9 +3666,41 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if status != "success":
                         gain_score -= 1
 
-                    # Track per-tool/target execution pressure and recent signal trend.
                     chosen_tool = str(action.get("tool") or "").strip().lower()
                     chosen_target = str(entry.get("target") or "").strip()
+                    browser_fallback_mode = ""
+                    browser_focus_hits = 0
+                    browser_fallback_confidence = ""
+                    if chosen_tool == "browser_use":
+                        data_block = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+                        observation = data_block.get("observation") if isinstance(data_block.get("observation"), dict) else {}
+                        browser_fallback_mode = str(observation.get("fallback_mode") or "").strip().lower()
+                        try:
+                            browser_focus_hits = int(observation.get("focus_hits") or 0)
+                        except Exception:
+                            browser_focus_hits = 0
+                        browser_fallback_confidence = str(observation.get("fallback_confidence") or "").strip().lower()
+                        completed = bool(data_block.get("completed"))
+                        if browser_fallback_mode and not completed and open_high_risk_cluster_delta <= 0:
+                            if browser_focus_hits <= 0:
+                                # Discovery-only fallback evidence can create many low-value unique findings.
+                                # Cap net gain so planner pivots instead of looping on same browser surface.
+                                penalty = max(2, min(8, int(agentic_net_new_unique_delta) + 1))
+                                gain_score -= int(penalty)
+                                if gain_score > 0:
+                                    gain_score = 0
+                                if chosen_target:
+                                    browser_use_fallback_block_targets.add(chosen_target)
+                            else:
+                                gain_score -= 1
+                        if browser_fallback_mode and browser_focus_hits <= 0 and open_high_risk_cluster_delta <= 0:
+                            signal = "medium" if findings_delta > 0 else "low"
+                            signal_note = (
+                                "Fallback browser discovery produced low-confidence evidence; "
+                                "deprioritizing repeated actions on same target."
+                            )
+
+                    # Track per-tool/target execution pressure and recent signal trend.
                     action_repeat_key = _action_repeat_key(action, entry)
                     if chosen_tool:
                         agentic_tool_counts[chosen_tool] = int(agentic_tool_counts.get(chosen_tool, 0)) + 1
@@ -3716,6 +3756,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "web_target_delta": int(web_target_delta),
                         "extra_results": int(extra_added),
                         "gain_score": int(gain_score),
+                        "browser_fallback_mode": browser_fallback_mode,
+                        "browser_focus_hits": int(browser_focus_hits),
+                        "browser_fallback_confidence": browser_fallback_confidence,
                         "started_at": started_at,
                         "finished_at": finished_at,
                     }
@@ -3762,6 +3805,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if action_repeat_key
                         else 0,
                         "tool_low_signal_count": int(agentic_low_signal_tool_counts.get(chosen_tool, 0)),
+                        "browser_fallback_mode": browser_fallback_mode,
+                        "browser_focus_hits": int(browser_focus_hits),
+                        "browser_fallback_confidence": browser_fallback_confidence,
                     }
                     trace_item["critique"] = {
                         "signal": signal,

@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 from pathlib import Path
 
@@ -281,6 +282,43 @@ class FakeBrowserUseScanner:
         }
 
 
+class FakeBrowserUseFallbackScanner:
+    def __init__(self):
+        self.calls = []
+
+    def is_available(self, command_override=None):
+        return True
+
+    def scan(self, target, **kwargs):
+        self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+        return {
+            "success": True,
+            "command": f"browser-use run 'scan {target}' --max-steps 8",
+            "urls": [
+                f"{str(target).rstrip('/')}/login",
+                f"{str(target).rstrip('/')}/admin",
+            ],
+            "findings": [],
+            "observation": {
+                "done": False,
+                "steps": 0,
+                "data_success": True,
+                "result": "",
+                "urls_count": 2,
+                "findings_count": 0,
+                "evidence_score": 2,
+                "fallback_mode": "deterministic_probe",
+                "fallback_steps": 10,
+                "fallback_urls_count": 2,
+                "fallback_findings_count": 0,
+                "focus_urls_count": 2,
+                "focus_hits": 0,
+                "fallback_confidence": "low",
+            },
+            "completed": False,
+        }
+
+
 class FakeLLMIterative:
     def __init__(self):
         self.plan_calls = 0
@@ -403,6 +441,44 @@ class FakeLLMSelectBrowserUse:
         return (
             [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
             {"provider": "fake", "model": "fake-browser-use-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMRepeatBrowserUse:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        return (
+            [
+                {
+                    "name": "propose_actions",
+                    "arguments": {
+                        "actions": [
+                            {
+                                "tool_name": "browser_use",
+                                "arguments": {
+                                    "profile": "standard",
+                                    "target": "http://localhost:9090",
+                                    "max_steps": 8,
+                                },
+                                "reasoning": "Repeat browser validation on same target.",
+                                "priority": 5,
+                            }
+                        ],
+                        "stop": False,
+                        "notes": "Keep testing same browser target.",
+                    },
+                }
+            ],
+            {"provider": "fake", "model": "fake-browser-use-repeat", "usage": {"total_tokens": 7}},
         )
 
     def chat_with_meta(self, messages, temperature=0.2):
@@ -1057,7 +1133,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         llm = FakeLLMSelectBlockedSqlmap()
         orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=llm)
         output = artifact_path("ai_audit_sqlmap_nonviable_not_retried.json")
-        with unittest.mock.patch.object(AIAuditOrchestrator, "_http_probe_status", return_value=(404, "", None)):
+        with patch.object(AIAuditOrchestrator, "_http_probe_status", return_value=(404, "", None)):
             report = orchestrator.run(
                 "localhost",
                 output,
@@ -1362,6 +1438,52 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertEqual(first_call.get("kwargs", {}).get("min_steps_success"), 1)
         self.assertEqual(first_call.get("kwargs", {}).get("allow_deterministic_fallback"), True)
         self.assertEqual(first_call.get("kwargs", {}).get("deterministic_max_paths"), 8)
+
+    def test_browser_use_fallback_no_cluster_closure_blocks_repeat_on_same_target(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseFallbackScanner()
+        scanners["browser_use"] = browser
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMRepeatBrowserUse())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        output = artifact_path("ai_audit_browser_use_fallback_repeat_block.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        self.assertEqual(len(browser.calls), 1)
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "browser_use" and a.get("phase") == "agentic"
+        ]
+        self.assertEqual(len(actions), 1)
+        trace = report.get("ai_audit", {}).get("decision_trace", [])
+        filtered_reasons = []
+        for t in trace:
+            if not isinstance(t, dict):
+                continue
+            rep = t.get("repeat_filtered") if isinstance(t.get("repeat_filtered"), dict) else {}
+            for c in rep.get("candidates", []) or []:
+                if isinstance(c, dict):
+                    filtered_reasons.append(str(c.get("reason") or ""))
+        replan_reasons = [
+            str((t.get("replan") or {}).get("reason") or "")
+            for t in trace
+            if isinstance(t, dict) and isinstance(t.get("replan"), dict)
+        ]
+        self.assertTrue(
+            ("browser_use_fallback_no_cluster_closure" in filtered_reasons)
+            or ("all_candidates_already_covered" in replan_reasons)
+        )
 
     def test_agentic_browser_use_skipped_when_disabled(self):
         scanners = _build_scanners()
