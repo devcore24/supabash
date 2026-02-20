@@ -172,6 +172,47 @@ class FakeGobusterScanner:
         return {"success": True, "command": f"gobuster dir -u {target} ...", "findings": []}
 
 
+class FakeNmapScannerSingleWebPort:
+    def scan(self, target, arguments=None, **kwargs):
+        return {
+            "success": True,
+            "command": f"nmap {target} -oX - -sV --script ssl-enum-ciphers -p-",
+            "scan_data": {
+                "hosts": [
+                    {
+                        "ip": "127.0.0.1",
+                        "ports": [
+                            {
+                                "port": 8080,
+                                "protocol": "tcp",
+                                "state": "open",
+                                "service": "http",
+                                "product": "nginx",
+                                "version": "1.0",
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+
+
+class FakeKatanaQueryScanner:
+    def crawl(self, target, **kwargs):
+        base = str(target).rstrip("/")
+        urls = [f"{base}/search?query=test"]
+        return {"success": True, "command": f"katana -u {target}", "urls": urls, "findings": urls}
+
+
+class FakeSqlmapCaptureScanner:
+    def __init__(self):
+        self.calls = []
+
+    def scan(self, target, **kwargs):
+        self.calls.append(str(target))
+        return {"success": True, "command": f"sqlmap -u {target}", "findings": []}
+
+
 class FakeGobusterWildcardScanner:
     def __init__(self):
         self.calls = []
@@ -751,6 +792,48 @@ class FakeLLMSelectGobusterWildcardTarget:
         )
 
 
+class FakeLLMSelectBlockedSqlmap:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls in (1, 2):
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "sqlmap",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "http://localhost:8080/search?query=test",
+                                    },
+                                    "reasoning": "Validate SQL injection on discovered parameterized endpoint.",
+                                    "priority": 5,
+                                }
+                            ],
+                            "stop": False,
+                            "notes": "Run sqlmap on discovered query endpoint.",
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 7}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True, "notes": "Done."}}],
+            {"provider": "fake", "model": "fake-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 7}},
+        )
+
+
 def _build_scanners():
     return {
         "nmap": FakeNmapScanner(),
@@ -849,7 +932,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         )
 
         web_targets = report.get("web_targets") if isinstance(report.get("web_targets"), list) else []
-        self.assertIn("http://127.0.0.1:3003", web_targets)
+        self.assertIn("http://127.0.0.1:3003/WebGoat", web_targets)
         self.assertNotIn("http://localhost:9090", web_targets)
         self.assertNotIn("http://localhost:8080", web_targets)
 
@@ -959,6 +1042,45 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertTrue(agentic_nuclei)
         command = str(agentic_nuclei[0].get("command") or "")
         self.assertIn("-rate-limit 10000", command)
+
+    def test_agentic_sqlmap_nonviable_target_is_not_retried(self):
+        sqlmap = FakeSqlmapCaptureScanner()
+        scanners = {
+            "nmap": FakeNmapScannerSingleWebPort(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "katana": FakeKatanaQueryScanner(),
+            "sqlmap": sqlmap,
+        }
+        llm = FakeLLMSelectBlockedSqlmap()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=llm)
+        output = artifact_path("ai_audit_sqlmap_nonviable_not_retried.json")
+        with unittest.mock.patch.object(AIAuditOrchestrator, "_http_probe_status", return_value=(404, "", None)):
+            report = orchestrator.run(
+                "localhost",
+                output,
+                llm_plan=True,
+                max_actions=2,
+                use_llm=True,
+                compliance_profile="soc2",
+            )
+
+        self.assertEqual(sqlmap.calls, [])
+        agentic_sqlmap_actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "sqlmap" and a.get("phase") == "agentic"
+        ]
+        self.assertEqual(len(agentic_sqlmap_actions), 1)
+        if agentic_sqlmap_actions:
+            self.assertTrue(bool(agentic_sqlmap_actions[0].get("skipped")))
+            self.assertIn(
+                "preflight blocked non-viable url",
+                str(agentic_sqlmap_actions[0].get("reason") or "").strip().lower(),
+            )
+        self.assertGreaterEqual(int(llm.plan_calls), 2)
 
     def test_repeat_policy_caps_low_signal_sslscan_repeats(self):
         scanners = _build_scanners()

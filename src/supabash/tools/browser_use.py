@@ -94,13 +94,96 @@ class BrowserUseScanner:
 
         if not result.success:
             err = result.stderr or result.stdout or f"Command failed (RC={result.return_code}): {result.command}"
-            return {
-                "success": False,
-                "error": err,
-                "canceled": bool(getattr(result, "canceled", False)),
-                "raw_output": combined_output,
-                "command": result.command,
-            }
+            session_retry_attempted = False
+            if (
+                isinstance(session, str)
+                and session.strip()
+                and not (isinstance(command, str) and command.strip())
+                and self._is_socket_timeout_error(err)
+            ):
+                retry_cmd = self._build_command(
+                    target=target_url,
+                    task=task_text,
+                    max_steps=steps,
+                    headless=bool(headless),
+                    model=model,
+                    session=None,
+                    profile=profile,
+                    command_override=command,
+                )
+                if retry_cmd:
+                    if isinstance(arguments, str) and arguments.strip():
+                        retry_cmd.extend(shlex.split(arguments))
+                    retry_result: CommandResult = self.runner.run(retry_cmd, **kwargs)
+                    session_retry_attempted = True
+                    if retry_result.success:
+                        result = retry_result
+                        combined_output = "\n".join(
+                            x for x in [retry_result.stdout, retry_result.stderr] if isinstance(x, str) and x.strip()
+                        )
+                        payload = self._parse_json_payload(combined_output)
+                    else:
+                        retry_err = (
+                            retry_result.stderr
+                            or retry_result.stdout
+                            or f"Command failed (RC={retry_result.return_code}): {retry_result.command}"
+                        )
+                        err = f"{err}\nRetry without session failed: {retry_err}"
+                        combined_output = "\n".join(
+                            x for x in [retry_result.stdout, retry_result.stderr] if isinstance(x, str) and x.strip()
+                        )
+                        result = retry_result
+
+            if not result.success:
+                fallback: Optional[Dict[str, Any]] = None
+                if bool(allow_deterministic_fallback) and not (isinstance(command, str) and command.strip()):
+                    fallback_session = None if session_retry_attempted or self._is_socket_timeout_error(err) else session
+                    fallback = self._run_deterministic_probe(
+                        target_url=target_url,
+                        session=fallback_session,
+                        profile=profile,
+                        headless=bool(headless),
+                        max_paths=int(max(1, min(int(deterministic_max_paths or 8), 24))),
+                        cancel_event=cancel_event,
+                        timeout=timeout,
+                    )
+                if isinstance(fallback, dict) and bool(fallback.get("success")):
+                    fallback_urls = fallback.get("urls") if isinstance(fallback.get("urls"), list) else []
+                    fallback_findings = fallback.get("findings") if isinstance(fallback.get("findings"), list) else []
+                    fallback_observation = (
+                        fallback.get("observation") if isinstance(fallback.get("observation"), dict) else {}
+                    )
+                    observation = {
+                        "done": False,
+                        "steps": 0,
+                        "data_success": False,
+                        "result": "",
+                        "urls_count": len(fallback_urls),
+                        "findings_count": len(fallback_findings),
+                        "evidence_score": int(fallback_observation.get("evidence_score") or 0),
+                        "fallback_mode": "deterministic_probe_on_run_failure",
+                        "fallback_steps": int(fallback_observation.get("steps") or 0),
+                        "fallback_urls_count": len(fallback_urls),
+                        "fallback_findings_count": len(fallback_findings),
+                    }
+                    return {
+                        "success": True,
+                        "target": target_url,
+                        "task": task_text,
+                        "urls": fallback_urls,
+                        "findings": fallback_findings,
+                        "observation": observation,
+                        "completed": False,
+                        "raw_output": combined_output,
+                        "command": result.command,
+                    }
+                return {
+                    "success": False,
+                    "error": err,
+                    "canceled": bool(getattr(result, "canceled", False)),
+                    "raw_output": combined_output,
+                    "command": result.command,
+                }
 
         status = self._extract_cli_status(combined_output, payload=payload)
         if isinstance(status, dict) and status.get("ok") is False:
@@ -200,6 +283,13 @@ class BrowserUseScanner:
             "raw_output": combined_output,
             "command": result.command,
         }
+
+    def _is_socket_timeout_error(self, error_text: Any) -> bool:
+        text = str(error_text or "").strip().lower()
+        if not text:
+            return False
+        timeout_tokens = ("timed out", "timeouterror", "socket", "recv")
+        return any(token in text for token in timeout_tokens)
 
     def _resolve_cli_binary(self) -> Optional[str]:
         for candidate in ("browser-use", "browser_use"):

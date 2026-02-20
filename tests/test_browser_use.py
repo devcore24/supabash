@@ -243,6 +243,126 @@ class BrowserUseScannerTests(unittest.TestCase):
         findings = out.get("findings") if isinstance(out.get("findings"), list) else []
         self.assertTrue(any("Form attack surface" in str(f.get("title") or "") for f in findings if isinstance(f, dict)))
 
+    def test_scan_retries_without_session_after_socket_timeout(self):
+        run_timeout = CommandResult(
+            command="browser-use --json --session audit-session run task --max-steps 2",
+            return_code=1,
+            stdout="",
+            stderr="TimeoutError: timed out",
+            success=False,
+        )
+        retry_ok = CommandResult(
+            command="browser-use --json run task --max-steps 2",
+            return_code=0,
+            stdout=(
+                '{"id":"x5","success":true,"data":{"success":true,'
+                '"task":"Inspect target","steps":2,"done":true,'
+                '"result":"Visited http://example.test/admin"}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        runner = _SequenceRunner([run_timeout, retry_ok])
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+
+        out = scanner.scan(
+            "http://example.test",
+            task="Inspect target",
+            max_steps=2,
+            session="audit-session",
+        )
+
+        self.assertTrue(out.get("success"))
+        self.assertEqual(len(runner.calls), 2)
+        first_call = runner.calls[0] if runner.calls else []
+        second_call = runner.calls[1] if len(runner.calls) > 1 else []
+        self.assertIn("--session", first_call)
+        self.assertIn("audit-session", first_call)
+        self.assertNotIn("--session", second_call)
+
+    def test_scan_uses_deterministic_fallback_when_run_fails(self):
+        run_timeout = CommandResult(
+            command="browser-use --json --session audit-session run task --max-steps 2",
+            return_code=1,
+            stdout="",
+            stderr="TimeoutError: timed out",
+            success=False,
+        )
+        retry_timeout = CommandResult(
+            command="browser-use --json run task --max-steps 2",
+            return_code=1,
+            stdout="",
+            stderr="TimeoutError: timed out",
+            success=False,
+        )
+        open_ok = CommandResult(
+            command="browser-use --json open http://example.test",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        state_ok = CommandResult(
+            command="browser-use --json state",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        title_root = CommandResult(
+            command="browser-use --json get title",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"title":"WebGoat"}}',
+            stderr="",
+            success=True,
+        )
+        html_root = CommandResult(
+            command="browser-use --json get html",
+            return_code=0,
+            stdout=(
+                '{"success":true,"data":{"success":true,'
+                '"html":"<html><body><form action=\\"/login\\"></form>'
+                'javax.servlet.ServletException</body></html>"}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        open_login = CommandResult(
+            command="browser-use --json open http://example.test/login",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        title_login = CommandResult(
+            command="browser-use --json get title",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"title":"Login"}}',
+            stderr="",
+            success=True,
+        )
+
+        runner = _SequenceRunner(
+            [run_timeout, retry_timeout, open_ok, state_ok, title_root, html_root, open_login, title_login]
+        )
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+
+        out = scanner.scan(
+            "http://example.test",
+            task="Inspect target",
+            max_steps=2,
+            session="audit-session",
+            deterministic_max_paths=1,
+        )
+
+        self.assertTrue(out.get("success"))
+        self.assertEqual(out.get("completed"), False)
+        obs = out.get("observation") if isinstance(out, dict) else {}
+        self.assertEqual(obs.get("fallback_mode"), "deterministic_probe_on_run_failure")
+        self.assertGreaterEqual(int(obs.get("fallback_findings_count") or 0), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

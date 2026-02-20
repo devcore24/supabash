@@ -817,12 +817,24 @@ class AIAuditOrchestrator(AuditOrchestrator):
             except Exception:
                 sqlmap_max_targets = 2
             sqlmap_max_targets = max(1, min(sqlmap_max_targets, 8))
-            sqlmap_targets = self._build_sqlmap_targets(
+            sqlmap_plan = self._build_sqlmap_targets(
                 normalized,
                 web_targets=allowed_web_targets,
                 results=agg.get("results", []),
                 max_targets=sqlmap_max_targets,
+                return_plan=True,
             )
+            sqlmap_targets = (
+                list(sqlmap_plan.get("targets", []))
+                if isinstance(sqlmap_plan, dict) and isinstance(sqlmap_plan.get("targets"), list)
+                else []
+            )
+            sqlmap_rejected_targets: Set[str] = set()
+            if isinstance(sqlmap_plan, dict):
+                for item in sqlmap_plan.get("rejected_targets", []) or []:
+                    value = str(item or "").strip()
+                    if value:
+                        sqlmap_rejected_targets.add(value)
 
             tool_specs = {
                 "httpx": {"target_kind": "web", "enabled_default": True},
@@ -1177,17 +1189,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return parse_input
                     if tool_name == "sqlmap":
                         if text in sqlmap_targets:
+                            normalized_candidate = self._normalize_sqlmap_candidate_url(text)
+                            if normalized_candidate and normalized_candidate in sqlmap_rejected_targets:
+                                return None
                             return text
                         parse_input = text if "://" in text else f"http://{text}"
-                        try:
-                            parsed = urlparse(parse_input)
-                            scheme = str(parsed.scheme or "").strip().lower()
-                            host = str(parsed.hostname or "").strip().lower()
-                            query = str(parsed.query or "").strip()
-                        except Exception:
-                            return None
-                        if scheme not in ("http", "https") or not host or not query or "=" not in query:
-                            return None
                         host_scope = set()
                         normalized_host = str(normalized.get("host") or "").strip().lower()
                         if normalized_host:
@@ -1196,9 +1202,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             hp = _web_target_host_port_key(item)
                             if hp is not None and hp[0]:
                                 host_scope.add(hp[0])
-                        if host_scope and host not in host_scope:
+                        normalized_candidate = self._normalize_sqlmap_candidate_url(
+                            parse_input,
+                            allowed_hosts=host_scope,
+                        )
+                        if not normalized_candidate:
                             return None
-                        return parse_input
+                        if normalized_candidate in sqlmap_rejected_targets:
+                            return None
+                        return normalized_candidate
                     if text in allowed_web_targets:
                         return text
                     host_port = _web_target_host_port_key(text)
@@ -1625,6 +1637,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "constraints": {
                             "profile_enum": list(profile_values),
                             "sqlmap_requires_parameterized_url": True,
+                            "sqlmap_blocked_targets": sorted(sqlmap_rejected_targets)[:20],
                             "nikto_opt_in": bool(run_nikto),
                             "browser_use_enabled": bool(run_browser_use),
                             "browser_use_available": bool(browser_use_available),
@@ -1936,17 +1949,51 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                         ),
                                     )
                                 elif tool == "sqlmap":
-                                    if "?" not in target:
+                                    normalized_sql_target = self._normalize_sqlmap_candidate_url(target)
+                                    if not normalized_sql_target:
                                         entry = self._skip_tool(tool, "No parameterized URL provided")
                                     else:
-                                        entry = self._run_tool(
-                                            tool,
-                                            lambda: self.scanners["sqlmap"].scan(
+                                        target = normalized_sql_target
+                                        args["target"] = target
+                                        if target in sqlmap_rejected_targets:
+                                            entry = self._skip_tool(
+                                                tool,
+                                                "SQLMap target previously marked non-viable in this run",
+                                            )
+                                        else:
+                                            try:
+                                                sqlmap_preflight_timeout = int(
+                                                    sqlmap_cfg.get("preflight_timeout_seconds", 3)
+                                                )
+                                            except Exception:
+                                                sqlmap_preflight_timeout = 3
+                                            sqlmap_preflight_timeout = max(1, min(sqlmap_preflight_timeout, 15))
+                                            preflight = self._sqlmap_preflight_viability(
                                                 target,
-                                                cancel_event=cancel_event,
-                                                timeout_seconds=self._tool_timeout_seconds("sqlmap"),
-                                            ),
-                                        )
+                                                timeout_seconds=sqlmap_preflight_timeout,
+                                            )
+                                            if not bool(preflight.get("viable")):
+                                                status_txt = str(preflight.get("status") or "").strip() or "unknown"
+                                                entry = self._skip_tool(
+                                                    tool,
+                                                    f"Preflight blocked non-viable URL (HTTP {status_txt})",
+                                                )
+                                                entry["preflight"] = preflight
+                                                sqlmap_rejected_targets.add(target)
+                                            else:
+                                                entry = self._run_tool(
+                                                    tool,
+                                                    lambda: self.scanners["sqlmap"].scan(
+                                                        target,
+                                                        cancel_event=cancel_event,
+                                                        timeout_seconds=self._tool_timeout_seconds("sqlmap"),
+                                                    ),
+                                                )
+                                                entry["preflight"] = preflight
+                                                temp_entry = dict(entry) if isinstance(entry, dict) else {}
+                                                temp_entry["target"] = target
+                                                if self._sqlmap_entry_indicates_nonviable(temp_entry):
+                                                    sqlmap_rejected_targets.add(target)
                                 else:
                                     entry = self._skip_tool(tool, "Unsupported agentic action")
                     elif tool == "dnsenum":
@@ -2902,6 +2949,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     if tool == "sslscan" and _resolve_sslscan_port_for_action(action) is None:
                         return "invalid_sslscan_target"
 
+                    if tool == "sqlmap":
+                        normalized_sql_target = self._normalize_sqlmap_candidate_url(target)
+                        if normalized_sql_target and normalized_sql_target in sqlmap_rejected_targets:
+                            return "sqlmap_target_nonviable"
+
                     if tool == "gobuster" and target in gobuster_wildcard_targets:
                         return "gobuster_wildcard_target"
 
@@ -2968,12 +3020,24 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 while actions_executed < int(max_actions):
                     if canceled():
                         break
-                    sqlmap_targets = self._build_sqlmap_targets(
+                    sqlmap_plan = self._build_sqlmap_targets(
                         normalized,
                         web_targets=allowed_web_targets,
                         results=agg.get("results", []),
                         max_targets=sqlmap_max_targets,
+                        blocked_targets=sorted(sqlmap_rejected_targets),
+                        return_plan=True,
                     )
+                    sqlmap_targets = (
+                        list(sqlmap_plan.get("targets", []))
+                        if isinstance(sqlmap_plan, dict) and isinstance(sqlmap_plan.get("targets"), list)
+                        else []
+                    )
+                    if isinstance(sqlmap_plan, dict):
+                        for item in sqlmap_plan.get("rejected_targets", []) or []:
+                            value = str(item or "").strip()
+                            if value:
+                                sqlmap_rejected_targets.add(value)
                     remaining = int(max_actions) - actions_executed
                     open_high_risk_clusters = _open_high_risk_clusters_now()
                     coverage_debt_open_count = len(open_high_risk_clusters)

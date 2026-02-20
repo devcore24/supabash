@@ -10,8 +10,8 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Sequence, Tuple
-from urllib.parse import urlparse, urlunparse
+from typing import Dict, Any, List, Optional, Sequence, Set, Tuple
+from urllib.parse import parse_qsl, unquote_plus, urlparse, urlunparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 import time
@@ -2453,7 +2453,7 @@ class AuditOrchestrator:
         """
         Returns:
           - scan_host: host/IP for nmap
-          - base_url: base URL for web tooling if target is a URL
+          - base_url: scoped URL seed for web tooling (preserves explicit non-root path)
           - sqlmap_url: full URL (only when it contains query params)
           - is_url: True when input target is a URL
           - scheme/host/port/path: parsed URL components (best-effort)
@@ -2472,9 +2472,15 @@ class AuditOrchestrator:
         parsed = urlparse(target)
         host = parsed.hostname or target
         netloc = parsed.netloc
-        base = f"{parsed.scheme}://{netloc}" if parsed.scheme and netloc else None
-        sqlmap_url = target if "?" in target else None
         path = str(parsed.path or "/").strip() or "/"
+        if parsed.scheme and netloc:
+            if path and path != "/":
+                base = f"{parsed.scheme}://{netloc}{path}"
+            else:
+                base = f"{parsed.scheme}://{netloc}"
+        else:
+            base = None
+        sqlmap_url = target if "?" in target else None
         return {
             "scan_host": host,
             "base_url": base,
@@ -2580,92 +2586,300 @@ class AuditOrchestrator:
                 seen.add(u)
         return out
 
+    def _normalize_sqlmap_candidate_url(
+        self,
+        url: Any,
+        *,
+        allowed_hosts: Optional[Set[str]] = None,
+    ) -> Optional[str]:
+        try:
+            parsed = urlparse(str(url or "").strip())
+        except Exception:
+            return None
+        scheme = str(parsed.scheme or "").strip().lower()
+        if scheme not in ("http", "https"):
+            return None
+        host = str(parsed.hostname or "").strip().lower()
+        if not host:
+            return None
+        if isinstance(allowed_hosts, set) and allowed_hosts and host not in allowed_hosts:
+            return None
+        query = str(parsed.query or "").strip()
+        if not query or "=" not in query:
+            return None
+        default_port = 443 if scheme == "https" else 80
+        port = parsed.port
+        if port is not None and int(port) != default_port:
+            netloc = f"{host}:{int(port)}"
+        else:
+            netloc = host
+        path = str(parsed.path or "/") or "/"
+        return urlunparse((scheme, netloc, path, "", query, ""))
+
+    def _sqlmap_query_looks_probe_like(self, query: str) -> bool:
+        q = str(query or "").strip()
+        if not q:
+            return False
+        pairs = parse_qsl(q, keep_blank_values=True)
+        if not pairs:
+            pairs = [("", q)]
+        probe_values = {"[", "]", "\\[", "\\]", "'", "\"", "`", "${", "${{"}
+        for _k, raw_val in pairs:
+            value = unquote_plus(str(raw_val or "")).strip()
+            if not value:
+                continue
+            lower_val = value.lower()
+            if lower_val in probe_values:
+                return True
+            # Short, non-alphanumeric payloads are often scanner probe artifacts.
+            if len(value) <= 3 and re.search(r"[a-z0-9]", lower_val) is None:
+                return True
+            if "\\[" in lower_val or "%5b" in lower_val or "%5d" in lower_val:
+                return True
+        return False
+
+    def _sqlmap_source_low_trust(
+        self,
+        *,
+        source_tool: str,
+        source_field: str,
+        source_template_id: str,
+        candidate_url: str,
+    ) -> bool:
+        tool = str(source_tool or "").strip().lower()
+        field = str(source_field or "").strip().lower()
+        template_id = str(source_template_id or "").strip().lower()
+        if tool == "nuclei":
+            if field.endswith("matched_at") or field == "matched_at":
+                return True
+            if "stacktrace" in template_id or "stack-trace" in template_id:
+                return True
+        try:
+            parsed = urlparse(str(candidate_url or "").strip())
+            if self._sqlmap_query_looks_probe_like(str(parsed.query or "")):
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _sqlmap_candidate_rows_from_results(
+        self,
+        results: Sequence[Any],
+        *,
+        allowed_hosts: Optional[Sequence[str]] = None,
+        max_urls: int = 20,
+    ) -> List[Dict[str, Any]]:
+        host_scope = {str(h).strip().lower() for h in (allowed_hosts or []) if str(h).strip()}
+        max_urls = max(1, min(int(max_urls), 200))
+        rows: List[Dict[str, Any]] = []
+        by_url: Dict[str, Dict[str, Any]] = {}
+        ordered_urls: List[str] = []
+
+        def _add_source_text(
+            text: Any,
+            *,
+            source_tool: str,
+            source_field: str,
+            source_template_id: str = "",
+        ) -> None:
+            if len(ordered_urls) >= max_urls and not isinstance(text, str):
+                return
+            txt = str(text or "").strip()
+            if not txt:
+                return
+            if "http" not in txt and "?" not in txt:
+                return
+            for candidate in self._extract_urls_from_text(txt):
+                normalized = self._normalize_sqlmap_candidate_url(candidate, allowed_hosts=host_scope)
+                if not normalized:
+                    continue
+                source = {
+                    "tool": str(source_tool or "").strip().lower(),
+                    "field": str(source_field or "").strip(),
+                    "template_id": str(source_template_id or "").strip().lower(),
+                }
+                meta = by_url.get(normalized)
+                if meta is None:
+                    if len(ordered_urls) >= max_urls:
+                        continue
+                    meta = {"url": normalized, "sources": []}
+                    by_url[normalized] = meta
+                    ordered_urls.append(normalized)
+                if source not in meta["sources"]:
+                    meta["sources"].append(source)
+
+        for entry in results or []:
+            if not isinstance(entry, dict):
+                continue
+            entry_tool = str(entry.get("tool") or "").strip().lower()
+            data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+            for key in ("url", "target", "evidence"):
+                _add_source_text(entry.get(key), source_tool=entry_tool, source_field=key)
+            if not isinstance(data, dict):
+                continue
+
+            raw_urls = data.get("urls")
+            if isinstance(raw_urls, list):
+                for item in raw_urls:
+                    _add_source_text(item, source_tool=entry_tool, source_field="data.urls")
+
+            raw_findings = data.get("findings")
+            if isinstance(raw_findings, list):
+                for item in raw_findings:
+                    if isinstance(item, str):
+                        _add_source_text(item, source_tool=entry_tool, source_field="data.findings")
+                        continue
+                    if not isinstance(item, dict):
+                        continue
+                    template_id = (
+                        str(item.get("id") or item.get("template_id") or item.get("template-id") or "").strip().lower()
+                    )
+                    for key in ("url", "matched_at", "endpoint", "evidence"):
+                        _add_source_text(
+                            item.get(key),
+                            source_tool=entry_tool,
+                            source_field=f"data.findings.{key}",
+                            source_template_id=template_id,
+                        )
+
+            ffuf_results = data.get("results")
+            ffuf_rows = ffuf_results.get("results") if isinstance(ffuf_results, dict) else None
+            if isinstance(ffuf_rows, list):
+                for row in ffuf_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    for key in ("url", "redirectlocation"):
+                        _add_source_text(
+                            row.get(key),
+                            source_tool=entry_tool,
+                            source_field=f"data.results.results.{key}",
+                        )
+
+        for url in ordered_urls:
+            meta = by_url.get(url) or {}
+            sources = meta.get("sources") if isinstance(meta.get("sources"), list) else []
+            low_trust_sources = 0
+            trusted_sources = 0
+            source_tools: Set[str] = set()
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                src_tool = str(source.get("tool") or "").strip().lower()
+                src_field = str(source.get("field") or "").strip()
+                src_tpl = str(source.get("template_id") or "").strip().lower()
+                if src_tool:
+                    source_tools.add(src_tool)
+                is_low_trust = self._sqlmap_source_low_trust(
+                    source_tool=src_tool,
+                    source_field=src_field,
+                    source_template_id=src_tpl,
+                    candidate_url=url,
+                )
+                if is_low_trust:
+                    low_trust_sources += 1
+                else:
+                    trusted_sources += 1
+            trust_score = int(trusted_sources * 3 - low_trust_sources)
+            rows.append(
+                {
+                    "url": url,
+                    "sources": sources,
+                    "source_tools": sorted(source_tools),
+                    "source_count": len(sources),
+                    "trusted_sources": int(trusted_sources),
+                    "low_trust_sources": int(low_trust_sources),
+                    "low_trust_only": bool(len(sources) > 0 and trusted_sources == 0),
+                    "trust_score": int(trust_score),
+                }
+            )
+        return rows[:max_urls]
+
     def _harvest_parameterized_urls_from_results(
         self,
         results: Sequence[Any],
         *,
         allowed_hosts: Optional[Sequence[str]] = None,
         max_urls: int = 20,
-    ) -> List[str]:
+        include_metadata: bool = False,
+    ) -> List[Any]:
+        rows = self._sqlmap_candidate_rows_from_results(
+            results,
+            allowed_hosts=allowed_hosts,
+            max_urls=max_urls,
+        )
+        if include_metadata:
+            return rows
+        return [str(r.get("url") or "").strip() for r in rows if isinstance(r, dict) and str(r.get("url") or "").strip()]
+
+    def _sqlmap_entry_indicates_nonviable(self, entry: Any) -> bool:
+        if not isinstance(entry, dict):
+            return False
+        preflight = entry.get("preflight") if isinstance(entry.get("preflight"), dict) else {}
+        try:
+            if int(preflight.get("status") or 0) in (404, 410):
+                return True
+        except Exception:
+            pass
+        parts: List[str] = []
+        reason = str(entry.get("reason") or "").strip()
+        if reason:
+            parts.append(reason)
+        error = str(entry.get("error") or "").strip()
+        if error:
+            parts.append(error)
+        data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+        data_error = str(data.get("error") or "").strip()
+        if data_error:
+            parts.append(data_error)
+        text = " ".join(parts).strip().lower()
+        if not text:
+            return False
+        return (
+            "preflight blocked non-viable url" in text
+            or "page not found (404)" in text
+            or "404 (not found)" in text
+        )
+
+    def _sqlmap_rejected_targets_from_results(
+        self,
+        results: Sequence[Any],
+        *,
+        allowed_hosts: Optional[Sequence[str]] = None,
+    ) -> Set[str]:
         host_scope = {str(h).strip().lower() for h in (allowed_hosts or []) if str(h).strip()}
-        seen = set()
-        out: List[str] = []
-        max_urls = max(1, min(int(max_urls), 200))
-
-        def _normalize_candidate(url: str) -> Optional[str]:
-            try:
-                parsed = urlparse(str(url or "").strip())
-            except Exception:
-                return None
-            scheme = str(parsed.scheme or "").strip().lower()
-            if scheme not in ("http", "https"):
-                return None
-            host = str(parsed.hostname or "").strip().lower()
-            if not host:
-                return None
-            if host_scope and host not in host_scope:
-                return None
-            query = str(parsed.query or "").strip()
-            if not query or "=" not in query:
-                return None
-            default_port = 443 if scheme == "https" else 80
-            port = parsed.port
-            if port is not None and int(port) != default_port:
-                netloc = f"{host}:{int(port)}"
-            else:
-                netloc = host
-            path = str(parsed.path or "/") or "/"
-            return urlunparse((scheme, netloc, path, "", query, ""))
-
-        text_candidates: List[str] = []
+        rejected: Set[str] = set()
         for entry in results or []:
             if not isinstance(entry, dict):
                 continue
-            data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
-            for key in ("url", "target", "evidence"):
-                v = entry.get(key)
-                if isinstance(v, str) and v.strip():
-                    text_candidates.append(v)
-            if isinstance(data, dict):
-                for key in ("urls", "findings"):
-                    values = data.get(key)
-                    if not isinstance(values, list):
-                        continue
-                    for item in values:
-                        if isinstance(item, str):
-                            text_candidates.append(item)
-                        elif isinstance(item, dict):
-                            for k in ("url", "matched_at", "endpoint", "evidence"):
-                                v = item.get(k)
-                                if isinstance(v, str) and v.strip():
-                                    text_candidates.append(v)
-                ffuf_results = data.get("results")
-                ffuf_rows = ffuf_results.get("results") if isinstance(ffuf_results, dict) else None
-                if isinstance(ffuf_rows, list):
-                    for row in ffuf_rows:
-                        if not isinstance(row, dict):
-                            continue
-                        for k in ("url", "redirectlocation"):
-                            v = row.get(k)
-                            if isinstance(v, str) and v.strip():
-                                text_candidates.append(v)
+            if str(entry.get("tool") or "").strip().lower() != "sqlmap":
+                continue
+            if not self._sqlmap_entry_indicates_nonviable(entry):
+                continue
+            normalized = self._normalize_sqlmap_candidate_url(entry.get("target"), allowed_hosts=host_scope)
+            if normalized:
+                rejected.add(normalized)
+        return rejected
 
-        for text in text_candidates:
-            if len(out) >= max_urls:
-                break
-            if not isinstance(text, str):
-                continue
-            if "http" not in text and "?" not in text:
-                continue
-            for candidate in self._extract_urls_from_text(text):
-                normalized = _normalize_candidate(candidate)
-                if not normalized or normalized in seen:
-                    continue
-                seen.add(normalized)
-                out.append(normalized)
-                if len(out) >= max_urls:
-                    break
-        return out
+    def _sqlmap_preflight_viability(self, target_url: str, timeout_seconds: int = 3) -> Dict[str, Any]:
+        url = str(target_url or "").strip()
+        if not url:
+            return {"viable": False, "status": None, "reason": "empty_target"}
+        status, _body, error = self._http_probe_status(url, timeout_seconds=max(1, int(timeout_seconds)))
+        status_int = int(status) if isinstance(status, int) else None
+        if status_int in (404, 410):
+            return {
+                "viable": False,
+                "status": status_int,
+                "reason": f"http_{status_int}",
+                "error": str(error or ""),
+            }
+        # Soft-allow when probing is unavailable/unreliable so remote scans are not over-blocked.
+        return {
+            "viable": True,
+            "status": status_int,
+            "reason": "ok" if status_int is not None else "probe_unavailable",
+            "error": str(error or ""),
+        }
 
     def _build_sqlmap_targets(
         self,
@@ -2674,7 +2888,9 @@ class AuditOrchestrator:
         web_targets: Sequence[Any],
         results: Sequence[Any],
         max_targets: int = 2,
-    ) -> List[str]:
+        blocked_targets: Optional[Sequence[str]] = None,
+        return_plan: bool = False,
+    ) -> Any:
         max_targets = max(1, min(int(max_targets), 8))
         allowed_hosts: List[str] = []
         host = str(normalized_target.get("host") or "").strip().lower()
@@ -2689,20 +2905,73 @@ class AuditOrchestrator:
                 allowed_hosts.append(h)
 
         explicit = str(normalized_target.get("sqlmap_url") or "").strip()
+        allowed_hosts_set = {str(h).strip().lower() for h in allowed_hosts if str(h).strip()}
+        rejected: Set[str] = set()
+        for raw in blocked_targets or []:
+            normalized_blocked = self._normalize_sqlmap_candidate_url(raw, allowed_hosts=allowed_hosts_set)
+            if normalized_blocked:
+                rejected.add(normalized_blocked)
+        rejected.update(self._sqlmap_rejected_targets_from_results(results, allowed_hosts=allowed_hosts))
+
         targets: List[str] = []
-        if explicit:
-            targets.append(explicit)
-        harvested = self._harvest_parameterized_urls_from_results(
+        blocked_rows: List[Dict[str, Any]] = []
+        candidates = self._harvest_parameterized_urls_from_results(
             results,
             allowed_hosts=allowed_hosts,
             max_urls=max(4, max_targets * 3),
+            include_metadata=True,
         )
-        for item in harvested:
+        explicit_norm = self._normalize_sqlmap_candidate_url(explicit, allowed_hosts=allowed_hosts_set) if explicit else None
+        if explicit:
+            targets.append(explicit_norm or explicit)
+        for row in candidates:
+            if not isinstance(row, dict):
+                continue
+            item = str(row.get("url") or "").strip()
+            if not item:
+                continue
+            if item in rejected and item != explicit_norm:
+                blocked_rows.append(
+                    {
+                        "url": item,
+                        "reason": "previous_nonviable_sqlmap_target",
+                        "sources": row.get("sources", []),
+                    }
+                )
+                continue
+            # Low-trust probe-only candidates (e.g., scanner-trigger payload URLs)
+            # require corroboration from at least one non-low-trust source.
+            if bool(row.get("low_trust_only")) and int(row.get("source_count") or 0) < 2 and item != explicit_norm:
+                blocked_rows.append(
+                    {
+                        "url": item,
+                        "reason": "low_trust_probe_only_candidate",
+                        "sources": row.get("sources", []),
+                    }
+                )
+                continue
+            if bool(row.get("low_trust_only")) and int(row.get("trust_score") or 0) <= 0 and item != explicit_norm:
+                blocked_rows.append(
+                    {
+                        "url": item,
+                        "reason": "low_trust_unconfirmed_candidate",
+                        "sources": row.get("sources", []),
+                    }
+                )
+                continue
             if item not in targets:
                 targets.append(item)
             if len(targets) >= max_targets:
                 break
-        return targets[:max_targets]
+        plan = {
+            "targets": targets[:max_targets],
+            "candidates": candidates,
+            "blocked_candidates": blocked_rows,
+            "rejected_targets": sorted(rejected),
+        }
+        if return_plan:
+            return plan
+        return plan["targets"]
 
     def _web_targets_from_nmap(self, scan_host: str, nmap_data: Dict[str, Any]) -> List[str]:
         """
@@ -4778,14 +5047,35 @@ class AuditOrchestrator:
         except Exception:
             sqlmap_max_targets = 2
         sqlmap_max_targets = max(1, min(sqlmap_max_targets, 8))
-        sqlmap_targets = self._build_sqlmap_targets(
+        sqlmap_plan = self._build_sqlmap_targets(
             normalized,
             web_targets=web_targets,
             results=agg.get("results", []),
             max_targets=sqlmap_max_targets,
+            return_plan=True,
         )
+        sqlmap_targets = sqlmap_plan.get("targets", []) if isinstance(sqlmap_plan, dict) else []
         agg["sqlmap_targets"] = list(sqlmap_targets)
+        agg["sqlmap_target_candidates"] = (
+            sqlmap_plan.get("candidates", []) if isinstance(sqlmap_plan, dict) else []
+        )
+        agg["sqlmap_blocked_candidates"] = (
+            sqlmap_plan.get("blocked_candidates", []) if isinstance(sqlmap_plan, dict) else []
+        )
         explicit_sqlmap_target = str(normalized.get("sqlmap_url") or "").strip()
+        blocked_candidate_count = len(agg.get("sqlmap_blocked_candidates") or [])
+        if blocked_candidate_count > 0:
+            agg.setdefault("summary_notes", []).append(
+                (
+                    "SQLMap candidate quality filter blocked "
+                    f"{blocked_candidate_count} low-trust/non-viable harvested URL(s)."
+                )
+            )
+        try:
+            sqlmap_preflight_timeout = int(sqlmap_cfg.get("preflight_timeout_seconds", 3))
+        except Exception:
+            sqlmap_preflight_timeout = 3
+        sqlmap_preflight_timeout = max(1, min(sqlmap_preflight_timeout, 15))
 
         if sqlmap_targets:
             harvested_count = 0
@@ -4807,6 +5097,22 @@ class AuditOrchestrator:
                     agg["finished_at"] = time.time()
                     return agg
                 note("tool_start", "sqlmap", f"Running sqlmap on {sql_target}")
+                preflight = self._sqlmap_preflight_viability(
+                    sql_target,
+                    timeout_seconds=sqlmap_preflight_timeout,
+                )
+                if not bool(preflight.get("viable")):
+                    status_txt = str(preflight.get("status") or "").strip() or "unknown"
+                    reason = f"Preflight blocked non-viable URL (HTTP {status_txt})"
+                    sqlmap_entry = self._skip_tool("sqlmap", reason)
+                    sqlmap_entry["target"] = sql_target
+                    sqlmap_entry["target_scope"] = (
+                        "explicit_input" if explicit_sqlmap_target and sql_target == explicit_sqlmap_target else "harvested"
+                    )
+                    sqlmap_entry["preflight"] = preflight
+                    agg["results"].append(sqlmap_entry)
+                    note("tool_end", "sqlmap", f"Skipped sqlmap on {sql_target}: {reason}")
+                    continue
                 sqlmap_entry = self._run_tool_if_enabled(
                     "sqlmap",
                     lambda sql_target=sql_target: self.scanners["sqlmap"].scan(
@@ -4819,6 +5125,7 @@ class AuditOrchestrator:
                 sqlmap_entry["target_scope"] = (
                     "explicit_input" if explicit_sqlmap_target and sql_target == explicit_sqlmap_target else "harvested"
                 )
+                sqlmap_entry["preflight"] = preflight
                 agg["results"].append(sqlmap_entry)
                 note("tool_end", "sqlmap", f"Finished sqlmap on {sql_target}")
                 if canceled() or (
