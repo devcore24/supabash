@@ -1416,6 +1416,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         tls_port_set.add(int(p))
                     except Exception:
                         continue
+                tls_ports_nmap_only = self._tls_candidate_ports_from_nmap(nmap_scan_data, web_targets=None)
+                tls_port_set_strict: Set[int] = set()
+                for p in tls_ports_nmap_only or []:
+                    try:
+                        tls_port_set_strict.add(int(p))
+                    except Exception:
+                        continue
 
                 def _extract_port_from_target_hint(value: Any) -> Optional[int]:
                     text = str(value or "").strip()
@@ -1455,10 +1462,17 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             requested = None
                         if requested is None:
                             return None
-                        if tls_port_set and requested not in tls_port_set:
+                        if tls_port_set_strict and requested not in tls_port_set_strict:
+                            return None
+                        if (not tls_port_set_strict) and tls_port_set and requested not in tls_port_set:
                             return None
                         return requested
 
+                    if tls_ports_nmap_only:
+                        try:
+                            return int(tls_ports_nmap_only[0])
+                        except Exception:
+                            return None
                     if tls_ports:
                         try:
                             return int(tls_ports[0])
@@ -2854,6 +2868,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if evidence and len(cluster["evidence_samples"]) < 3:
                             cluster["evidence_samples"].append(evidence[:220])
                         if phase == "agentic":
+                            include_for_correlation = True
+                            if str(tool or "").strip().lower() == "browser_use":
+                                finding_type = str(finding.get("type") or "").strip().lower()
+                                confidence = str(finding.get("confidence") or "").strip().lower()
+                                # Only browser observations (not discovery URLs) with sufficient
+                                # confidence can close high-risk clusters via correlation.
+                                if finding_type != "browser_observation":
+                                    include_for_correlation = False
+                                elif confidence and confidence not in {"medium", "high"}:
+                                    include_for_correlation = False
+                            if not include_for_correlation:
+                                continue
                             signal_labels: List[str] = []
                             if target_label:
                                 signal_labels.append(target_label)
@@ -3195,6 +3221,94 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return text
                     return text[: max_len - 3].rstrip() + "..."
 
+                def _validate_browser_discovery_urls(
+                    action: Dict[str, Any],
+                    entry: Dict[str, Any],
+                ) -> None:
+                    if not isinstance(action, dict) or not isinstance(entry, dict):
+                        return
+                    if str(action.get("tool") or "").strip().lower() != "browser_use":
+                        return
+                    if not bool(entry.get("success")):
+                        return
+                    data = entry.get("data") if isinstance(entry.get("data"), dict) else None
+                    if not isinstance(data, dict):
+                        return
+                    urls_raw = data.get("urls")
+                    if not isinstance(urls_raw, list):
+                        return
+
+                    validation_block: Dict[str, Any] = {
+                        "attempted": False,
+                        "candidate_count": 0,
+                        "validated_count": 0,
+                        "validated_urls": [],
+                        "httpx_success": False,
+                    }
+                    data["browser_discovery_validation"] = validation_block
+
+                    if not self._has_scanner("httpx") or not self._tool_enabled("httpx", default=True):
+                        return
+
+                    base_target = str(entry.get("target") or (action.get("arguments") or {}).get("target") or "").strip()
+                    base_hp = _web_target_host_port_key(base_target)
+                    candidates: List[str] = []
+                    seen_candidates: Set[str] = set()
+                    for raw in urls_raw:
+                        url = str(raw or "").strip()
+                        if not url or url in seen_candidates:
+                            continue
+                        hp = _web_target_host_port_key(url)
+                        if base_hp is not None and hp is not None and hp != base_hp:
+                            continue
+                        seen_candidates.add(url)
+                        candidates.append(url)
+                        if len(candidates) >= 16:
+                            break
+                    if not candidates:
+                        return
+
+                    validation_block["candidate_count"] = len(candidates)
+                    validation_block["attempted"] = True
+                    try:
+                        result = self.scanners["httpx"].scan(
+                            candidates,
+                            cancel_event=cancel_event,
+                            timeout_seconds=self._tool_timeout_seconds("httpx"),
+                        )
+                    except Exception as e:
+                        validation_block["error"] = str(e)
+                        return
+                    if not isinstance(result, dict):
+                        return
+                    validation_block["httpx_success"] = bool(result.get("success"))
+                    if not bool(result.get("success")):
+                        validation_block["error"] = str(result.get("error") or "")
+                        return
+                    alive = result.get("alive") if isinstance(result.get("alive"), list) else []
+                    validated_urls = []
+                    seen_validated: Set[str] = set()
+                    for raw in alive:
+                        url = str(raw or "").strip()
+                        if not url or url in seen_validated:
+                            continue
+                        seen_validated.add(url)
+                        validated_urls.append(url)
+                    validation_block["validated_urls"] = validated_urls[:32]
+                    validation_block["validated_count"] = len(validated_urls)
+                    results_rows = result.get("results") if isinstance(result.get("results"), list) else []
+                    if results_rows:
+                        status_map: Dict[str, Any] = {}
+                        for row in results_rows:
+                            if not isinstance(row, dict):
+                                continue
+                            url = str(row.get("url") or "").strip()
+                            if not url or url in status_map:
+                                continue
+                            status_map[url] = row.get("status-code")
+                        if status_map:
+                            validation_block["status_by_url"] = status_map
+
                 while actions_executed < int(max_actions):
                     if canceled():
                         break
@@ -3225,6 +3339,49 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "started_at": time.time(),
                         "open_high_risk_cluster_count_before": int(coverage_debt_open_count),
                     }
+                    if (
+                        coverage_debt_open_count <= 0
+                        and any(
+                            int(x.get("open_high_risk_cluster_delta", 0)) > 0
+                            for x in (planner_action_ledger[-6:] if isinstance(planner_action_ledger, list) else [])
+                            if isinstance(x, dict)
+                        )
+                    ):
+                        recent_ledger_window = [
+                            x
+                            for x in (planner_action_ledger[-2:] if isinstance(planner_action_ledger, list) else [])
+                            if isinstance(x, dict)
+                        ]
+                        recent_net_new_sum = sum(
+                            int(x.get("agentic_net_new_unique_delta", 0)) for x in recent_ledger_window
+                        )
+                        recent_risk_delta_sum = sum(int(x.get("risk_class_delta", 0)) for x in recent_ledger_window)
+                        recent_open_high_risk_delta_sum = sum(
+                            int(x.get("open_high_risk_cluster_delta", 0)) for x in recent_ledger_window
+                        )
+                        recent_gain_sum_2 = sum(int(x) for x in recent_gain_scores[-2:]) if len(recent_gain_scores) >= 2 else 0
+                        if (
+                            len(recent_ledger_window) >= 2
+                            and low_signal_streak >= 2
+                            and recent_open_high_risk_delta_sum <= 0
+                            and recent_risk_delta_sum <= 0
+                            and recent_net_new_sum <= 1
+                            and len(recent_gain_scores) >= 2
+                            and recent_gain_sum_2 <= 1
+                        ):
+                            note(
+                                "llm_decision",
+                                "planner",
+                                "diminishing returns: post-closure marginal signal exhausted; stopping",
+                                agg=agg,
+                            )
+                            trace_item["decision"] = {
+                                "result": "stop",
+                                "reason": "post_closure_low_marginal_signal",
+                            }
+                            trace_item["finished_at"] = time.time()
+                            ai_obj.setdefault("decision_trace", []).append(trace_item)
+                            break
                     if (
                         coverage_debt_open_count <= 0
                         and low_signal_streak >= 3
@@ -3656,6 +3813,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             extra_added += 1
 
                     actions_executed += 1
+                    _validate_browser_discovery_urls(action, entry)
                     if action["tool"] == "httpx" and entry.get("success"):
                         alive = entry.get("data", {}).get("alive")
                         if isinstance(alive, list) and alive:
@@ -3872,6 +4030,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     browser_focus_hits = 0
                     browser_fallback_confidence = ""
                     browser_focused_endpoint_artifacts = 0
+                    browser_discovery_validated_urls: Set[str] = set()
+                    browser_discovery_validation_attempted = False
+                    browser_discovery_validation_success = False
                     if chosen_tool == "browser_use":
                         data_block = entry.get("data") if isinstance(entry.get("data"), dict) else {}
                         observation = data_block.get("observation") if isinstance(data_block.get("observation"), dict) else {}
@@ -3885,11 +4046,48 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         except Exception:
                             browser_focused_endpoint_artifacts = 0
                         browser_fallback_confidence = str(observation.get("fallback_confidence") or "").strip().lower()
+                        validation_block = (
+                            data_block.get("browser_discovery_validation")
+                            if isinstance(data_block.get("browser_discovery_validation"), dict)
+                            else {}
+                        )
+                        browser_discovery_validation_attempted = bool(validation_block.get("attempted"))
+                        browser_discovery_validation_success = bool(validation_block.get("httpx_success"))
+                        validated_urls_raw = (
+                            validation_block.get("validated_urls")
+                            if isinstance(validation_block.get("validated_urls"), list)
+                            else []
+                        )
+                        browser_discovery_validated_urls = {
+                            str(u).strip() for u in validated_urls_raw if isinstance(u, str) and str(u).strip()
+                        }
+                    browser_validated_discovery_unique_delta = 0
+                    browser_unvalidated_discovery_unique_delta = 0
+                    if chosen_tool == "browser_use" and new_agentic_items:
+                        for row in new_agentic_items:
+                            if not isinstance(row, dict):
+                                continue
+                            if str(row.get("tool") or "").strip().lower() != "browser_use":
+                                continue
+                            if str(row.get("type") or "").strip().lower() != "browser_discovery":
+                                continue
+                            ev = str(row.get("evidence") or "").strip()
+                            if ev and ev in browser_discovery_validated_urls:
+                                browser_validated_discovery_unique_delta += 1
+                            else:
+                                browser_unvalidated_discovery_unique_delta += 1
+                    if chosen_tool == "browser_use" and browser_unvalidated_discovery_unique_delta > 0:
+                        # Discovery-only URLs should not earn gain until a status check (httpx) confirms reachability.
+                        gain_score -= int(browser_unvalidated_discovery_unique_delta) * 3
+                        if browser_observation_unique_delta <= 0 and open_high_risk_cluster_delta <= 0:
+                            gain_score = min(gain_score, 0)
+
+                    if chosen_tool == "browser_use":
                         completed = bool(data_block.get("completed"))
                         if browser_discovery_unique_delta > 0 and open_high_risk_cluster_delta <= 0:
                             # Browser-discovery endpoint churn is useful for scope expansion but should not dominate
                             # gain when it does not reduce unresolved high-risk coverage debt.
-                            gain_score -= min(8, int(browser_discovery_unique_delta))
+                            gain_score -= min(8, int(browser_validated_discovery_unique_delta))
                         if (
                             browser_discovery_unique_delta > 0
                             and browser_observation_unique_delta <= 0
@@ -3898,18 +4096,44 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             gain_score = min(gain_score, 0)
                             if chosen_target:
                                 browser_use_fallback_block_targets.add(chosen_target)
-                        if browser_fallback_mode and not completed and open_high_risk_cluster_delta <= 0:
+                        if browser_fallback_mode:
+                            fallback_penalty = 0
+                            if not completed:
+                                fallback_penalty += 3
+                            if browser_fallback_confidence == "low":
+                                fallback_penalty += 3
                             if browser_focus_hits <= 0:
-                                # Discovery-only fallback evidence can create many low-value unique findings.
-                                # Cap net gain so planner pivots instead of looping on same browser surface.
-                                penalty = max(2, min(8, int(agentic_net_new_unique_delta) + 1))
-                                gain_score -= int(penalty)
-                                if gain_score > 0:
-                                    gain_score = 0
+                                fallback_penalty += 2
+                            if fallback_penalty > 0:
+                                gain_score -= int(fallback_penalty)
+                            if not completed or browser_fallback_confidence == "low":
+                                # Down-rank incomplete/low-confidence fallback browser runs regardless
+                                # of focus hits so they don't dominate gain scoring.
+                                fallback_gain_cap = 2
+                                if (
+                                    browser_observation_unique_delta > 0
+                                    and browser_focused_endpoint_artifacts > 0
+                                    and open_high_risk_cluster_delta > 0
+                                ):
+                                    fallback_gain_cap = 8
+                                elif browser_observation_unique_delta > 0:
+                                    fallback_gain_cap = 4
+                                gain_score = min(gain_score, int(fallback_gain_cap))
+                            if (not completed or browser_fallback_confidence == "low") and open_high_risk_cluster_delta <= 0:
+                                gain_score = min(gain_score, 0)
                                 if chosen_target:
                                     browser_use_fallback_block_targets.add(chosen_target)
-                            else:
-                                gain_score -= 1
+                        if (
+                            browser_unvalidated_discovery_unique_delta > 0
+                            and browser_observation_unique_delta <= 0
+                            and browser_security_unique_delta <= 0
+                            and open_high_risk_cluster_delta <= 0
+                        ):
+                            signal = "low"
+                            signal_note = (
+                                "Browser action produced unvalidated discovery-only URLs; "
+                                "httpx validation is required before treating these as meaningful signal."
+                            )
                         if browser_focus_hits > 0 and browser_focused_endpoint_artifacts <= 0 and status == "success":
                             signal_note = (
                                 "Browser action found focus URLs but lacked concrete endpoint artifacts; "
@@ -3918,11 +4142,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if browser_security_unique_delta > 0 and open_high_risk_cluster_delta <= 0:
                             signal = "high"
                             signal_note = "Browser action produced net-new security observations."
-                        if browser_fallback_mode and browser_focus_hits <= 0 and open_high_risk_cluster_delta <= 0:
-                            signal = "medium" if findings_delta > 0 else "low"
+                        if browser_fallback_mode and (not completed or browser_fallback_confidence == "low"):
+                            signal = "medium" if browser_observation_unique_delta > 0 else "low"
                             signal_note = (
-                                "Fallback browser discovery produced low-confidence evidence; "
-                                "deprioritizing repeated actions on same target."
+                                "Fallback browser evidence was incomplete/low-confidence; "
+                                "deprioritizing repeated actions on same target unless independently validated."
                             )
 
                     # Track per-tool/target execution pressure and recent signal trend.
@@ -3986,8 +4210,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "browser_focused_endpoint_artifacts": int(browser_focused_endpoint_artifacts),
                         "browser_fallback_confidence": browser_fallback_confidence,
                         "browser_discovery_unique_delta": int(browser_discovery_unique_delta),
+                        "browser_validated_discovery_unique_delta": int(browser_validated_discovery_unique_delta),
+                        "browser_unvalidated_discovery_unique_delta": int(browser_unvalidated_discovery_unique_delta),
                         "browser_observation_unique_delta": int(browser_observation_unique_delta),
                         "browser_security_unique_delta": int(browser_security_unique_delta),
+                        "browser_discovery_validation_attempted": bool(browser_discovery_validation_attempted),
+                        "browser_discovery_validation_success": bool(browser_discovery_validation_success),
                         "started_at": started_at,
                         "finished_at": finished_at,
                     }
@@ -4039,8 +4267,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "browser_focused_endpoint_artifacts": int(browser_focused_endpoint_artifacts),
                         "browser_fallback_confidence": browser_fallback_confidence,
                         "browser_discovery_unique_delta": int(browser_discovery_unique_delta),
+                        "browser_validated_discovery_unique_delta": int(browser_validated_discovery_unique_delta),
+                        "browser_unvalidated_discovery_unique_delta": int(browser_unvalidated_discovery_unique_delta),
                         "browser_observation_unique_delta": int(browser_observation_unique_delta),
                         "browser_security_unique_delta": int(browser_security_unique_delta),
+                        "browser_discovery_validation_attempted": bool(browser_discovery_validation_attempted),
+                        "browser_discovery_validation_success": bool(browser_discovery_validation_success),
                     }
                     trace_item["critique"] = {
                         "signal": signal,

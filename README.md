@@ -18,7 +18,7 @@
 ![License](https://img.shields.io/badge/License-AGPLv3-blue)
 ![Status](https://img.shields.io/badge/Status-Beta-orange)
 
-> **⚠️ Development Status:** Supabash is in active development. Core CLI and baseline audit workflows are production-usable, while some agentic planning paths, cloud posture checks, and Supabase heuristics remain **beta**. Coverage is improving and behavior may change as reliability and compliance mapping mature.  
+> **⚠️ Development Status:** Supabash is in development. Core CLI and baseline audit workflows are production-usable, while some agentic planning paths, cloud posture checks, and Supabase heuristics remain **beta**. Coverage is improving and behavior may change as reliability and compliance mapping mature.  
 > **Status:** **Beta (stabilization + coverage expansion in progress)**
 
 **Supabash** is an AI-powered agentic security audit tool that generates evidence-backed **Supabash Audit** reports.  
