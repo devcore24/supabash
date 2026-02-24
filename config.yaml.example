@@ -102,6 +102,11 @@ tools:
     session: ""
     profile: ""
     model: ""
+    # Optional: Supabash exports this as BROWSER_USE_API_KEY before running browser-use.
+    # Prefer a lab/test key here if you choose to store it in config.
+    api_key: ""
+    # Optional: read from another env var and export into BROWSER_USE_API_KEY (used when api_key is empty).
+    api_key_env: ""
     allow_deterministic_fallback: true
     deterministic_max_paths: 8
     # Optional command template supports placeholders:

@@ -98,6 +98,11 @@ DEFAULT_CONFIG = {
             "min_steps_success": 1,
             "require_done": True,
             "headless": True,
+            # Optional browser-use cloud API key; Supabash exports it as
+            # BROWSER_USE_API_KEY when invoking the browser-use CLI.
+            "api_key": "",
+            # Optional alternate environment variable name to read when api_key is empty.
+            "api_key_env": "",
             # Optional browser-use session/profile for authenticated workflows.
             "session": "",
             "profile": "",

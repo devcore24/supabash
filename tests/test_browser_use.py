@@ -1,3 +1,5 @@
+import os
+import shutil
 import unittest
 from typing import List
 
@@ -454,6 +456,59 @@ class BrowserUseScannerTests(unittest.TestCase):
         obs = out.get("observation") if isinstance(out, dict) else {}
         self.assertEqual(obs.get("fallback_mode"), "deterministic_probe_on_run_failure")
         self.assertGreaterEqual(int(obs.get("fallback_findings_count") or 0), 1)
+
+
+@unittest.skipUnless(
+    os.getenv("SUPABASH_RUN_LIVE_BROWSER_USE_TEST") == "1",
+    "Set SUPABASH_RUN_LIVE_BROWSER_USE_TEST=1 to run live browser-use integration tests.",
+)
+class BrowserUseScannerLiveIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        if not shutil.which("browser-use"):
+            self.skipTest("browser-use CLI not installed")
+        if not os.getenv("BROWSER_USE_API_KEY"):
+            self.skipTest("BROWSER_USE_API_KEY not set")
+        self.target = os.getenv("SUPABASH_BROWSER_USE_TEST_TARGET", "http://localhost:8080")
+        self.session_name = os.getenv("SUPABASH_BROWSER_USE_TEST_SESSION", "supabash-live-test")
+        self.scanner = BrowserUseScanner()
+
+    def _run_live_scan(self, *, session=None):
+        task = (
+            f"Open {self.target}. Capture the page title and note whether it is reachable. "
+            "Do not log in. Stop after the first useful observation."
+        )
+        return self.scanner.scan(
+            self.target,
+            task=task,
+            max_steps=1,
+            session=session,
+            require_done=False,
+            min_steps_success=0,
+            allow_deterministic_fallback=False,
+        )
+
+    def test_live_browser_use_smoke_without_session(self):
+        out = self._run_live_scan(session=None)
+        self.assertTrue(
+            out.get("success"),
+            (
+                "browser-use no-session live smoke failed. "
+                f"error={out.get('error')!r} raw_output={(out.get('raw_output') or '')[:1200]!r}"
+            ),
+        )
+        self.assertIn("observation", out)
+
+    def test_live_browser_use_smoke_with_session(self):
+        out = self._run_live_scan(session=self.session_name)
+        self.assertTrue(
+            out.get("success"),
+            (
+                "browser-use session live smoke failed (this reproduces Supabash session-path issues if it times out). "
+                f"session={self.session_name!r} error={out.get('error')!r} "
+                f"raw_output={(out.get('raw_output') or '')[:1200]!r}"
+            ),
+        )
+        self.assertIn("observation", out)
 
 
 if __name__ == "__main__":

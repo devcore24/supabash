@@ -282,6 +282,15 @@ class FakeBrowserUseScanner:
         }
 
 
+class FakeBrowserUseEnvCaptureScanner(FakeBrowserUseScanner):
+    def scan(self, target, **kwargs):
+        env_seen = os.getenv("BROWSER_USE_API_KEY")
+        result = super().scan(target, **kwargs)
+        if self.calls:
+            self.calls[-1]["env_browser_use_api_key"] = env_seen
+        return result
+
+
 class FakeBrowserUseFallbackScanner:
     def __init__(self):
         self.calls = []
@@ -1701,6 +1710,52 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         kwargs = call.get("kwargs", {})
         session_name = str(kwargs.get("session") or "")
         self.assertTrue(session_name.startswith("supabash-"))
+
+    def test_agentic_browser_use_exports_configured_api_key_and_restores_env(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseEnvCaptureScanner()
+        scanners["browser_use"] = browser
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        original_tool_config = orchestrator._tool_config
+
+        def _tool_config_override(name):
+            if str(name or "").strip().lower() == "browser_use":
+                cfg = dict(original_tool_config(name) or {})
+                cfg.update(
+                    {
+                        "enabled": True,
+                        "timeout_seconds": 900,
+                        "max_steps": 25,
+                        "headless": True,
+                        "api_key": "config-browser-use-test-key",
+                        "api_key_env": "",
+                    }
+                )
+                return cfg
+            return original_tool_config(name)
+
+        orchestrator._tool_config = _tool_config_override
+        output = artifact_path("ai_audit_browser_use_config_api_key_export.json")
+
+        with patch.dict(os.environ, {"BROWSER_USE_API_KEY": "shell-original-key"}, clear=False):
+            orchestrator.run(
+                "localhost",
+                output,
+                llm_plan=True,
+                max_actions=2,
+                use_llm=True,
+                compliance_profile="soc2",
+                run_browser_use=True,
+            )
+            self.assertEqual(os.environ.get("BROWSER_USE_API_KEY"), "shell-original-key")
+
+        self.assertTrue(browser.calls)
+        first_call = browser.calls[0]
+        self.assertEqual(first_call.get("env_browser_use_api_key"), "config-browser-use-test-key")
 
 
 if __name__ == "__main__":

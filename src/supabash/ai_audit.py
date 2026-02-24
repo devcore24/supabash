@@ -1780,6 +1780,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 planner_browser_task = str(args.get("task") or "").strip() or None
                                 browser_model = str(args.get("model") or browser_cfg_local.get("model") or "").strip() or None
                                 browser_command = str(browser_cfg_local.get("command") or "").strip() or None
+                                browser_api_key = str(browser_cfg_local.get("api_key") or "").strip() or None
+                                browser_api_key_env = str(browser_cfg_local.get("api_key_env") or "").strip()
+                                if not browser_api_key and browser_api_key_env:
+                                    browser_api_key = str(os.getenv(browser_api_key_env) or "").strip() or None
                                 browser_session = (
                                     str(args.get("browser_session") or browser_cfg_local.get("session") or "").strip() or None
                                 )
@@ -1926,24 +1930,38 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                         ),
                                     )
                                 elif tool == "browser_use":
+                                    def _run_browser_use_with_config_key() -> Dict[str, Any]:
+                                        key_to_export = str(browser_api_key or "").strip()
+                                        prev_browser_use_api_key = os.environ.get("BROWSER_USE_API_KEY")
+                                        set_browser_use_api_key = bool(key_to_export)
+                                        if set_browser_use_api_key:
+                                            os.environ["BROWSER_USE_API_KEY"] = key_to_export
+                                        try:
+                                            return self.scanners["browser_use"].scan(
+                                                target,
+                                                task=browser_task,
+                                                max_steps=browser_steps,
+                                                headless=browser_headless,
+                                                model=browser_model,
+                                                session=browser_session,
+                                                profile=browser_profile,
+                                                command=browser_command,
+                                                require_done=browser_require_done,
+                                                min_steps_success=browser_min_steps_success,
+                                                allow_deterministic_fallback=browser_allow_fallback,
+                                                deterministic_max_paths=browser_deterministic_max_paths,
+                                                cancel_event=cancel_event,
+                                                timeout_seconds=self._tool_timeout_seconds("browser_use"),
+                                            )
+                                        finally:
+                                            if set_browser_use_api_key:
+                                                if prev_browser_use_api_key is None:
+                                                    os.environ.pop("BROWSER_USE_API_KEY", None)
+                                                else:
+                                                    os.environ["BROWSER_USE_API_KEY"] = prev_browser_use_api_key
                                     entry = self._run_tool(
                                         tool,
-                                        lambda: self.scanners["browser_use"].scan(
-                                            target,
-                                            task=browser_task,
-                                            max_steps=browser_steps,
-                                            headless=browser_headless,
-                                            model=browser_model,
-                                            session=browser_session,
-                                            profile=browser_profile,
-                                            command=browser_command,
-                                            require_done=browser_require_done,
-                                            min_steps_success=browser_min_steps_success,
-                                            allow_deterministic_fallback=browser_allow_fallback,
-                                            deterministic_max_paths=browser_deterministic_max_paths,
-                                            cancel_event=cancel_event,
-                                            timeout_seconds=self._tool_timeout_seconds("browser_use"),
-                                        ),
+                                        _run_browser_use_with_config_key,
                                     )
                                 elif tool == "nikto":
                                     try:
