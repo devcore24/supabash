@@ -275,6 +275,35 @@ class TestAuditOrchestrator(unittest.TestCase):
         if blocked:
             self.assertTrue(any(str(item.get("reason") or "") == "object_store_listing_candidate" for item in blocked))
 
+    def test_sqlmap_blocks_static_asset_candidate(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        normalized = orch._normalize_target("localhost")
+        plan = orch._build_sqlmap_targets(
+            normalized,
+            web_targets=["http://localhost:3000"],
+            results=[
+                {
+                    "tool": "katana",
+                    "data": {
+                        "urls": [
+                            "http://localhost:3000/_next/static/chunks/webpack.js?v=1772296488194",
+                            "http://localhost:3000/search?query=test",
+                        ],
+                        "findings": [
+                            "http://localhost:3000/_next/static/chunks/webpack.js?v=1772296488194",
+                            "http://localhost:3000/search?query=test",
+                        ],
+                    },
+                }
+            ],
+            return_plan=True,
+        )
+        targets = plan.get("targets") if isinstance(plan.get("targets"), list) else []
+        self.assertIn("http://localhost:3000/search?query=test", targets)
+        self.assertNotIn("http://localhost:3000/_next/static/chunks/webpack.js?v=1772296488194", targets)
+        blocked = plan.get("blocked_candidates") if isinstance(plan.get("blocked_candidates"), list) else []
+        self.assertTrue(any(str(item.get("reason") or "") == "static_asset_candidate" for item in blocked))
+
     def test_sqlmap_blocks_low_trust_nuclei_probe_only_candidate(self):
         class FakeNmapSinglePort:
             def scan(self, target, ports=None, arguments=None, **kwargs):

@@ -2712,6 +2712,76 @@ class AuditOrchestrator:
                 matched += 1
         return matched > 0
 
+    def _sqlmap_candidate_looks_static_asset(self, url: str) -> bool:
+        text = str(url or "").strip()
+        if not text:
+            return False
+        try:
+            parsed = urlparse(text)
+        except Exception:
+            return False
+        path = str(parsed.path or "").strip().lower()
+        query = str(parsed.query or "").strip()
+        if not path or not query:
+            return False
+        static_exts = {
+            ".css",
+            ".js",
+            ".mjs",
+            ".map",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".svg",
+            ".ico",
+            ".woff",
+            ".woff2",
+            ".ttf",
+            ".eot",
+            ".otf",
+            ".webp",
+            ".avif",
+            ".mp4",
+            ".webm",
+            ".mp3",
+            ".wav",
+        }
+        static_dirs = (
+            "/_next/static/",
+            "/static/",
+            "/assets/",
+            "/dist/",
+            "/build/",
+            "/public/",
+        )
+        looks_static_path = any(path.endswith(ext) for ext in static_exts) or any(segment in path for segment in static_dirs)
+        if not looks_static_path:
+            return False
+        pairs = parse_qsl(query, keep_blank_values=True)
+        if not pairs:
+            return False
+        cache_buster_keys = {
+            "v",
+            "ver",
+            "version",
+            "hash",
+            "h",
+            "t",
+            "ts",
+            "timestamp",
+            "build",
+            "rev",
+            "cb",
+            "cache",
+            "_",
+        }
+        for raw_key, _raw_val in pairs:
+            key = unquote_plus(str(raw_key or "")).strip().lower()
+            if key and key not in cache_buster_keys:
+                return False
+        return True
+
     def _sqlmap_source_low_trust(
         self,
         *,
@@ -3020,6 +3090,15 @@ class AuditOrchestrator:
                 query = str(parsed_item.query or "")
             except Exception:
                 query = ""
+            if self._sqlmap_candidate_looks_static_asset(item) and item != explicit_norm:
+                blocked_rows.append(
+                    {
+                        "url": item,
+                        "reason": "static_asset_candidate",
+                        "sources": row.get("sources", []),
+                    }
+                )
+                continue
             if self._sqlmap_query_looks_object_store_like(query) and item != explicit_norm:
                 blocked_rows.append(
                     {

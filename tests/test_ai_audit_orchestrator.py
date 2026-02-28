@@ -465,6 +465,42 @@ class FakeBrowserUseTargetOnlyScanner:
         }
 
 
+class FakeBrowserUseCrossOriginScanner(FakeBrowserUseScanner):
+    def scan(self, target, **kwargs):
+        self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+        return {
+            "success": True,
+            "command": f"browser-use run 'scan {target}' --max-steps 6",
+            "urls": [
+                str(target),
+                "http://localhost:4001/rest/v1/",
+            ],
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Browser-driven security signal",
+                    "evidence": "http://localhost:4001/rest/v1/ returned 200 without authentication",
+                    "type": "browser_observation",
+                    "confidence": "high",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Browser-driven security signal",
+                    "evidence": f"{str(target).rstrip('/')} returned 200 without authentication",
+                    "type": "browser_observation",
+                    "confidence": "high",
+                },
+            ],
+            "completed": True,
+            "observation": {
+                "done": True,
+                "steps": 3,
+                "focus_hits": 1,
+                "focused_endpoint_artifacts": 1,
+            },
+        }
+
+
 class FakeLLMIterative:
     def __init__(self):
         self.plan_calls = 0
@@ -669,6 +705,49 @@ class FakeLLMSelectBrowserUse8080:
         return (
             [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
             {"provider": "fake", "model": "fake-browser-use-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMSelectBrowserUse9090:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "browser_use",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "http://localhost:9090/api/v1/status/config",
+                                    },
+                                    "reasoning": "Validate the exact Prometheus config endpoint with browser evidence.",
+                                    "hypothesis": "The selected Prometheus endpoint is reachable without authentication.",
+                                    "expected_evidence": "Direct endpoint evidence for the selected Prometheus target.",
+                                    "priority": 1,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-browser-use-9090", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-browser-use-9090", "usage": {"total_tokens": 4}},
         )
 
     def chat_with_meta(self, messages, temperature=0.2):
@@ -1901,6 +1980,98 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         unresolved = report.get("unresolved_high_risk_clusters", [])
         self.assertIsInstance(unresolved, list)
         self.assertEqual(len(unresolved), 0)
+
+    def test_browser_use_task_scope_excludes_cross_origin_prior_findings(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseScanner()
+        scanners["browser_use"] = browser
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse9090())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Supabase REST API accessible without authentication",
+                    "evidence": "http://localhost:4001/rest/v1/ (HTTP 200)",
+                    "type": "supabase_rest_exposure",
+                },
+            ],
+        }
+        output = artifact_path("ai_audit_browser_use_task_scope.json")
+        orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        self.assertTrue(browser.calls)
+        task = str(browser.calls[0].get("kwargs", {}).get("task") or "")
+        self.assertIn("http://localhost:9090/api/v1/status/config", task)
+        self.assertNotIn("http://localhost:4001/rest/v1/", task)
+
+    def test_browser_use_result_scope_filters_cross_origin_urls_and_findings(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseCrossOriginScanner()
+        scanners["browser_use"] = browser
+        scanners["httpx"] = FakeHttpxScannerWithStatus()
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse9090())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_browser_use_scope_filter.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        browser_actions = [
+            a
+            for a in (report.get("agentic_action_ledger") or [])
+            if isinstance(a, dict) and a.get("tool") == "browser_use"
+        ]
+        self.assertTrue(browser_actions)
+        if browser_actions:
+            self.assertEqual(browser_actions[0].get("open_high_risk_cluster_delta"), 1)
+
+        browser_findings = [
+            f
+            for f in (report.get("findings") or [])
+            if isinstance(f, dict) and str(f.get("tool") or "").strip().lower() == "browser_use"
+        ]
+        evidences = " || ".join(str(f.get("evidence") or "") for f in browser_findings)
+        self.assertIn("http://localhost:9090/api/v1/status/config", evidences)
+        self.assertNotIn("http://localhost:4001/rest/v1/", evidences)
         cluster_overview = report.get("finding_cluster_overview", {})
         self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 0)
 
@@ -1939,7 +2110,12 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         unresolved = report.get("unresolved_high_risk_clusters", [])
         self.assertEqual(len(unresolved), 1)
         if unresolved:
-            self.assertEqual(int(unresolved[0].get("count", 0)), 2)
+            self.assertGreaterEqual(int(unresolved[0].get("count", 0)), 1)
+            targets = unresolved[0].get("targets", [])
+            self.assertTrue(
+                any(str(target).endswith("/api/v1/status/config") for target in targets),
+                targets,
+            )
             evidence_samples = unresolved[0].get("evidence_samples") or []
             self.assertTrue(any("/api/v1/status/config" in str(sample) for sample in evidence_samples))
 

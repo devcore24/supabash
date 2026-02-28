@@ -1296,11 +1296,84 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     )
                     return any(pattern in text for pattern in patterns)
 
+                def _urls_from_text(value: Any) -> List[str]:
+                    text = str(value or "").strip()
+                    if not text:
+                        return []
+                    return [str(x).rstrip(".,;)]>}\"'") for x in re.findall(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE)]
+
+                def _normalize_browser_scope_path(value: Any) -> str:
+                    text = str(value or "").strip() or "/"
+                    if "?" in text:
+                        path_part, query_part = text.split("?", 1)
+                        path_part = path_part.rstrip("/") or "/"
+                        return f"{path_part}?{query_part}"
+                    return text.rstrip("/") or "/"
+
+                def _browser_paths_related(target_path: str, candidate_path: str) -> bool:
+                    a = _normalize_browser_scope_path(target_path)
+                    b = _normalize_browser_scope_path(candidate_path)
+                    if a == b:
+                        return True
+                    a_path = a.split("?", 1)[0]
+                    b_path = b.split("?", 1)[0]
+                    if a_path == "/" or b_path == "/":
+                        return True
+                    if b_path.startswith(a_path.rstrip("/") + "/"):
+                        return True
+                    if a_path.startswith(b_path.rstrip("/") + "/"):
+                        return True
+                    return False
+
+                def _finding_matches_browser_scope(item: Dict[str, Any], *, target_url: str) -> bool:
+                    if not isinstance(item, dict):
+                        return False
+                    base_hp = _web_target_host_port_key(target_url)
+                    if base_hp is None:
+                        return False
+                    try:
+                        parsed_target = urlparse(str(target_url or "").strip())
+                        target_path = _normalize_browser_scope_path(
+                            f"{str(parsed_target.path or '/').strip() or '/'}"
+                            + (f"?{parsed_target.query}" if parsed_target.query else "")
+                        )
+                    except Exception:
+                        target_path = "/"
+
+                    matched_same_origin = False
+                    candidate_texts = [
+                        item.get("target"),
+                        item.get("evidence"),
+                        item.get("title"),
+                    ]
+                    for raw in candidate_texts:
+                        text = str(raw or "").strip()
+                        if not text:
+                            continue
+                        direct = [text] if text.startswith(("http://", "https://")) else []
+                        for url in direct + _urls_from_text(text):
+                            hp = _web_target_host_port_key(url)
+                            if hp != base_hp:
+                                continue
+                            matched_same_origin = True
+                            try:
+                                parsed = urlparse(url)
+                                candidate_path = _normalize_browser_scope_path(
+                                    f"{str(parsed.path or '/').strip() or '/'}"
+                                    + (f"?{parsed.query}" if parsed.query else "")
+                                )
+                            except Exception:
+                                candidate_path = "/"
+                            if _browser_paths_related(target_path, candidate_path):
+                                return True
+                    if matched_same_origin:
+                        return True
+                    combined = " ".join(str(x or "").strip() for x in candidate_texts).lower()
+                    return target_url.lower() in combined
+
                 def _target_related_findings_for_browser(target_url: str, limit: int = 6) -> List[Dict[str, str]]:
                     selected: List[Dict[str, str]] = []
                     seen: Set[str] = set()
-                    host_port = _web_target_host_port_key(target_url)
-                    host = host_port[0] if host_port else ""
                     findings_all: List[Dict[str, Any]] = []
                     try:
                         collected = self._collect_findings(agg)
@@ -1315,8 +1388,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         evidence = str(item.get("evidence") or "").strip()
                         severity = str(item.get("severity") or "INFO").strip().upper()
                         risk_class = str(item.get("risk_class") or "").strip().lower()
-                        text = f"{title} {evidence}".lower()
-                        if host and host not in text and target_url.lower() not in text:
+                        if not _finding_matches_browser_scope(item, target_url=target_url):
                             continue
                         key = f"{severity}|{title}|{risk_class}"
                         if key in seen:
@@ -1372,6 +1444,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         [
                             "Execution guidance:",
                             "- Start at the target URL and map reachable same-origin paths/forms.",
+                            "- Stay on the target origin (same host:port) unless the selected target itself redirects there.",
                             "- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.",
                             "- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.",
                             "- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.",
@@ -3608,6 +3681,82 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if status_map:
                             validation_block["status_by_url"] = status_map
 
+                def _restrict_browser_use_result_scope(
+                    action: Dict[str, Any],
+                    entry: Dict[str, Any],
+                ) -> None:
+                    if not isinstance(action, dict) or not isinstance(entry, dict):
+                        return
+                    if str(action.get("tool") or "").strip().lower() != "browser_use":
+                        return
+                    if not bool(entry.get("success")):
+                        return
+                    data = entry.get("data") if isinstance(entry.get("data"), dict) else None
+                    if not isinstance(data, dict):
+                        return
+                    base_target = str(entry.get("target") or (action.get("arguments") or {}).get("target") or "").strip()
+                    base_hp = _web_target_host_port_key(base_target)
+                    if base_hp is None:
+                        return
+
+                    urls_raw = data.get("urls")
+                    if isinstance(urls_raw, list):
+                        filtered_urls: List[str] = []
+                        removed_urls = 0
+                        seen_urls: Set[str] = set()
+                        for raw in urls_raw:
+                            url = str(raw or "").strip()
+                            if not url:
+                                continue
+                            hp = _web_target_host_port_key(url)
+                            if hp is not None and hp != base_hp:
+                                removed_urls += 1
+                                continue
+                            if url in seen_urls:
+                                continue
+                            seen_urls.add(url)
+                            filtered_urls.append(url)
+                        data["urls"] = filtered_urls
+                        if removed_urls > 0:
+                            data["scope_filter"] = {
+                                "same_origin_only": True,
+                                "removed_cross_origin_urls": int(removed_urls),
+                            }
+
+                    findings_raw = data.get("findings")
+                    if isinstance(findings_raw, list):
+                        filtered_findings: List[Dict[str, Any]] = []
+                        removed_findings = 0
+                        for item in findings_raw:
+                            if not isinstance(item, dict):
+                                continue
+                            explicit_urls: List[str] = []
+                            for field_name in ("evidence", "title", "target"):
+                                raw_value = item.get(field_name)
+                                if isinstance(raw_value, str) and raw_value.strip().startswith(("http://", "https://")):
+                                    explicit_urls.append(raw_value.strip())
+                                explicit_urls.extend(_urls_from_text(raw_value))
+                            explicit_urls = [str(x).strip() for x in explicit_urls if str(x).strip()]
+                            if explicit_urls:
+                                same_origin_seen = False
+                                off_origin_seen = False
+                                for url in explicit_urls:
+                                    hp = _web_target_host_port_key(url)
+                                    if hp == base_hp:
+                                        same_origin_seen = True
+                                    elif hp is not None:
+                                        off_origin_seen = True
+                                if off_origin_seen and not same_origin_seen:
+                                    removed_findings += 1
+                                    continue
+                            filtered_findings.append(item)
+                        data["findings"] = filtered_findings
+                        if removed_findings > 0:
+                            scope_filter = data.get("scope_filter") if isinstance(data.get("scope_filter"), dict) else {}
+                            scope_filter["removed_cross_origin_findings"] = int(removed_findings)
+                            scope_filter["same_origin_only"] = True
+                            data["scope_filter"] = scope_filter
+
                 while actions_executed < int(max_actions):
                     if canceled():
                         break
@@ -4180,6 +4329,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             extra_added += 1
 
                     actions_executed += 1
+                    _restrict_browser_use_result_scope(action, entry)
                     _validate_browser_discovery_urls(action, entry)
                     if action["tool"] == "httpx" and entry.get("success"):
                         alive = entry.get("data", {}).get("alive")
