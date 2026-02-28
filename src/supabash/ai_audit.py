@@ -1107,6 +1107,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         parsed = urlparse(parse_input)
                         scheme = str(parsed.scheme or "http").strip().lower() or "http"
                         host = str(parsed.hostname or "").strip().lower()
+                        if host in {"localhost", "::1"}:
+                            host = "127.0.0.1"
                         if not host:
                             return None
                         port = int(parsed.port or (443 if scheme == "https" else 80))
@@ -1146,20 +1148,38 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         parsed = urlparse(parse_input)
                         scheme = str(parsed.scheme or "http").strip().lower() or "http"
                         host = str(parsed.hostname or "").strip().lower()
+                        if host in {"localhost", "::1"}:
+                            host = "127.0.0.1"
                         if scheme not in ("http", "https") or not host:
                             return None
                         port = int(parsed.port or (443 if scheme == "https" else 80))
                     except Exception:
                         return None
-                    if _preferred_allowed_web_target((host, port)) is None:
+                    preferred = _preferred_allowed_web_target((host, port))
+                    if preferred is None:
                         return None
+                    chosen_scheme = scheme
+                    chosen_host = host
+                    chosen_port = port
+                    try:
+                        preferred_parsed = urlparse(preferred)
+                        preferred_scheme = str(preferred_parsed.scheme or "").strip().lower()
+                        preferred_host = str(preferred_parsed.hostname or "").strip().lower() or host
+                        preferred_port = int(
+                            preferred_parsed.port or (443 if preferred_scheme == "https" else 80)
+                        )
+                        chosen_scheme = preferred_scheme or scheme
+                        chosen_host = preferred_host or host
+                        chosen_port = preferred_port
+                    except Exception:
+                        pass
                     path = str(parsed.path or "")
                     if not path and (text.endswith("/") or parse_input.endswith("/")):
                         path = "/"
                     query = str(parsed.query or "")
-                    default_port = 443 if scheme == "https" else 80
-                    netloc = host if port == default_port else f"{host}:{port}"
-                    return urlunparse((scheme, netloc, path, "", query, ""))
+                    default_port = 443 if chosen_scheme == "https" else 80
+                    netloc = chosen_host if chosen_port == default_port else f"{chosen_host}:{chosen_port}"
+                    return urlunparse((chosen_scheme, netloc, path, "", query, ""))
 
                 def _canonicalize_web_action_target(tool: str, target: str) -> str:
                     text = str(target or "").strip()
@@ -1207,6 +1227,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return None
                     tool_name = str(tool or "").strip().lower()
                     if tool_name == "browser_use":
+                        preserved = _preserve_allowed_web_target_path(text)
+                        if preserved:
+                            return preserved
                         if text in allowed_web_targets:
                             return text
                         parse_input = text if "://" in text else f"http://{text}"
@@ -1214,15 +1237,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             parsed = urlparse(parse_input)
                             scheme = str(parsed.scheme or "").strip().lower()
                             host = str(parsed.hostname or "").strip().lower()
+                            if host in {"localhost", "::1"}:
+                                host = "127.0.0.1"
                             if scheme not in ("http", "https") or not host:
                                 return None
                             port = int(parsed.port or (443 if scheme == "https" else 80))
                         except Exception:
                             return None
                         host_port = (host, port)
-                        if _preferred_allowed_web_target(host_port) is None:
+                        preferred = _preferred_allowed_web_target(host_port)
+                        if preferred is None:
                             return None
-                        return parse_input
+                        return preserved or preferred
                     if tool_name == "sqlmap":
                         if text in sqlmap_targets:
                             normalized_candidate = self._normalize_sqlmap_candidate_url(text)
@@ -2478,6 +2504,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if not parsed.scheme:
                             return None
                         host = str(parsed.hostname or "").strip().lower()
+                        if host in {"localhost", "::1"}:
+                            host = "127.0.0.1"
                         if not host:
                             return None
                         port = int(parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80))
@@ -2626,6 +2654,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 if "://" in text:
                                     parsed = urlparse(text)
                                     host = str(parsed.hostname or "").strip().lower()
+                                    if host in {"localhost", "::1"}:
+                                        host = "127.0.0.1"
                                     if host:
                                         hosts.add(host)
                                     port_val = parsed.port
@@ -2640,12 +2670,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             if ":" in host_part:
                                 maybe_host, maybe_port = host_part.rsplit(":", 1)
                                 if maybe_host:
+                                    if maybe_host in {"localhost", "::1"}:
+                                        maybe_host = "127.0.0.1"
                                     hosts.add(maybe_host)
                                     try:
                                         host_ports.add(f"{maybe_host}:{int(maybe_port)}")
                                         continue
                                     except Exception:
                                         pass
+                            if host_part in {"localhost", "::1"}:
+                                host_part = "127.0.0.1"
                             hosts.add(host_part)
                     return {"hosts": hosts, "host_ports": host_ports}
 
@@ -2663,10 +2697,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if host_port:
                             host = str(host_port[0]).strip().lower()
                             pair = f"{host}:{int(host_port[1])}"
-                            if host in hosts or pair in host_ports:
+                            if pair in host_ports:
+                                return True
+                            if not host_ports and host in hosts:
                                 return True
                         else:
                             host_only = str(target).split("/", 1)[0].strip().lower().strip("[]")
+                            if host_only in {"localhost", "::1"}:
+                                host_only = "127.0.0.1"
                             if host_only in hosts:
                                 return True
                     if tool == "sslscan":
@@ -2676,7 +2714,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             return True
                         if host and resolved_port is not None and f"{host}:{int(resolved_port)}" in host_ports:
                             return True
-                    if target and target in _high_risk_web_targets_now():
+                    if target and not host_ports and target in _high_risk_web_targets_now():
                         return True
                     return False
 
@@ -2792,16 +2830,42 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 _add(base)
 
                     # 4) High-risk web targets from current evidence graph.
+                    unresolved_hints = _open_high_risk_target_hints_now()
+                    unresolved_hosts = unresolved_hints.get("hosts", set()) if isinstance(unresolved_hints, dict) else set()
+                    unresolved_host_ports = (
+                        unresolved_hints.get("host_ports", set()) if isinstance(unresolved_hints, dict) else set()
+                    )
+
+                    def _target_matches_unresolved_surface(value: str) -> bool:
+                        text = str(value or "").strip()
+                        if not text:
+                            return False
+                        hp = _target_host_port_key(text)
+                        if hp:
+                            host = str(hp[0]).strip().lower()
+                            pair = f"{host}:{int(hp[1])}"
+                            if pair in unresolved_host_ports:
+                                return True
+                            if not unresolved_host_ports and host in unresolved_hosts:
+                                return True
+                            return False
+                        host_only = str(text).split("/", 1)[0].strip().lower().strip("[]")
+                        if host_only in {"localhost", "::1"}:
+                            host_only = "127.0.0.1"
+                        return bool(host_only) and host_only in unresolved_hosts and not unresolved_host_ports
+
                     risk_scores = _target_risk_scores_now()
                     ranked_risk_targets = [
                         t for _, t in sorted([(int(v), k) for k, v in risk_scores.items() if int(v) > 0], key=lambda x: (-x[0], x[1]))
                     ]
                     for target in ranked_risk_targets[:8]:
-                        _add(target)
+                        if _target_matches_unresolved_surface(target):
+                            _add(target)
 
                     if not out:
                         for target in allowed_web_targets[:6]:
-                            _add(target)
+                            if _target_matches_unresolved_surface(target):
+                                _add(target)
                     return out[:12]
 
                 def _build_coverage_debt_pivot_actions(

@@ -935,6 +935,10 @@ class TestAuditOrchestrator(unittest.TestCase):
         }
 
         orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        original_tool_enabled = orch._tool_enabled
+        orch._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "nuclei" else original_tool_enabled(tool, default)
+        )
         output = artifact_path("audit_broad_nuclei_single_pass.json")
         report = orch.run("localhost", output, use_llm=False)
 
@@ -990,6 +994,10 @@ class TestAuditOrchestrator(unittest.TestCase):
         }
 
         orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        original_tool_enabled = orch._tool_enabled
+        orch._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "nuclei" else original_tool_enabled(tool, default)
+        )
         output = artifact_path("audit_normal_mode_broad_nuclei_cap.json")
         original_tool_config = orch._tool_config
 
@@ -1051,6 +1059,10 @@ class TestAuditOrchestrator(unittest.TestCase):
         }
 
         orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        original_tool_enabled = orch._tool_enabled
+        orch._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "nuclei" else original_tool_enabled(tool, default)
+        )
         output = artifact_path("audit_normal_mode_no_broad_nuclei_cap.json")
         report = orch.run("localhost", output, use_llm=False, mode="normal", nuclei_rate_limit=777)
 

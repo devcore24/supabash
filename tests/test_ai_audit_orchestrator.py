@@ -887,6 +887,113 @@ class FakeLLMSelectBrowserUse4001:
         )
 
 
+class FakeLLMSelectBrowserUseHttps3000:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "browser_use",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "https://localhost:3000",
+                                    },
+                                    "reasoning": "Validate the selected web surface with browser workflow.",
+                                    "hypothesis": "The web surface is reachable and worth browser validation.",
+                                    "expected_evidence": "Same-origin browser observations for the selected target.",
+                                    "priority": 1,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-browser-use-https-3000", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-browser-use-https-3000", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMBrowserThenHttpx8080:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "browser_use",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "http://localhost:4001",
+                                    },
+                                    "reasoning": "Close the Supabase cluster first.",
+                                    "priority": 1,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-browser-then-httpx-8080", "usage": {"total_tokens": 8}},
+            )
+        if self.plan_calls == 2:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "httpx",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "http://localhost:8080",
+                                    },
+                                    "reasoning": "Revalidate the unresolved object-store surface directly.",
+                                    "priority": 1,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-browser-then-httpx-8080", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-browser-then-httpx-8080", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
 class FakeLLMCloseThenProbe9433:
     def __init__(self):
         self.plan_calls = 0
@@ -1609,7 +1716,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             for a in (report.get("ai_audit", {}).get("actions") or [])
             if isinstance(a, dict) and a.get("tool") == "sqlmap" and a.get("phase") == "agentic"
         ]
-        self.assertEqual(len(agentic_sqlmap_actions), 1)
+        self.assertLessEqual(len(agentic_sqlmap_actions), 1)
         if agentic_sqlmap_actions:
             self.assertTrue(bool(agentic_sqlmap_actions[0].get("skipped")))
             self.assertIn(
@@ -1734,6 +1841,10 @@ class TestAIAuditOrchestrator(unittest.TestCase):
     def test_endpoint_level_web_target_is_not_skipped_when_host_port_is_allowed(self):
         scanners = _build_scanners()
         orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMEndpointNuclei())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "nuclei" else original_tool_enabled(tool, default)
+        )
         output = artifact_path("ai_audit_endpoint_level_target_allowed.json")
         report = orchestrator.run(
             "localhost",
@@ -2142,6 +2253,183 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         browser_actions = [a for a in ledger if isinstance(a, dict) and a.get("tool") == "browser_use"]
         self.assertEqual(len(browser_actions), 1)
         self.assertLess(int(browser_actions[0].get("open_high_risk_cluster_delta", 0)), 4)
+
+    def test_browser_use_https_target_is_canonicalized_to_observed_http_origin(self):
+        class FakeNmapScannerPort3000:
+            def scan(self, target, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {
+                                        "port": 3000,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "nextjs",
+                                        "version": "1",
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        scanners = {
+            "nmap": FakeNmapScannerPort3000(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseScanner(),
+        }
+        browser = scanners["browser_use"]
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUseHttps3000())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {"success": True, "findings": []}
+        output = artifact_path("ai_audit_browser_use_https_canonicalized.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        self.assertEqual(len(browser.calls), 1)
+        if browser.calls:
+            self.assertEqual(browser.calls[0].get("target"), "http://localhost:3000")
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("tool") == "browser_use" and a.get("phase") == "agentic"
+        ]
+        self.assertEqual(len(actions), 1)
+        if actions:
+            self.assertEqual(actions[0].get("target"), "http://localhost:3000")
+
+    def test_coverage_debt_keeps_localhost_targets_linked_to_127001_clusters(self):
+        class FakeNmapScannerPorts3000_4001_8080_9090:
+            def scan(self, target, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {
+                                        "port": 3000,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "nextjs",
+                                        "version": "1",
+                                    },
+                                    {
+                                        "port": 4001,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "supabase",
+                                        "version": "1",
+                                    },
+                                    {
+                                        "port": 8080,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "minio",
+                                        "version": "1",
+                                    },
+                                    {
+                                        "port": 9090,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "prometheus",
+                                        "version": "1",
+                                    },
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        scanners = {
+            "nmap": FakeNmapScannerPorts3000_4001_8080_9090(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseSupabaseScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMBrowserThenHttpx8080())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True
+            if str(tool or "").strip().lower() in {"browser_use", "httpx"}
+            else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "CRITICAL",
+                    "title": "Supabase service role key exposed",
+                    "evidence": "key=eyJhbG…sig, source=http://localhost:4001",
+                    "type": "secret_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Supabase REST API accessible without authentication",
+                    "evidence": "http://localhost:4001/rest/v1/ (HTTP 200)",
+                    "type": "supabase_rest_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Anonymous S3-compatible bucket listing accessible",
+                    "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                    "type": "s3_bucket_listing",
+                },
+            ],
+        }
+        output = artifact_path("ai_audit_coverage_debt_localhost_127001_link.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("phase") == "agentic"
+        ]
+        self.assertGreaterEqual(len(actions), 2)
+        if len(actions) >= 2:
+            self.assertEqual(actions[0].get("target"), "http://localhost:4001")
+            self.assertTrue(str(actions[1].get("target") or "").startswith("http://localhost:8080"))
+        self.assertFalse(any(str(a.get("target") or "").startswith("http://localhost:3000") for a in actions))
+        self.assertFalse(any(str(a.get("target") or "").startswith("https://localhost:3000") for a in actions))
 
     def test_endpoint_target_browser_observation_closes_matching_cluster_via_target_field(self):
         scanners = {

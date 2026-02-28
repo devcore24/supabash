@@ -4597,20 +4597,23 @@ class AuditOrchestrator:
                         return results
 
                 if include_nuclei:
-                    note("tool_start", "nuclei", f"Running nuclei on {web_target}")
-                    nuclei_entry = self._run_tool_if_enabled(
-                        "nuclei",
-                        lambda: self.scanners["nuclei"].scan(
-                            web_target,
-                            templates=nuclei_templates,
-                            rate_limit=nuclei_rate_limit or None,
-                            tags=nuclei_tags,
-                            severity=nuclei_severity,
-                            cancel_event=cancel_event,
-                            timeout_seconds=self._tool_timeout_seconds("nuclei"),
-                        ),
-                    )
-                    note("tool_end", "nuclei", f"Finished nuclei on {web_target}")
+                    if self._tool_enabled("nuclei", default=True):
+                        note("tool_start", "nuclei", f"Running nuclei on {web_target}")
+                        nuclei_entry = self._run_tool_if_enabled(
+                            "nuclei",
+                            lambda: self.scanners["nuclei"].scan(
+                                web_target,
+                                templates=nuclei_templates,
+                                rate_limit=nuclei_rate_limit or None,
+                                tags=nuclei_tags,
+                                severity=nuclei_severity,
+                                cancel_event=cancel_event,
+                                timeout_seconds=self._tool_timeout_seconds("nuclei"),
+                            ),
+                        )
+                        note("tool_end", "nuclei", f"Finished nuclei on {web_target}")
+                    else:
+                        nuclei_entry = self._skip_disabled("nuclei")
                     results.append(tag(nuclei_entry))
                     if canceled() or (isinstance(nuclei_entry.get("data"), dict) and nuclei_entry["data"].get("canceled")):
                         return results
@@ -4704,8 +4707,8 @@ class AuditOrchestrator:
                 else:
                     results.append(tag(self._skip_disabled("whatweb")))
                 if include_nuclei:
-                    note("tool_start", "nuclei", f"Running nuclei on {web_target}")
                     if self._tool_enabled("nuclei", default=True):
+                        note("tool_start", "nuclei", f"Running nuclei on {web_target}")
                         futures[
                             ex.submit(
                                 self._run_tool,
