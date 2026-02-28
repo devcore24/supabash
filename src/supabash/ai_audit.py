@@ -3011,6 +3011,38 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             classes.add("general_security_signal")
                         return classes
 
+                    def _planner_cluster_key(
+                        dedup_key: str,
+                        severity: str,
+                        severity_rank: int,
+                        risk_class: str,
+                        title: str,
+                        evidence: str,
+                        host: str,
+                        path: str,
+                    ) -> str:
+                        # Planner clusters should be coarser than raw finding dedup keys so
+                        # one endpoint-level high-risk exposure does not inflate into multiple
+                        # open coverage-debt clusters across complementary tools.
+                        if severity_rank < 4 or not host or not path:
+                            return dedup_key
+                        candidate_risk_classes = _risk_match_classes(risk_class, title, evidence)
+                        canonical_order = (
+                            "secret_exposure",
+                            "data_plane_exposure",
+                            "unauthenticated_exposure",
+                            "security_misconfiguration",
+                            "known_vulnerability",
+                            "vulnerability_signal",
+                            "transport_security",
+                            "general_security_signal",
+                        )
+                        rc = next(
+                            (name for name in canonical_order if name in candidate_risk_classes),
+                            str(risk_class or "").strip().lower() or "general_security_signal",
+                        )
+                        return f"planner_cluster|{severity}|{rc}|{host}|{path}"
+
                     for finding in findings or []:
                         if not isinstance(finding, dict):
                             continue
@@ -3032,12 +3064,24 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             target_label = host
                             if path:
                                 target_label = f"{target_label}{path}"
-                        cluster = by_key.get(dedup_key)
+                        severity_rank = int(self._severity_rank(sev))
+                        cluster_key = _planner_cluster_key(
+                            dedup_key,
+                            sev,
+                            severity_rank,
+                            risk_class,
+                            title,
+                            evidence,
+                            host,
+                            path,
+                        )
+                        cluster = by_key.get(cluster_key)
                         if cluster is None:
                             cluster = {
-                                "cluster_id": dedup_key,
+                                "cluster_id": cluster_key,
+                                "source_dedup_keys": set(),
                                 "severity": sev,
-                                "severity_rank": int(self._severity_rank(sev)),
+                                "severity_rank": severity_rank,
                                 "risk_class": risk_class or "general_security_signal",
                                 "title": title,
                                 "count": 0,
@@ -3046,11 +3090,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 "targets": set(),
                                 "evidence_samples": [],
                             }
-                            by_key[dedup_key] = cluster
+                            by_key[cluster_key] = cluster
+                        cluster["source_dedup_keys"].add(dedup_key)
                         cluster["count"] = int(cluster.get("count", 0)) + 1
-                        if int(self._severity_rank(sev)) > int(cluster.get("severity_rank", 0)):
+                        if severity_rank > int(cluster.get("severity_rank", 0)):
                             cluster["severity"] = sev
-                            cluster["severity_rank"] = int(self._severity_rank(sev))
+                            cluster["severity_rank"] = severity_rank
                         if tool:
                             cluster["tools"].add(tool)
                         if phase:
@@ -3113,6 +3158,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "risk_class": item.get("risk_class"),
                             "title": item.get("title"),
                             "count": int(item.get("count", 0)),
+                            "source_dedup_keys": sorted(
+                                str(x) for x in item.get("source_dedup_keys", set()) if str(x).strip()
+                            )[:8],
                             "tools": tools[:6],
                             "phases": phases,
                             "targets": targets[:6],
@@ -3542,7 +3590,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             url = str(row.get("url") or "").strip()
                             if not url or url in status_map:
                                 continue
-                            status_map[url] = row.get("status-code")
+                            status = row.get("status_code")
+                            if status is None:
+                                status = row.get("status-code")
+                            if status is None:
+                                status = row.get("status")
+                            if status is None:
+                                continue
+                            status_map[url] = status
                         if status_map:
                             validation_block["status_by_url"] = status_map
 

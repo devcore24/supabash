@@ -101,6 +101,17 @@ class FakeHttpxScanner:
         return {"success": True, "command": "httpx -silent ...", "alive": alive}
 
 
+class FakeHttpxScannerWithStatus:
+    def scan(self, targets, **kwargs):
+        alive = [str(x) for x in (targets or [])]
+        return {
+            "success": True,
+            "command": "httpx -silent ...",
+            "alive": alive,
+            "results": [{"url": url, "status_code": 200} for url in alive],
+        }
+
+
 class FakeWhatwebScanner:
     def scan(self, target, **kwargs):
         return {
@@ -1892,6 +1903,99 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertEqual(len(unresolved), 0)
         cluster_overview = report.get("finding_cluster_overview", {})
         self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 0)
+
+    def test_high_risk_findings_on_same_endpoint_merge_into_single_planner_cluster(self):
+        scanners = {
+            "nmap": FakeNmapScannerSingleWebPort(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScannerWithHighFindings(),
+            "gobuster": FakeGobusterScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMStopWithAction())
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:8080/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_prometheus_high_cluster_merge.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=0,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        cluster_overview = report.get("finding_cluster_overview", {})
+        self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 1)
+        unresolved = report.get("unresolved_high_risk_clusters", [])
+        self.assertEqual(len(unresolved), 1)
+        if unresolved:
+            self.assertEqual(int(unresolved[0].get("count", 0)), 2)
+            evidence_samples = unresolved[0].get("evidence_samples") or []
+            self.assertTrue(any("/api/v1/status/config" in str(sample) for sample in evidence_samples))
+
+    def test_browser_use_validation_records_httpx_status_by_url(self):
+        scanners = {
+            "nmap": FakeNmapScannerSingleWebPort(),
+            "httpx": FakeHttpxScannerWithStatus(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseCorrelationScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse8080())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:8080/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_browser_use_validation_status_map.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        browser_entries = [
+            r
+            for r in (report.get("results") or [])
+            if isinstance(r, dict) and r.get("tool") == "browser_use" and r.get("phase") == "agentic"
+        ]
+        self.assertTrue(browser_entries)
+        validation_block = (
+            browser_entries[0].get("data", {}).get("browser_discovery_validation")
+            if isinstance(browser_entries[0].get("data"), dict)
+            else None
+        )
+        self.assertIsInstance(validation_block, dict)
+        if isinstance(validation_block, dict):
+            self.assertTrue(validation_block.get("httpx_success"))
+            self.assertEqual(int(validation_block.get("validated_count", 0)), 1)
+            status_by_url = validation_block.get("status_by_url") or {}
+            self.assertEqual(status_by_url.get("http://localhost:8080/api/v1/status/config"), 200)
 
     def test_post_closure_low_value_followups_are_stopped_before_execution(self):
         scanners = {
