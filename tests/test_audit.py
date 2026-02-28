@@ -239,6 +239,42 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertTrue(any("search?query=test" in str(c) for c in sqlmap_scanner.calls))
         cleanup_artifact(output)
 
+    def test_extract_urls_from_text_strips_trailing_evidence_suffix(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        urls = orch._extract_urls_from_text(
+            "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult"
+        )
+        self.assertEqual(urls, ["http://localhost:8080/?list-type=2"])
+
+    def test_sqlmap_blocks_object_store_listing_candidate(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        normalized = orch._normalize_target("localhost")
+        plan = orch._build_sqlmap_targets(
+            normalized,
+            web_targets=["http://localhost:8080"],
+            results=[
+                {
+                    "tool": "readiness_probe",
+                    "target": "http://localhost:8080/?list-type=2",
+                    "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                    "data": {
+                        "findings": [
+                            {
+                                "title": "Anonymous S3-compatible bucket listing accessible",
+                                "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                            }
+                        ]
+                    },
+                }
+            ],
+            return_plan=True,
+        )
+        self.assertEqual(plan.get("targets"), [])
+        blocked = plan.get("blocked_candidates") if isinstance(plan.get("blocked_candidates"), list) else []
+        self.assertTrue(blocked)
+        if blocked:
+            self.assertTrue(any(str(item.get("reason") or "") == "object_store_listing_candidate" for item in blocked))
+
     def test_sqlmap_blocks_low_trust_nuclei_probe_only_candidate(self):
         class FakeNmapSinglePort:
             def scan(self, target, ports=None, arguments=None, **kwargs):
@@ -378,6 +414,66 @@ class TestAuditOrchestrator(unittest.TestCase):
             )
         cleanup_artifact(output)
 
+    def test_disabled_katana_does_not_emit_progress_run_messages(self):
+        class FakeNmapSinglePort:
+            def scan(self, target, ports=None, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 3000, "protocol": "tcp", "state": "open", "service": "http"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxEcho:
+            def scan(self, targets, **kwargs):
+                return {"success": True, "command": "httpx test", "alive": [str(t) for t in (targets or [])]}
+
+        class FakeKatana:
+            def crawl(self, target, **kwargs):
+                return {"success": True, "command": "katana test", "urls": [str(target)]}
+
+        scanners = {
+            "nmap": FakeNmapSinglePort(),
+            "httpx": FakeHttpxEcho(),
+            "whatweb": FakeScanner("whatweb"),
+            "nuclei": FakeScanner("nuclei"),
+            "gobuster": FakeScanner("gobuster"),
+            "katana": FakeKatana(),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+
+        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+
+        def tool_enabled(tool, default=True):
+            if str(tool) == "katana":
+                return False
+            return default
+
+        orch._tool_enabled = tool_enabled
+        output = artifact_path("audit_disabled_katana_progress.json")
+        events = []
+
+        def progress_cb(**kwargs):
+            events.append((kwargs.get("event"), kwargs.get("tool"), kwargs.get("message")))
+
+        report = orch.run("localhost", output, use_llm=False, progress_cb=progress_cb)
+        katana_messages = [str(msg or "") for event, tool, msg in events if str(tool or "") == "katana"]
+        self.assertFalse(any("Running katana" in msg for msg in katana_messages))
+        self.assertFalse(any("Finished katana" in msg for msg in katana_messages))
+        katana_entries = [
+            r for r in (report.get("results") or []) if isinstance(r, dict) and str(r.get("tool") or "").strip().lower() == "katana"
+        ]
+        if katana_entries:
+            self.assertTrue(all(bool(entry.get("skipped")) for entry in katana_entries))
+        cleanup_artifact(output)
+
     def test_tls_candidate_ports_include_nonstandard_tls_ports(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
         ports = orch._tls_candidate_ports_from_nmap(
@@ -505,6 +601,79 @@ class TestAuditOrchestrator(unittest.TestCase):
         )
         self.assertEqual(host, "localhost")
         self.assertEqual(path, "/api/v1/status/config")
+
+    def test_readiness_probe_does_not_escalate_object_store_high_on_root_200_alone(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+
+        def fake_probe(url, timeout_seconds=3):
+            return (200, "<html><body>ok</body></html>", None)
+
+        with patch.object(AuditOrchestrator, "_http_probe_status", side_effect=fake_probe):
+            out = orch._run_readiness_probe("localhost", ["http://localhost:8080"], [8080])
+
+        findings = out.get("findings") if isinstance(out, dict) else []
+        self.assertFalse(
+            any(
+                isinstance(f, dict)
+                and str(f.get("type") or "") == "s3_bucket_listing"
+                and str(f.get("severity") or "").upper() == "HIGH"
+                for f in findings
+            )
+        )
+
+    def test_readiness_probe_escalates_object_store_high_on_verified_listing_marker(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+
+        def fake_probe(url, timeout_seconds=3):
+            if "list-type=2" in str(url):
+                return (200, "<ListBucketResult><Name>public</Name></ListBucketResult>", None)
+            return (200, "", None)
+
+        with patch.object(AuditOrchestrator, "_http_probe_status", side_effect=fake_probe):
+            out = orch._run_readiness_probe("localhost", ["http://localhost:8080"], [8080])
+
+        findings = out.get("findings") if isinstance(out, dict) else []
+        self.assertTrue(
+            any(
+                isinstance(f, dict)
+                and str(f.get("type") or "") == "s3_bucket_listing"
+                and str(f.get("severity") or "").upper() == "HIGH"
+                for f in findings
+            )
+        )
+
+    def test_readiness_probe_records_rejected_object_store_listing_without_high_escalation(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+
+        def fake_probe(url, timeout_seconds=3):
+            if "list-type=2" in str(url):
+                return (
+                    403,
+                    "<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>",
+                    None,
+                )
+            return (200, "", None)
+
+        with patch.object(AuditOrchestrator, "_http_probe_status", side_effect=fake_probe):
+            out = orch._run_readiness_probe("localhost", ["http://localhost:8080"], [8080])
+
+        findings = out.get("findings") if isinstance(out, dict) else []
+        self.assertTrue(
+            any(
+                isinstance(f, dict)
+                and str(f.get("type") or "") == "s3_listing_rejected"
+                and str(f.get("severity") or "").upper() == "INFO"
+                for f in findings
+            )
+        )
+        self.assertFalse(
+            any(
+                isinstance(f, dict)
+                and str(f.get("type") or "") == "s3_bucket_listing"
+                and str(f.get("severity") or "").upper() == "HIGH"
+                for f in findings
+            )
+        )
 
     def test_handles_failure(self):
         scanners = {
@@ -748,6 +917,58 @@ class TestAuditOrchestrator(unittest.TestCase):
             r for r in report.get("results", []) if isinstance(r, dict) and r.get("tool") == "nuclei" and not r.get("skipped")
         ]
         self.assertEqual(len(nuclei_entries), 1)
+        cleanup_artifact(output)
+
+    def test_normal_mode_caps_broad_nuclei_rate_limit(self):
+        class FakeNmapMultiWeb:
+            def scan(self, target, ports=None, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 3000, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 3001, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 5050, "protocol": "tcp", "state": "open", "service": "http"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxAlive:
+            def scan(self, targets, **kwargs):
+                return {"success": True, "command": "httpx test", "alive": [str(t) for t in targets]}
+
+        class CaptureNuclei:
+            def __init__(self):
+                self.calls = []
+
+            def scan(self, target, **kwargs):
+                self.calls.append({"target": target, "kwargs": dict(kwargs)})
+                return {"success": True, "command": "nuclei test", "findings": []}
+
+        nuclei_scanner = CaptureNuclei()
+        scanners = {
+            "nmap": FakeNmapMultiWeb(),
+            "httpx": FakeHttpxAlive(),
+            "whatweb": FakeScanner("whatweb"),
+            "nuclei": nuclei_scanner,
+            "gobuster": FakeScanner("gobuster"),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+
+        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        output = artifact_path("audit_normal_mode_broad_nuclei_cap.json")
+        report = orch.run("localhost", output, use_llm=False, mode="normal", nuclei_rate_limit=10000)
+
+        self.assertEqual(len(nuclei_scanner.calls), 1)
+        if nuclei_scanner.calls:
+            self.assertEqual(int(nuclei_scanner.calls[0]["kwargs"].get("rate_limit") or 0), 25)
+        notes = report.get("summary_notes") if isinstance(report.get("summary_notes"), list) else []
+        self.assertTrue(any("broad nuclei rate capped" in str(note or "").lower() for note in notes))
         cleanup_artifact(output)
 
     def test_readiness_probe_receives_all_confirmed_web_targets(self):

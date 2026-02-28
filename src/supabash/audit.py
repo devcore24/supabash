@@ -59,6 +59,8 @@ from supabash.aggressive_caps import apply_aggressive_caps
 
 logger = setup_logger(__name__)
 
+DEFAULT_NORMAL_BROAD_NUCLEI_RATE_CAP = 25
+
 COMPLIANCE_PROFILE_ALIASES = {
     "pci": "compliance_pci",
     "pci_dss": "compliance_pci",
@@ -1446,7 +1448,10 @@ class AuditOrchestrator:
             return "known_vulnerability"
         if any(k in joined for k in ("tls", "ssl", "cipher", "certificate", "cleartext", "https")):
             return "transport_security"
-        if any(k in joined for k in ("without authentication", "unauthenticated", "publicly accessible", "exposed", "open port")):
+        if any(
+            k in joined
+            for k in ("without authentication", "unauthenticated", "anonymous", "publicly accessible", "exposed", "open port")
+        ):
             return "unauthenticated_exposure"
         if any(k in joined for k in ("redis", "postgres", "database", "rest api", "rpc", "rls")):
             return "data_plane_exposure"
@@ -2615,8 +2620,6 @@ class AuditOrchestrator:
         if not text:
             return []
         urls: List[str] = []
-        if text.startswith(("http://", "https://")):
-            urls.append(text)
         for m in re.finditer(r"https?://[^\s'\"<>]+", text):
             raw = str(m.group(0) or "").strip()
             if not raw:
@@ -2683,6 +2686,34 @@ class AuditOrchestrator:
                 return True
         return False
 
+    def _sqlmap_query_looks_object_store_like(self, query: str) -> bool:
+        q = str(query or "").strip()
+        if not q:
+            return False
+        pairs = parse_qsl(q, keep_blank_values=True)
+        if not pairs:
+            return False
+        object_store_keys = {
+            "list-type",
+            "prefix",
+            "delimiter",
+            "marker",
+            "continuation-token",
+            "max-keys",
+            "uploads",
+            "location",
+            "policy",
+            "versioning",
+            "tagging",
+            "acl",
+        }
+        matched = 0
+        for raw_key, _raw_val in pairs:
+            key = unquote_plus(str(raw_key or "")).strip().lower()
+            if key in object_store_keys:
+                matched += 1
+        return matched > 0
+
     def _sqlmap_source_low_trust(
         self,
         *,
@@ -2702,6 +2733,8 @@ class AuditOrchestrator:
         try:
             parsed = urlparse(str(candidate_url or "").strip())
             if self._sqlmap_query_looks_probe_like(str(parsed.query or "")):
+                return True
+            if self._sqlmap_query_looks_object_store_like(str(parsed.query or "")):
                 return True
         except Exception:
             return False
@@ -2980,6 +3013,20 @@ class AuditOrchestrator:
                     {
                         "url": item,
                         "reason": "previous_nonviable_sqlmap_target",
+                        "sources": row.get("sources", []),
+                    }
+                )
+                continue
+            try:
+                parsed_item = urlparse(item)
+                query = str(parsed_item.query or "")
+            except Exception:
+                query = ""
+            if self._sqlmap_query_looks_object_store_like(query) and item != explicit_norm:
+                blocked_rows.append(
+                    {
+                        "url": item,
+                        "reason": "object_store_listing_candidate",
                         "sources": row.get("sources", []),
                     }
                 )
@@ -3289,6 +3336,88 @@ class AuditOrchestrator:
         except Exception as e:
             return None, None, str(e)
 
+    def _web_target_available(self, url: str, timeout_seconds: int = 3) -> Tuple[bool, str]:
+        status, _body, error = self._http_probe_status(url, timeout_seconds=max(1, int(timeout_seconds)))
+        if status is not None:
+            return True, f"http_{int(status)}"
+        if error:
+            return False, str(error).strip()
+        return False, "probe_unavailable"
+
+    def _baseline_broad_nuclei_rate_limit(
+        self,
+        requested_rate: int,
+        *,
+        mode: str,
+        target_count: int,
+    ) -> int:
+        rate = int(requested_rate or 0)
+        if str(mode or "").strip().lower() != "normal":
+            return rate
+        if int(target_count or 0) <= 1:
+            return rate
+        cfg = self._tool_config("nuclei")
+        cap_raw = cfg.get("normal_mode_broad_rate_limit") if isinstance(cfg, dict) else None
+        try:
+            cap = int(cap_raw)
+        except Exception:
+            cap = DEFAULT_NORMAL_BROAD_NUCLEI_RATE_CAP
+        cap = max(1, cap)
+        if rate <= 0:
+            return cap
+        return min(rate, cap)
+
+    def _classify_object_store_probe(
+        self,
+        *,
+        url: str,
+        status: Optional[int],
+        body: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        if status is None:
+            return None
+        text = str(body or "")
+        low = text.lower()
+        if not low:
+            return None
+
+        verified_listing_markers = ("listallmybucketsresult", "listbucketresult")
+        auth_denial_markers = ("accessdenied", "invalidaccesskeyid", "signaturedoesnotmatch", "allaccessdisabled")
+        object_store_markers = verified_listing_markers + auth_denial_markers + (
+            "<error>",
+            "nosuchbucket",
+            "minio",
+        )
+
+        evidence_suffix = f"{url} (HTTP {int(status)})"
+
+        if 200 <= int(status) < 300 and any(marker in low for marker in verified_listing_markers):
+            marker = "ListBucketResult" if "listbucketresult" in low else "ListAllMyBucketsResult"
+            return {
+                "severity": "HIGH",
+                "title": "Anonymous S3-compatible bucket listing accessible",
+                "evidence": f"{evidence_suffix}; marker={marker}",
+                "type": "s3_bucket_listing",
+            }
+
+        if any(marker in low for marker in auth_denial_markers):
+            marker = next((m for m in auth_denial_markers if m in low), "accessdenied")
+            return {
+                "severity": "INFO",
+                "title": "S3-compatible object-store listing request rejected",
+                "evidence": f"{evidence_suffix}; marker={marker}; anonymous listing not verified",
+                "type": "s3_listing_rejected",
+            }
+
+        if 200 <= int(status) < 300 and any(marker in low for marker in object_store_markers):
+            return {
+                "severity": "INFO",
+                "title": "S3-compatible object-store surface detected",
+                "evidence": f"{evidence_suffix}; object-store markers observed but anonymous listing not verified",
+                "type": "s3_surface_detected",
+            }
+        return None
+
     def _run_readiness_probe(
         self,
         scan_host: str,
@@ -3428,17 +3557,38 @@ class AuditOrchestrator:
                             "error": error,
                         }
                     )
-                    if status is not None and 200 <= status < 300 and isinstance(body, str) and body:
-                        body_l = body.lower()
-                        if "listallmybucketsresult" in body_l or "listbucketresult" in body_l:
-                            findings.append(
-                                {
-                                    "severity": "HIGH",
-                                    "title": "Anonymous S3-compatible bucket listing accessible",
-                                    "evidence": f"{base_url}/ (HTTP {status})",
-                                    "type": "s3_bucket_listing",
-                                }
-                            )
+                    object_store_finding = self._classify_object_store_probe(
+                        url=f"{base_url}/",
+                        status=status,
+                        body=body,
+                    )
+                    if isinstance(object_store_finding, dict):
+                        findings.append(object_store_finding)
+
+                for probe_url in (
+                    f"{base_url}/?list-type=2",
+                    f"{base_url}/?prefix=",
+                    f"{base_url}/?delimiter=/",
+                ):
+                    if probe_url in seen_urls:
+                        continue
+                    seen_urls.add(probe_url)
+                    status, body, error = self._http_probe_status(probe_url, timeout_seconds=3)
+                    checks.append(
+                        {
+                            "name": "http_probe_object_store",
+                            "url": probe_url,
+                            "status": status,
+                            "error": error,
+                        }
+                    )
+                    object_store_finding = self._classify_object_store_probe(
+                        url=probe_url,
+                        status=status,
+                        body=body,
+                    )
+                    if isinstance(object_store_finding, dict):
+                        findings.append(object_store_finding)
 
                 for path, title, severity, finding_type in probe_paths:
                     probe_url = f"{base_url}{path}"
@@ -4437,19 +4587,22 @@ class AuditOrchestrator:
                         results.append(tag(ffuf_entry))
 
                     if self._has_scanner("katana"):
-                        note("tool_start", "katana", f"Running katana on {web_target} (crawl)")
-                        katana_entry = self._run_tool_if_enabled(
-                            "katana",
-                            lambda: self.scanners["katana"].crawl(
-                                web_target,
-                                depth=int(self._tool_config("katana").get("depth", 3) or 3),
-                                concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
-                                cancel_event=cancel_event,
-                                timeout_seconds=self._tool_timeout_seconds("katana"),
-                            ),
-                        )
+                        if self._tool_enabled("katana", default=True):
+                            note("tool_start", "katana", f"Running katana on {web_target} (crawl)")
+                            katana_entry = self._run_tool_if_enabled(
+                                "katana",
+                                lambda: self.scanners["katana"].crawl(
+                                    web_target,
+                                    depth=int(self._tool_config("katana").get("depth", 3) or 3),
+                                    concurrency=int(self._tool_config("katana").get("concurrency", 10) or 10),
+                                    cancel_event=cancel_event,
+                                    timeout_seconds=self._tool_timeout_seconds("katana"),
+                                ),
+                            )
+                            note("tool_end", "katana", f"Finished katana on {web_target}")
+                        else:
+                            katana_entry = self._skip_disabled("katana")
                         results.append(tag(katana_entry))
-                        note("tool_end", "katana", f"Finished katana on {web_target}")
                 return results
 
             # Parallel web tooling
@@ -4573,13 +4726,25 @@ class AuditOrchestrator:
             )
             if len(deduped_targets) <= 1:
                 return None
+            broad_rate_limit = self._baseline_broad_nuclei_rate_limit(
+                nuclei_rate_limit,
+                mode=mode,
+                target_count=len(deduped_targets),
+            )
+            if int(broad_rate_limit or 0) > 0 and int(broad_rate_limit or 0) != int(nuclei_rate_limit or 0):
+                agg.setdefault("summary_notes", []).append(
+                    (
+                        "Normal-mode broad nuclei rate capped from "
+                        f"{int(nuclei_rate_limit or 0)} to {int(broad_rate_limit)} for safer multi-target baseline coverage."
+                    )
+                )
             note("tool_start", "nuclei", f"Running nuclei broad pass on {len(deduped_targets)} targets")
             entry = self._run_tool(
                 "nuclei",
                 lambda: self.scanners["nuclei"].scan(
                     deduped_targets,
                     templates=nuclei_templates,
-                    rate_limit=nuclei_rate_limit or None,
+                    rate_limit=broad_rate_limit or None,
                     tags=nuclei_tags,
                     severity=nuclei_severity,
                     cancel_event=cancel_event,
@@ -4588,6 +4753,7 @@ class AuditOrchestrator:
             )
             entry["target_scope"] = "broad"
             entry["targets"] = deduped_targets
+            entry["rate_limit_used"] = broad_rate_limit or None
             note("tool_end", "nuclei", "Finished nuclei broad pass")
             return entry
 
@@ -5035,6 +5201,12 @@ class AuditOrchestrator:
                 deep_targets = deep_web_targets_for_run()
                 for idx, target_url in enumerate(deep_targets):
                     include_content_discovery = idx == 0
+                    target_alive, target_health_reason = self._web_target_available(target_url, timeout_seconds=3)
+                    if not target_alive:
+                        agg.setdefault("summary_notes", []).append(
+                            f"Skipped deep web follow-up on {target_url}: target unavailable after baseline probes ({target_health_reason})."
+                        )
+                        continue
                     for entry in run_web_tools(
                         target_url,
                         include_content_discovery=include_content_discovery,

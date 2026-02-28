@@ -3,6 +3,8 @@ import re
 import shlex
 import shutil
 from urllib.parse import urljoin, urlparse
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 from typing import Any, Dict, List, Optional, Set
 
 from supabash.logger import setup_logger
@@ -601,6 +603,12 @@ class BrowserUseScanner:
         meaningful_artifacts = 0
         focus_hits = 0
         focused_endpoint_artifacts = 0
+        focus_urls = self._extract_task_focus_urls(
+            target_url,
+            objective_text or "",
+            max_urls=max(2, min(int(max_paths), 24)),
+        )
+        focus_url_set = set(focus_urls)
 
         open_root = self._run_cli_json(base_cmd + ["open", target_url], cancel_event=cancel_event, timeout=timeout)
         probe_steps += 1
@@ -635,12 +643,23 @@ class BrowserUseScanner:
                 confidence="low",
             )
 
-        focus_urls = self._extract_task_focus_urls(
+        root_status, root_body, root_content_type, _root_error = self._http_probe_response(
             target_url,
-            objective_text or "",
-            max_urls=max(2, min(int(max_paths), 24)),
+            timeout_seconds=min(5, max(2, int(timeout))),
         )
-        focus_url_set = set(focus_urls)
+        added = self._extract_response_signals(
+            target_url,
+            status=root_status,
+            body=root_body,
+            content_type=root_content_type,
+            findings=findings,
+            seen_findings=seen_findings,
+        )
+        if added > 0:
+            meaningful_artifacts += int(added)
+            if target_url in focus_url_set:
+                focused_endpoint_artifacts += int(added)
+
         candidates = self._derive_probe_urls(
             target_url,
             root_html,
@@ -698,6 +717,22 @@ class BrowserUseScanner:
                 meaningful_artifacts += 1
                 if candidate in focus_url_set:
                     focused_endpoint_artifacts += 1
+            response_status, response_body, response_content_type, _response_error = self._http_probe_response(
+                candidate,
+                timeout_seconds=min(5, max(2, int(timeout))),
+            )
+            added = self._extract_response_signals(
+                candidate,
+                status=response_status,
+                body=response_body,
+                content_type=response_content_type,
+                findings=findings,
+                seen_findings=seen_findings,
+            )
+            if added > 0:
+                meaningful_artifacts += int(added)
+                if candidate in focus_url_set:
+                    focused_endpoint_artifacts += int(added)
 
         for u, html in list(html_cache.items()):
             self._extract_html_signals(u, html, findings, seen_findings)
@@ -943,6 +978,91 @@ class BrowserUseScanner:
                 confidence="high",
             )
 
+    def _extract_response_signals(
+        self,
+        url: str,
+        *,
+        status: Optional[int],
+        body: Optional[str],
+        content_type: str,
+        findings: List[Dict[str, Any]],
+        seen_findings: Set[str],
+    ) -> int:
+        if status is None:
+            return 0
+        low = str(body or "").lower()
+        parsed = urlparse(str(url or "").strip())
+        path = str(parsed.path or "/").lower()
+        query = str(parsed.query or "").lower()
+        ct = str(content_type or "").lower()
+        before = len(findings)
+
+        listing_markers = ("listallmybucketsresult", "listbucketresult")
+        auth_denial_markers = ("accessdenied", "invalidaccesskeyid", "signaturedoesnotmatch", "allaccessdisabled")
+        object_store_probe = path == "/" or any(token in query for token in ("list-type=2", "prefix=", "delimiter=/"))
+
+        if 200 <= int(status) < 300 and any(marker in low for marker in listing_markers):
+            marker = "ListBucketResult" if "listbucketresult" in low else "ListAllMyBucketsResult"
+            self._append_browser_finding(
+                findings,
+                seen_findings,
+                severity="HIGH",
+                title="Anonymous S3-compatible bucket listing verified in browser workflow",
+                evidence=(
+                    f"{url} returned S3-compatible listing content without explicit authentication workflow "
+                    f"(HTTP {int(status)}; marker={marker})."
+                ),
+                confidence="high",
+            )
+        elif object_store_probe and any(marker in low for marker in auth_denial_markers):
+            marker = next((m for m in auth_denial_markers if m in low), "accessdenied")
+            self._append_browser_finding(
+                findings,
+                seen_findings,
+                severity="INFO",
+                title="S3-compatible listing probe rejected by auth controls",
+                evidence=f"{url} returned auth-denial object-store markers (HTTP {int(status)}; marker={marker}).",
+                confidence="high",
+            )
+
+        if "/api/v1/status/config" in path and 200 <= int(status) < 300:
+            if any(token in low for token in ("scrape_configs", "prometheus", "remote_write", "alertmanagers")):
+                self._append_browser_finding(
+                    findings,
+                    seen_findings,
+                    severity="HIGH",
+                    title="Unauthenticated configuration exposure verified in browser workflow",
+                    evidence=(
+                        f"{url} returned configuration-like content without explicit authentication workflow "
+                        f"(HTTP {int(status)})."
+                    ),
+                    confidence="high",
+                )
+
+        if path.endswith("/metrics") and 200 <= int(status) < 300:
+            if any(token in low for token in ("# help", "# type", "process_cpu_seconds_total", "go_gc_duration_seconds")):
+                self._append_browser_finding(
+                    findings,
+                    seen_findings,
+                    severity="MEDIUM",
+                    title="Unauthenticated metrics exposure verified in browser workflow",
+                    evidence=f"{url} returned metrics-style plaintext without explicit authentication workflow (HTTP {int(status)}).",
+                    confidence="high",
+                )
+
+        # Low-noise hint for focused non-HTML API/object-store endpoints that returned useful content.
+        if 200 <= int(status) < 300 and low and ("json" in ct or "xml" in ct or "text/plain" in ct):
+            if path.endswith("/api/v1/status/config") or object_store_probe:
+                self._append_browser_finding(
+                    findings,
+                    seen_findings,
+                    severity="INFO",
+                    title="Focused endpoint returned non-HTML content in browser workflow",
+                    evidence=f"{url} returned {content_type or 'non-HTML content'} (HTTP {int(status)}).",
+                    confidence="medium",
+                )
+        return len(findings) - before
+
     def _append_browser_finding(
         self,
         findings: List[Dict[str, Any]],
@@ -971,6 +1091,33 @@ class BrowserUseScanner:
                 "confidence": str(confidence or "medium").strip().lower()[:16] or "medium",
             }
         )
+
+    def _http_probe_response(
+        self,
+        url: str,
+        *,
+        timeout_seconds: int = 5,
+    ) -> tuple[Optional[int], Optional[str], str, Optional[str]]:
+        request = Request(url, headers={"User-Agent": "supabash-browser-use-fallback/1.0"})
+        try:
+            with urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
+                status = int(response.getcode())
+                content_type = str(response.headers.get("Content-Type") or "").strip()
+                body = response.read(4096).decode("utf-8", errors="ignore")
+                return status, body, content_type, None
+        except HTTPError as e:
+            status = int(getattr(e, "code", 0) or 0) or None
+            content_type = str(getattr(e, "headers", {}).get("Content-Type") or "").strip()
+            body = ""
+            try:
+                body = (e.read() or b"").decode("utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            return status, body, content_type, None
+        except (URLError, TimeoutError, OSError) as e:
+            return None, None, "", str(e)
+        except Exception as e:
+            return None, None, "", str(e)
 
     def _looks_like_embedded_authority_path(self, path: str) -> bool:
         text = str(path or "").strip()

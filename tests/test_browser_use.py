@@ -337,6 +337,55 @@ class BrowserUseScannerTests(unittest.TestCase):
             )
         )
 
+    def test_extract_response_signals_detects_verified_object_store_listing(self):
+        scanner = BrowserUseScanner()
+        findings = []
+        seen = set()
+
+        added = scanner._extract_response_signals(
+            "http://example.test/?list-type=2",
+            status=200,
+            body="<ListBucketResult><Name>public</Name></ListBucketResult>",
+            content_type="application/xml",
+            findings=findings,
+            seen_findings=seen,
+        )
+
+        self.assertGreaterEqual(added, 1)
+        self.assertTrue(
+            any(
+                isinstance(f, dict)
+                and "Anonymous S3-compatible bucket listing verified in browser workflow"
+                in str(f.get("title") or "")
+                and str(f.get("type") or "") == "browser_observation"
+                for f in findings
+            )
+        )
+
+    def test_extract_response_signals_detects_rejected_object_store_listing(self):
+        scanner = BrowserUseScanner()
+        findings = []
+        seen = set()
+
+        added = scanner._extract_response_signals(
+            "http://example.test/?list-type=2",
+            status=403,
+            body="<Error><Code>AccessDenied</Code></Error>",
+            content_type="application/xml",
+            findings=findings,
+            seen_findings=seen,
+        )
+
+        self.assertGreaterEqual(added, 1)
+        self.assertTrue(
+            any(
+                isinstance(f, dict)
+                and "S3-compatible listing probe rejected by auth controls" in str(f.get("title") or "")
+                and str(f.get("severity") or "").upper() == "INFO"
+                for f in findings
+            )
+        )
+
     def test_scan_retries_without_session_after_socket_timeout(self):
         run_timeout = CommandResult(
             command="browser-use --json --session audit-session run task --max-steps 2",

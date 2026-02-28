@@ -2994,7 +2994,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             classes.add("known_vulnerability")
                         if any(
                             k in joined
-                            for k in ("without authentication", "unauthenticated", "publicly accessible", "exposed", "open port")
+                            for k in (
+                                "without authentication",
+                                "unauthenticated",
+                                "anonymous",
+                                "publicly accessible",
+                                "exposed",
+                                "open port",
+                            )
                         ):
                             classes.add("unauthenticated_exposure")
                         if any(k in joined for k in ("tls", "ssl", "cipher", "certificate", "cleartext", "https")):
