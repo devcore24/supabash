@@ -39,7 +39,7 @@ The agentic phase only allows tools that:
 - Match the target type (web, domain, SMB, TLS, container, etc.)
 - Respect opt‑in flags (e.g., `nikto`)
 - Respect runtime gates (for example `browser_use` is allowed by default when available, and can be disabled with `--no-browser-use`)
-- Respect tool credentials/runtime requirements (for `browser_use`, set `BROWSER_USE_API_KEY` in the same shell/session running `supabash`)
+- Respect tool credentials/runtime requirements (for `browser_use`, Supabash can use `tools.browser_use.api_key`, `tools.browser_use.api_key_env`, or `BROWSER_USE_API_KEY` from the running shell)
 - Respect browser-use runtime controls (`tools.browser_use.require_done`, `tools.browser_use.min_steps_success`) so incomplete browser runs are rejected
 
 ### 3) Tool calls are schema‑constrained
@@ -83,6 +83,15 @@ For `browser_use` actions, Supabash composes an evidence-aware task brief that i
 
 After execution, browser observations (completion status, steps, findings/URLs) are added back to run state so the next planner iteration sees what was already tried and what evidence was produced.
 If browser-use returns an incomplete run (`done=false`), Supabash can perform deterministic browser probes (`open/state/get`) as a fallback (`tools.browser_use.allow_deterministic_fallback`) and merge that evidence back into planner context.
+Browser-discovered URLs are post-validated with `httpx` before they materially influence gain or cluster closure.
+
+### 4.2) Coverage-debt prioritization and stopping
+Supabash tracks open HIGH/CRITICAL finding clusters during the run.
+
+- If high-risk coverage debt remains open, the planner prioritizes actions linked to those clusters first.
+- Endpoint-level targets are preserved for follow-up actions (for example `/api/v1/status/config`, `/rest/v1/`) instead of collapsing them back to `/`.
+- If normal candidates are exhausted, Supabash can synthesize fallback `httpx` / `browser_use` / `nuclei` actions directly from unresolved cluster evidence.
+- Once high-risk clusters are closed and recent marginal gain is low, the planner stops with a post-closure diminishing-returns decision instead of spending low-value cleanup actions.
 
 ### 5) Graceful fallback is built‑in
 If tool‑calling fails or isn’t supported, Supabash skips the agentic phase and still writes the baseline report.
@@ -103,6 +112,13 @@ If `llm.enabled=false` (or `--no-llm` is passed), the run stays baseline‑only.
 6) Optional **compliance tags** are added
 7) JSON report is written; Markdown/HTML/PDF are optional exports
 
+The combined report also exposes run-quality metrics such as:
+- total/unique/duplicate findings
+- duplicate rate
+- agentic net-new unique findings
+- open high-risk cluster count
+- covered cluster count
+
 ---
 
 ## Key Guarantees
@@ -110,3 +126,4 @@ If `llm.enabled=false` (or `--no-llm` is passed), the run stays baseline‑only.
 - Baseline audit always runs (agentic is optional).
 - Tool calling cannot bypass hard constraints or enable disabled tools.
 - Report output is deterministic and auditable.
+- Low-signal duplicate `INFO` findings are suppressed in the final finding list while raw tool evidence remains preserved in the evidence/result artifacts.

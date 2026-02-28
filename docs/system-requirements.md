@@ -68,6 +68,24 @@ On Kali Linux, `searchsploit` is commonly available via:
 sudo apt-get install -y exploitdb
 ```
 
+#### browser-use (browser-driven agentic validation)
+```bash
+pipx install browser-use
+pipx ensurepath
+browser-use install
+```
+
+If `browser-use install` fails with a `uvx` permission/runtime error:
+```bash
+pipx install --force uv
+browser-use install
+```
+
+Credential options for Supabash:
+- export `BROWSER_USE_API_KEY` in the shell that runs `supabash`
+- or set `tools.browser_use.api_key` in `config.yaml`
+- or set `tools.browser_use.api_key_env` and let Supabash map that env var to `BROWSER_USE_API_KEY`
+
 ## Python dependencies
 ```bash
 python3 -m venv venv

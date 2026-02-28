@@ -44,6 +44,8 @@ export BROWSER_USE_API_KEY=your_browser_use_cloud_key
 supabash ai-audit "http://127.0.0.1:3003/WebGoat" --compliance soc2 --mode normal --yes
 ```
 
+You can also store the Browser-Use key in `config.yaml` under `tools.browser_use.api_key` instead of exporting `BROWSER_USE_API_KEY` each time.
+
 If `browser_use` reports missing API/LLM configuration during agentic runs, reset browser-use sessions and retry in the same shell:
 
 ```bash
@@ -66,6 +68,8 @@ This writes:
 - `...-webgoat-compare.md`
 
 in the same report folder.
+
+Use the comparator as a benchmark aid, not a strict pass/fail oracle. WebGoat is intentionally vulnerable and useful for measuring coverage gaps, but the generic localhost engine should still be validated on mixed targets (for example WebGoat + DVWA + Juice Shop + Supabase mock) so behavior does not overfit to one lab application.
 
 ## 3) Optional automated test
 

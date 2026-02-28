@@ -7,7 +7,7 @@ This guide explains how to package **Supabash** for distribution and how to cut 
 - Python `3.10+`
 - A clean working tree (recommended)
 - Tests passing:
-  - `PYTHONPATH=src venv/bin/python -m unittest discover -s tests -q`
+  - `venv/bin/python -m pytest -q`
 
 ## Versioning
 

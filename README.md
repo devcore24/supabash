@@ -142,8 +142,10 @@ Notes:
 - If browser-use is missing after install, run: `pipx install browser-use && pipx ensurepath && browser-use install`
 - `browser-use` may not support `--version` on all releases; validate with `browser-use --help` (or `pipx list | grep browser-use`).
 - If runtime setup fails with `uvx` errors, install `uv` first: `pipx install --force uv` and rerun `browser-use install`.
-- For agentic browser tasks, export your Browser-Use key in the same shell before running Supabash:
-  - `export BROWSER_USE_API_KEY=your_browser_use_cloud_key`
+- For agentic browser tasks, configure a Browser-Use key in one of these ways:
+  - export it in the same shell: `export BROWSER_USE_API_KEY=your_browser_use_cloud_key`
+  - or set `tools.browser_use.api_key` in `config.yaml`
+  - or set `tools.browser_use.api_key_env` to another env var name and let Supabash export it into `BROWSER_USE_API_KEY` before invoking `browser-use`
 - If `browser-use run` still says no LLM/API key, close stale sessions and retry:
   - `browser-use --json close --all`
   - `browser-use --json run 'Open https://example.com and stop.' --max-steps 1`
@@ -184,8 +186,12 @@ supabash doctor --verbose
     pipx install browser-use
     pipx ensurepath
     browser-use install
+    ```
+    Then either export a key:
+    ```bash
     export BROWSER_USE_API_KEY=your_browser_use_cloud_key
     ```
+    or set it in `config.yaml` under `tools.browser_use.api_key`.
 
 ## 🧪 Integration Testing (Optional)
 
@@ -548,9 +554,11 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Optionally scope Nuclei templates with `tools.nuclei.tags` or `tools.nuclei.severity` for faster audits.
 - Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
 - Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.min_steps_success`, `tools.browser_use.require_done`, `tools.browser_use.auto_session`, `tools.browser_use.headless`, `tools.browser_use.session`, `tools.browser_use.profile`, `tools.browser_use.command`, `tools.browser_use.model`, `tools.browser_use.allow_deterministic_fallback`, `tools.browser_use.deterministic_max_paths`, `tools.browser_use.auth.{enabled,login_url,notes,username_env,password_env,cookie_env,include_secrets_in_task}`.
-- Browser-use credential requirement: set `BROWSER_USE_API_KEY` in your shell/session for non-interactive agentic runs that invoke `browser_use`.
+- Browser-use credentials: set `tools.browser_use.api_key`, or set `tools.browser_use.api_key_env`, or export `BROWSER_USE_API_KEY` in the shell running Supabash.
 - Agentic browser-use tasks are evidence-aware: Supabash now passes prior findings + rationale/hypothesis into each browser run, then feeds browser observations back into planner context for the next step.
 - Browser-use resilience: when `run` returns incomplete (`done=false`) and fallback is enabled, Supabash performs deterministic browser probes (`open/state/get`) in the same session to still collect actionable evidence for replanning.
+- Agentic planner quality controls: Supabash tracks duplicate-rate, unique findings, open high-risk cluster count, and post-action gain to decide whether to continue, pivot, or stop.
+- Coverage-debt behavior: unresolved HIGH/CRITICAL clusters are prioritized first, and endpoint-level evidence such as `/api/v1/status/config` or `/rest/v1/` is preserved instead of being collapsed back to host root.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
@@ -635,6 +643,8 @@ Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx 
 - **Chat mode:** slash commands `/scan`, `/audit`, `/ai-audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state` with a focused interactive option subset.
 - **Planner robustness:** one-time automatic replan with exclusions when candidates are already baseline-covered.
 - **Repeat/novelty guards:** tool-target reuse caps and low-signal penalties reduce redundant agentic retries.
+- **Coverage-debt prioritization:** open HIGH/CRITICAL clusters are followed with concrete endpoint-level `browser_use` / `httpx` / `nuclei` candidates before normal low-value exploration.
+- **Run-quality metrics:** reports expose duplicate-rate, unique findings, net-new agentic signal, and open high-risk cluster counts for regression tracking.
 
 ### Reporting
 - **Formats:** Timestamped run folders under `reports/` containing JSON + Markdown reports (and optional HTML/PDF) with command traces for auditability

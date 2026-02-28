@@ -15,7 +15,7 @@ pip install -r requirements.txt
 
 ### 2) Run tests
 ```bash
-PYTHONPATH=src venv/bin/python -m unittest discover -s tests
+venv/bin/python -m pytest -q
 ```
 
 ## Safety expectations

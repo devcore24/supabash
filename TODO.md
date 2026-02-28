@@ -78,9 +78,15 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Validate promoted hosts with optional DNS resolution checks.
     - [x] Keep promoted targets in-scope before feeding `httpx`/web tooling.
 - [ ] **Next hardening step (high ROI)**
-    - [ ] Add canonical finding dedup key (`tool/template/host/path/severity + normalized evidence`) and expose duplicate-rate metrics in run metadata.
-    - [ ] Add novelty scoring based on risk-class gain (not raw finding count) to improve stop/continue decisions.
+    - [x] Add canonical finding dedup key (`tool/template/host/path/severity + normalized evidence`) and expose duplicate-rate metrics in run metadata.
+    - [x] Add novelty scoring based on risk-class gain (not raw finding count) to improve stop/continue decisions.
+    - [x] Add coverage-debt pivots that synthesize endpoint-level `httpx` / `browser_use` / `nuclei` follow-ups from unresolved high-risk clusters.
+    - [x] Add browser-use validation/fallback scoring so discovery-only or incomplete browser runs do not over-close risk.
+    - [x] Add post-closure early-stop + TLS-only `sslscan` gating to reduce low-value tail actions.
+    - [x] Reduce duplicate report noise by suppressing repeated low-signal `INFO` nuclei findings while preserving raw evidence artifacts.
+    - [x] Collapse closely related endpoint-level high-risk findings into coarser planner clusters so one exposed surface does not inflate coverage debt.
     - [ ] Add benchmark quality gates (time, actions, duplicate rate, CRITICAL/HIGH yield) across SOC2 + PCI regression runs.
+    - [ ] Extend planner-cluster merge heuristics across adjacent surfaces when they share the same exposure family but differ by path/scheme/product fingerprint.
 
 ---
 
