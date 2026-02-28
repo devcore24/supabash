@@ -3034,22 +3034,66 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     host = _normalize_host(parsed.hostname or "")
                                     if not host:
                                         continue
+                                    port = int(parsed.port or (443 if (parsed.scheme or "").lower() == "https" else 80))
                                     path = _normalize_path(
                                         f"{str(parsed.path or '/').strip() or '/'}"
                                         + (f"?{parsed.query}" if parsed.query else "")
                                     )
-                                    out.add(f"{host}{path}")
+                                    out.add(f"{host}:{port}{path}")
                                     continue
                             except Exception:
                                 pass
                             if "/" not in text:
                                 continue
                             host_part, remainder = text.split("/", 1)
-                            host = _normalize_host(host_part)
+                            host_raw = str(host_part or "").strip()
+                            if not host_raw:
+                                continue
+                            host = _normalize_host(host_raw)
                             if not host:
                                 continue
-                            out.add(f"{host}{_normalize_path('/' + remainder.lstrip('/'))}")
+                            origin = host
+                            if ":" in host_raw:
+                                maybe_host, maybe_port = host_raw.rsplit(":", 1)
+                                maybe_host = _normalize_host(maybe_host)
+                                if maybe_host:
+                                    try:
+                                        origin = f"{maybe_host}:{int(maybe_port)}"
+                                    except Exception:
+                                        origin = maybe_host
+                            out.add(f"{origin}{_normalize_path('/' + remainder.lstrip('/'))}")
                         return out
+
+                    def _surface_label_from_finding(finding: Dict[str, Any]) -> Tuple[str, str]:
+                        labels: List[str] = []
+                        target_hint = str(finding.get("target") or "").strip()
+                        if target_hint:
+                            labels.append(target_hint)
+                        title = str(finding.get("title") or "").strip()
+                        evidence = str(finding.get("evidence") or "").strip()
+                        for blob in (title, evidence):
+                            if not blob:
+                                continue
+                            labels.extend(
+                                str(u).rstrip(".,;")
+                                for u in re.findall(r"https?://[^\s)>'\"`]+", blob, flags=re.IGNORECASE)
+                            )
+
+                        target_paths = sorted(_target_path_keys_from_labels(labels))
+                        if target_paths:
+                            surface = target_paths[0]
+                            if "/" in surface:
+                                origin, _, rest = surface.partition("/")
+                                return origin, f"/{rest.lstrip('/')}" if rest else "/"
+                            return surface, "/"
+
+                        host_ports = sorted(_host_port_keys_from_labels(labels))
+                        if host_ports:
+                            return host_ports[0], "/"
+
+                        host, path = self._extract_finding_host_path(finding)
+                        host = str(host or "").strip().lower()
+                        return host, str(path or "/").strip() or "/"
 
                     def _risk_match_classes(
                         risk_class: str,
@@ -3098,13 +3142,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         risk_class: str,
                         title: str,
                         evidence: str,
-                        host: str,
+                        origin: str,
                         path: str,
                     ) -> str:
                         # Planner clusters should be coarser than raw finding dedup keys so
                         # one endpoint-level high-risk exposure does not inflate into multiple
                         # open coverage-debt clusters across complementary tools.
-                        if severity_rank < 4 or not host or not path:
+                        if severity_rank < 4 or not origin or not path:
                             return dedup_key
                         candidate_risk_classes = _risk_match_classes(risk_class, title, evidence)
                         canonical_order = (
@@ -3121,7 +3165,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             (name for name in canonical_order if name in candidate_risk_classes),
                             str(risk_class or "").strip().lower() or "general_security_signal",
                         )
-                        return f"planner_cluster|{severity}|{rc}|{host}|{path}"
+                        return f"planner_cluster|{severity}|{rc}|{origin}|{path}"
 
                     for finding in findings or []:
                         if not isinstance(finding, dict):
@@ -3138,10 +3182,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         phase = str(finding.get("phase") or "baseline").strip().lower() or "baseline"
                         title = str(finding.get("title") or "").strip()
                         evidence = str(finding.get("evidence") or "").strip()
-                        host, path = self._extract_finding_host_path(finding)
+                        origin, path = _surface_label_from_finding(finding)
                         target_label = ""
-                        if host:
-                            target_label = host
+                        if origin:
+                            target_label = origin
                             if path:
                                 target_label = f"{target_label}{path}"
                         severity_rank = int(self._severity_rank(sev))
@@ -3152,7 +3196,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             risk_class,
                             title,
                             evidence,
-                            host,
+                            origin,
                             path,
                         )
                         cluster = by_key.get(cluster_key)
@@ -3182,8 +3226,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             cluster["phases"].add(phase)
                         if target_label:
                             cluster["targets"].add(target_label)
-                        elif host:
-                            cluster["targets"].add(host)
+                        elif origin:
+                            cluster["targets"].add(origin)
                         if evidence and len(cluster["evidence_samples"]) < 3:
                             cluster["evidence_samples"].append(evidence[:220])
                         if phase == "agentic":
@@ -3203,8 +3247,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             target_field = str(finding.get("target") or "").strip()
                             if target_label:
                                 signal_labels.append(target_label)
-                            if host:
-                                signal_labels.append(host)
+                            if origin:
+                                signal_labels.append(origin)
                             if target_field:
                                 signal_labels.append(target_field)
                             if evidence:
@@ -3305,7 +3349,9 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             if seen_ports and cluster_host_ports and (cluster_host_ports & seen_ports):
                                 matched = True
                                 break
-                            if seen_hosts and cluster_hosts and (cluster_hosts & seen_hosts):
+                            if (not seen_ports and not cluster_host_ports) and seen_hosts and cluster_hosts and (
+                                cluster_hosts & seen_hosts
+                            ):
                                 matched = True
                                 break
                         if matched:

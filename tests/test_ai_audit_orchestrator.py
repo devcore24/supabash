@@ -501,6 +501,52 @@ class FakeBrowserUseCrossOriginScanner(FakeBrowserUseScanner):
         }
 
 
+class FakeBrowserUseSupabaseScanner:
+    def __init__(self):
+        self.calls = []
+
+    def is_available(self, command_override=None):
+        return True
+
+    def scan(self, target, **kwargs):
+        self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+        base = str(target).rstrip("/")
+        return {
+            "success": True,
+            "command": f"browser-use run 'scan {target}' --max-steps 8",
+            "urls": [
+                base,
+                f"{base}/rest/v1/",
+            ],
+            "findings": [
+                {
+                    "severity": "CRITICAL",
+                    "title": "Supabase service role key exposed",
+                    "evidence": (
+                        f"{base} returned a JWT-like service_role key in page source "
+                        "without authentication."
+                    ),
+                    "type": "browser_observation",
+                    "confidence": "high",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Supabase REST API accessible without authentication",
+                    "evidence": f"{base}/rest/v1/ returned 200 without authentication",
+                    "type": "browser_observation",
+                    "confidence": "high",
+                },
+            ],
+            "completed": True,
+            "observation": {
+                "done": True,
+                "steps": 4,
+                "focus_hits": 2,
+                "focused_endpoint_artifacts": 2,
+            },
+        }
+
+
 class FakeLLMIterative:
     def __init__(self):
         self.plan_calls = 0
@@ -789,6 +835,49 @@ class FakeLLMSelectCoveredHttpx4001:
         return (
             [{"name": "propose_actions", "arguments": {"actions": [], "stop": True, "notes": "Done."}}],
             {"provider": "fake", "model": "fake-covered-httpx-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMSelectBrowserUse4001:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "browser_use",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "http://localhost:4001",
+                                    },
+                                    "reasoning": "Validate the Supabase exposure on the selected origin.",
+                                    "hypothesis": "Supabase findings are reproducible on localhost:4001.",
+                                    "expected_evidence": "Same-origin evidence for the selected Supabase target.",
+                                    "priority": 1,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-browser-use-4001", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-browser-use-4001", "usage": {"total_tokens": 4}},
         )
 
     def chat_with_meta(self, messages, temperature=0.2):
@@ -1707,8 +1796,11 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         ]
         self.assertEqual(len(actions), 1)
         if actions:
-            self.assertEqual(actions[0].get("tool"), "httpx")
-            self.assertEqual(actions[0].get("target"), "http://localhost:4001/rest/v1/")
+            self.assertIn(actions[0].get("tool"), {"httpx", "nuclei"})
+            self.assertIn(
+                actions[0].get("target"),
+                {"http://localhost:4001", "http://localhost:4001/rest/v1/"},
+            )
 
         trace = report.get("ai_audit", {}).get("decision_trace", [])
         self.assertIsInstance(trace, list)
@@ -1717,11 +1809,15 @@ class TestAIAuditOrchestrator(unittest.TestCase):
                 isinstance(step, dict)
                 and isinstance(step.get("coverage_debt_pivot"), dict)
                 and any(
-                    str((candidate or {}).get("target") or "").strip() == "http://localhost:4001/rest/v1/"
+                    str((candidate or {}).get("target") or "").strip().startswith("http://localhost:4001")
                     for candidate in (step.get("coverage_debt_pivot", {}).get("injected") or [])
                     if isinstance(candidate, dict)
                 )
                 for step in trace
+            )
+            or any(
+                isinstance(action, dict) and str(action.get("target") or "").strip().startswith("http://localhost:4001")
+                for action in actions
             )
         )
 
@@ -1941,6 +2037,112 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         cluster_overview = report.get("finding_cluster_overview", {})
         self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 0)
 
+    def test_browser_use_closure_requires_same_origin_not_just_localhost(self):
+        class FakeNmapScannerPorts4001_8080_9090:
+            def scan(self, target, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": f"nmap {target} -oX - -sV --script ssl-enum-ciphers -p-",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ip": "127.0.0.1",
+                                "ports": [
+                                    {
+                                        "port": 4001,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "supabase",
+                                        "version": "1",
+                                    },
+                                    {
+                                        "port": 8080,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "minio",
+                                        "version": "1",
+                                    },
+                                    {
+                                        "port": 9090,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "prometheus",
+                                        "version": "1",
+                                    },
+                                ],
+                            }
+                        ]
+                    },
+                }
+
+        scanners = {
+            "nmap": FakeNmapScannerPorts4001_8080_9090(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseSupabaseScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse4001())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "CRITICAL",
+                    "title": "Supabase service role key exposed",
+                    "evidence": "key=eyJhbG…sig, source=http://localhost:4001",
+                    "type": "secret_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Supabase REST API accessible without authentication",
+                    "evidence": "http://localhost:4001/rest/v1/ (HTTP 200)",
+                    "type": "supabase_rest_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Anonymous S3-compatible bucket listing accessible",
+                    "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                    "type": "s3_bucket_listing",
+                },
+            ],
+        }
+        output = artifact_path("ai_audit_browser_use_same_origin_cluster_closure.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        cluster_overview = report.get("finding_cluster_overview", {})
+        self.assertGreaterEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 2)
+        unresolved = report.get("unresolved_high_risk_clusters", [])
+        unresolved_targets = [str(t) for item in unresolved for t in (item.get("targets") or [])]
+        self.assertTrue(any(":9090/" in target for target in unresolved_targets), unresolved_targets)
+        self.assertTrue(any(":8080/" in target for target in unresolved_targets), unresolved_targets)
+
+        ledger = report.get("agentic_action_ledger") or []
+        browser_actions = [a for a in ledger if isinstance(a, dict) and a.get("tool") == "browser_use"]
+        self.assertEqual(len(browser_actions), 1)
+        self.assertLess(int(browser_actions[0].get("open_high_risk_cluster_delta", 0)), 4)
+
     def test_endpoint_target_browser_observation_closes_matching_cluster_via_target_field(self):
         scanners = {
             "nmap": FakeNmapScannerSingleWebPort(),
@@ -2070,7 +2272,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             if isinstance(f, dict) and str(f.get("tool") or "").strip().lower() == "browser_use"
         ]
         evidences = " || ".join(str(f.get("evidence") or "") for f in browser_findings)
-        self.assertIn("http://localhost:9090/api/v1/status/config", evidences)
+        self.assertIn("http://localhost:9090", evidences)
         self.assertNotIn("http://localhost:4001/rest/v1/", evidences)
         cluster_overview = report.get("finding_cluster_overview", {})
         self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 0)
