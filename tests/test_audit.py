@@ -494,6 +494,18 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertEqual(len(info_findings), 1)
         self.assertEqual(len(high_findings), 1)
 
+    def test_extract_finding_host_path_falls_back_to_target_field(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        host, path = orch._extract_finding_host_path(
+            {
+                "title": "Browser-driven security signal",
+                "evidence": "HTTP 200 OK (Unauthenticated)",
+                "target": "http://localhost:8080/api/v1/status/config",
+            }
+        )
+        self.assertEqual(host, "localhost")
+        self.assertEqual(path, "/api/v1/status/config")
+
     def test_handles_failure(self):
         scanners = {
             "nmap": FakeFailScanner("nmap"),

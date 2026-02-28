@@ -2445,6 +2445,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             [
                                 str(finding.get("title") or "").strip(),
                                 str(finding.get("evidence") or "").strip(),
+                                str(finding.get("target") or "").strip(),
                             ]
                         ).strip()
                         for url in re.findall(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE):
@@ -2453,14 +2454,63 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 for mapped in by_host_port.get(host_port, []):
                                     matched_targets.add(mapped)
 
-                        host, _ = self._extract_finding_host_path(finding)
-                        host = str(host or "").strip().lower()
-                        if host:
-                            for mapped in by_host.get(host, []):
-                                matched_targets.add(mapped)
+                        if not matched_targets:
+                            host, _ = self._extract_finding_host_path(finding)
+                            host = str(host or "").strip().lower()
+                            if host:
+                                for mapped in by_host.get(host, []):
+                                    matched_targets.add(mapped)
 
                         for target in matched_targets:
                             scores[target] = int(scores.get(target, 0)) + int(weight)
+
+                    return scores
+
+                def _target_max_severity_ranks_now() -> Dict[str, int]:
+                    scores: Dict[str, int] = {}
+                    by_host_port: Dict[Tuple[str, int], List[str]] = {}
+                    by_host: Dict[str, List[str]] = {}
+                    for item in allowed_web_targets or []:
+                        target = str(item or "").strip()
+                        if not target:
+                            continue
+                        scores[target] = 0
+                        host_port = _target_host_port_key(target)
+                        if host_port:
+                            by_host_port.setdefault(host_port, []).append(target)
+                            by_host.setdefault(host_port[0], []).append(target)
+
+                    findings = self._collect_findings(agg)
+                    if not isinstance(findings, list) or not scores:
+                        return scores
+
+                    for finding in findings:
+                        if not isinstance(finding, dict):
+                            continue
+                        rank = int(self._severity_rank(finding.get("severity") or "INFO"))
+                        if rank <= 0:
+                            continue
+                        matched_targets: Set[str] = set()
+                        text = " ".join(
+                            [
+                                str(finding.get("title") or "").strip(),
+                                str(finding.get("evidence") or "").strip(),
+                                str(finding.get("target") or "").strip(),
+                            ]
+                        ).strip()
+                        for url in re.findall(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE):
+                            host_port = _target_host_port_key(str(url).rstrip(".,;"))
+                            if host_port:
+                                for mapped in by_host_port.get(host_port, []):
+                                    matched_targets.add(mapped)
+                        if not matched_targets:
+                            host, _ = self._extract_finding_host_path(finding)
+                            host = str(host or "").strip().lower()
+                            if host:
+                                for mapped in by_host.get(host, []):
+                                    matched_targets.add(mapped)
+                        for target in matched_targets:
+                            scores[target] = max(int(scores.get(target, 0)), int(rank))
 
                     return scores
 
@@ -2818,6 +2868,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     by_key: Dict[str, Dict[str, Any]] = {}
                     agentic_risk_host_ports: Dict[str, Set[str]] = {}
                     agentic_risk_hosts: Dict[str, Set[str]] = {}
+                    agentic_risk_target_paths: Dict[str, Set[str]] = {}
                     total = 0
 
                     def _host_port_keys_from_labels(labels: List[str]) -> Set[str]:
@@ -2881,6 +2932,50 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 host_part = "127.0.0.1"
                             if host_part:
                                 out.add(host_part)
+                        return out
+
+                    def _target_path_keys_from_labels(labels: List[str]) -> Set[str]:
+                        out: Set[str] = set()
+
+                        def _normalize_host(value: str) -> str:
+                            host_text = str(value or "").strip().lower().strip("[]")
+                            if host_text in {"localhost", "::1"}:
+                                return "127.0.0.1"
+                            return host_text
+
+                        def _normalize_path(value: str) -> str:
+                            path_text = str(value or "/").strip() or "/"
+                            if "?" in path_text:
+                                path_part, query_part = path_text.split("?", 1)
+                                path_part = path_part.rstrip("/") or "/"
+                                return f"{path_part}?{query_part}"
+                            return path_text.rstrip("/") or "/"
+
+                        for raw in labels or []:
+                            text = str(raw or "").strip().rstrip(".,;")
+                            if not text:
+                                continue
+                            try:
+                                parsed = urlparse(text)
+                                if parsed.scheme:
+                                    host = _normalize_host(parsed.hostname or "")
+                                    if not host:
+                                        continue
+                                    path = _normalize_path(
+                                        f"{str(parsed.path or '/').strip() or '/'}"
+                                        + (f"?{parsed.query}" if parsed.query else "")
+                                    )
+                                    out.add(f"{host}{path}")
+                                    continue
+                            except Exception:
+                                pass
+                            if "/" not in text:
+                                continue
+                            host_part, remainder = text.split("/", 1)
+                            host = _normalize_host(host_part)
+                            if not host:
+                                continue
+                            out.add(f"{host}{_normalize_path('/' + remainder.lstrip('/'))}")
                         return out
 
                     def _risk_match_classes(
@@ -2980,10 +3075,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             if not include_for_correlation:
                                 continue
                             signal_labels: List[str] = []
+                            target_field = str(finding.get("target") or "").strip()
                             if target_label:
                                 signal_labels.append(target_label)
                             if host:
                                 signal_labels.append(host)
+                            if target_field:
+                                signal_labels.append(target_field)
                             if evidence:
                                 signal_labels.extend(
                                     str(u).rstrip(".,;")
@@ -2991,12 +3089,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 )
                             host_ports = _host_port_keys_from_labels(signal_labels)
                             hosts_only = _host_keys_from_labels(signal_labels)
+                            target_paths = _target_path_keys_from_labels(signal_labels)
+                            risk_classes = _risk_match_classes(risk_class, title, evidence)
+                            if target_paths:
+                                for rc in risk_classes:
+                                    agentic_risk_target_paths.setdefault(rc, set()).update(target_paths)
                             if host_ports:
-                                risk_classes = _risk_match_classes(risk_class, title, evidence)
                                 for rc in risk_classes:
                                     agentic_risk_host_ports.setdefault(rc, set()).update(host_ports)
                             if hosts_only:
-                                risk_classes = _risk_match_classes(risk_class, title, evidence)
                                 for rc in risk_classes:
                                     agentic_risk_hosts.setdefault(rc, set()).update(hosts_only)
 
@@ -3029,8 +3130,17 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             continue
                         rc = str(cluster.get("risk_class") or "").strip().lower() or "general_security_signal"
                         cluster_host_ports = _host_port_keys_from_labels(cluster.get("targets", []) or [])
+                        cluster_target_paths = _target_path_keys_from_labels(cluster.get("targets", []) or [])
                         evidence_blob = " ".join(str(x or "") for x in (cluster.get("evidence_samples") or []))
                         if evidence_blob:
+                            cluster_target_paths.update(
+                                _target_path_keys_from_labels(
+                                    [
+                                        str(u).rstrip(".,;")
+                                        for u in re.findall(r"https?://[^\s)>'\"`]+", evidence_blob, flags=re.IGNORECASE)
+                                    ]
+                                )
+                            )
                             cluster_host_ports.update(
                                 _host_port_keys_from_labels(
                                     [
@@ -3058,8 +3168,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         )
                         matched = False
                         for risk_name in candidate_risk_classes:
+                            seen_paths = agentic_risk_target_paths.get(risk_name, set())
                             seen_ports = agentic_risk_host_ports.get(risk_name, set())
                             seen_hosts = agentic_risk_hosts.get(risk_name, set())
+                            if seen_paths and cluster_target_paths and (cluster_target_paths & seen_paths):
+                                matched = True
+                                break
                             if seen_ports and cluster_host_ports and (cluster_host_ports & seen_ports):
                                 matched = True
                                 break
@@ -3150,6 +3264,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     tool = str(action.get("tool") or "").strip().lower()
                     target = str(args.get("target") or "").strip()
                     score = int(_action_novelty(action))
+                    open_high_risk_count_now = len(_open_high_risk_clusters_now())
 
                     history = agentic_tool_gain_scores.get(tool, [])
                     if history:
@@ -3172,6 +3287,28 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             if high_risk_targets and target not in high_risk_targets:
                                 score -= 3
                         if int(agentic_tool_no_risk_gain_counts.get(tool, 0)) >= 2:
+                            score -= 2
+
+                    if open_high_risk_count_now <= 0:
+                        resolved_target = _resolve_allowed_web_target(tool, target) if target else None
+                        target_ranks = _target_max_severity_ranks_now()
+                        target_rank = 0
+                        if resolved_target and resolved_target in target_ranks:
+                            target_rank = int(target_ranks.get(resolved_target, 0))
+                        elif target and target in target_ranks:
+                            target_rank = int(target_ranks.get(target, 0))
+
+                        if tool in ("nuclei", "sslscan", "browser_use", "gobuster", "ffuf", "katana"):
+                            if target_rank < 3:
+                                score -= 4
+                            elif target_rank < 4:
+                                score -= 2
+                        elif tool in ("whatweb", "httpx") and target_rank < 3:
+                            score -= 2
+
+                        if tool in ("nuclei", "sslscan") and int(agentic_tool_no_risk_gain_counts.get(tool, 0)) >= 1:
+                            score -= 2
+                        if tool == "browser_use" and int(agentic_tool_no_risk_gain_counts.get(tool, 0)) >= 1:
                             score -= 2
 
                     return score
@@ -3791,6 +3928,25 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     _candidate_sort_key(a),
                                 )
                             )
+                            if coverage_debt_open_count <= 0:
+                                positive_actionable = [a for a in actionable if _action_gain_score(a) > 0]
+                                if positive_actionable:
+                                    actionable = positive_actionable
+                                elif actions_executed > 0:
+                                    note(
+                                        "llm_decision",
+                                        "planner",
+                                        "diminishing returns: post-closure marginal signal exhausted; stopping",
+                                        agg=agg,
+                                    )
+                                    trace_item["decision"] = {
+                                        "result": "stop",
+                                        "reason": "post_closure_low_marginal_signal",
+                                    }
+                                    trace_item["finished_at"] = time.time()
+                                    ai_obj.setdefault("decision_trace", []).append(trace_item)
+                                    action = None
+                                    break
                             best_novelty = _action_novelty(actionable[0])
                             best_gain = _action_gain_score(actionable[0])
                             trace_item["candidate_novelty"] = {

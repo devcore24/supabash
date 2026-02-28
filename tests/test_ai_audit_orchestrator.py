@@ -224,6 +224,39 @@ class FakeNmapScannerSupabaseOnly:
         }
 
 
+class FakeNmapScannerPrometheusAndTls9433:
+    def scan(self, target, arguments=None, **kwargs):
+        return {
+            "success": True,
+            "command": f"nmap {target} -oX - -sV --script ssl-enum-ciphers -p-",
+            "scan_data": {
+                "hosts": [
+                    {
+                        "ip": "127.0.0.1",
+                        "ports": [
+                            {
+                                "port": 9090,
+                                "protocol": "tcp",
+                                "state": "open",
+                                "service": "http",
+                                "product": "prometheus",
+                                "version": "2.0",
+                            },
+                            {
+                                "port": 9433,
+                                "protocol": "tcp",
+                                "state": "open",
+                                "service": "https",
+                                "product": "custom-ui",
+                                "version": "1.0",
+                            },
+                        ],
+                    }
+                ]
+            },
+        }
+
+
 class FakeKatanaQueryScanner:
     def crawl(self, target, **kwargs):
         base = str(target).rstrip("/")
@@ -384,6 +417,37 @@ class FakeBrowserUseCorrelationScanner:
             "observation": {
                 "done": True,
                 "steps": 3,
+                "focus_hits": 1,
+                "focused_endpoint_artifacts": 1,
+            },
+        }
+
+
+class FakeBrowserUseTargetOnlyScanner:
+    def __init__(self):
+        self.calls = []
+
+    def is_available(self, command_override=None):
+        return True
+
+    def scan(self, target, **kwargs):
+        self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+        return {
+            "success": True,
+            "command": f"browser-use run 'scan {target}' --max-steps 6",
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Browser-driven security signal",
+                    "evidence": "HTTP 200 OK (Unauthenticated)",
+                    "type": "browser_observation",
+                    "confidence": "high",
+                }
+            ],
+            "completed": True,
+            "observation": {
+                "done": True,
+                "steps": 2,
                 "focus_hits": 1,
                 "focused_endpoint_artifacts": 1,
             },
@@ -635,6 +699,67 @@ class FakeLLMSelectCoveredHttpx4001:
         return (
             [{"name": "propose_actions", "arguments": {"actions": [], "stop": True, "notes": "Done."}}],
             {"provider": "fake", "model": "fake-covered-httpx-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMCloseThenProbe9433:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "browser_use",
+                                    "arguments": {
+                                        "profile": "soc2",
+                                        "target": "http://localhost:9090/api/v1/status/config",
+                                    },
+                                    "reasoning": "Close the known Prometheus auth gap with direct browser validation.",
+                                    "priority": 1,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-close-then-probe", "usage": {"total_tokens": 8}},
+            )
+        if self.plan_calls == 2:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "nuclei",
+                                    "arguments": {"profile": "soc2", "target": "http://localhost:9433"},
+                                    "reasoning": "Probe another service after closure.",
+                                    "priority": 5,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-close-then-probe", "usage": {"total_tokens": 7}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-close-then-probe", "usage": {"total_tokens": 4}},
         )
 
     def chat_with_meta(self, messages, temperature=0.2):
@@ -1725,6 +1850,102 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertEqual(len(unresolved), 0)
         cluster_overview = report.get("finding_cluster_overview", {})
         self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 0)
+
+    def test_endpoint_target_browser_observation_closes_matching_cluster_via_target_field(self):
+        scanners = {
+            "nmap": FakeNmapScannerSingleWebPort(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseTargetOnlyScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse8080())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:8080/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_browser_use_endpoint_target_closure.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        unresolved = report.get("unresolved_high_risk_clusters", [])
+        self.assertIsInstance(unresolved, list)
+        self.assertEqual(len(unresolved), 0)
+        cluster_overview = report.get("finding_cluster_overview", {})
+        self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 0)
+
+    def test_post_closure_low_value_followups_are_stopped_before_execution(self):
+        scanners = {
+            "nmap": FakeNmapScannerPrometheusAndTls9433(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseTargetOnlyScanner(),
+            "sslscan": FakeSslscanScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMCloseThenProbe9433())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_post_closure_stop.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=3,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("phase") == "agentic"
+        ]
+        self.assertEqual(len(actions), 1)
+        if actions:
+            self.assertEqual(actions[0].get("tool"), "browser_use")
+        trace = report.get("ai_audit", {}).get("decision_trace", [])
+        self.assertTrue(
+            any(
+                isinstance(step, dict)
+                and str((step.get("decision") or {}).get("reason") or "").strip() == "post_closure_low_marginal_signal"
+                for step in trace
+            )
+        )
 
     def test_agentic_browser_use_skipped_when_disabled(self):
         scanners = _build_scanners()

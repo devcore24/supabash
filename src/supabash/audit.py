@@ -1391,12 +1391,11 @@ class AuditOrchestrator:
                 str(finding.get("evidence") or "").strip(),
             ]
         ).strip()
-        if not text:
-            return "", ""
 
-        url_match = re.search(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE)
-        if url_match:
-            candidate = str(url_match.group(0)).strip().rstrip(".,;")
+        def _parse_candidate_url(candidate_text: Any) -> Tuple[str, str]:
+            candidate = str(candidate_text or "").strip().rstrip(".,;")
+            if not candidate:
+                return "", ""
             try:
                 parsed = urlparse(candidate)
                 host = str(parsed.hostname or "").strip().lower()
@@ -1405,7 +1404,23 @@ class AuditOrchestrator:
                     path = f"{path}?{parsed.query}"
                 return host, path
             except Exception:
-                pass
+                return "", ""
+
+        if text:
+            url_match = re.search(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE)
+            if url_match:
+                host, path = _parse_candidate_url(url_match.group(0))
+                if host:
+                    return host, path
+
+        target_hint = str(finding.get("target") or "").strip()
+        if target_hint:
+            host, path = _parse_candidate_url(target_hint)
+            if host:
+                return host, path
+
+        if not text:
+            return "", ""
 
         host_match = re.search(r"\bhost=([a-z0-9._:-]+)\b", text, flags=re.IGNORECASE)
         host = str(host_match.group(1)).strip().lower() if host_match else ""
