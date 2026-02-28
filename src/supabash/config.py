@@ -82,6 +82,7 @@ DEFAULT_CONFIG = {
             "enabled": True,
             "timeout_seconds": 1800,
             "rate_limit": 10,
+            "normal_mode_broad_rate_limit": 0,
             "tags": "",
             "severity": "",
         },
@@ -89,7 +90,7 @@ DEFAULT_CONFIG = {
         # Content discovery (alternative/fallback to gobuster; keep opt-in by default to reduce noise)
         "ffuf": {"enabled": False, "timeout_seconds": 1800},
         # Crawling/spidering (attack-surface expansion; opt-in for noise control)
-        "katana": {"enabled": False, "timeout_seconds": 1800, "depth": 3, "concurrency": 10},
+        "katana": {"enabled": True, "timeout_seconds": 1800, "depth": 3, "concurrency": 10},
         # Browser-driven exploration (agentic tool only; enabled by default but auto-skips when CLI is unavailable).
         "browser_use": {
             "enabled": True,

@@ -59,8 +59,6 @@ from supabash.aggressive_caps import apply_aggressive_caps
 
 logger = setup_logger(__name__)
 
-DEFAULT_NORMAL_BROAD_NUCLEI_RATE_CAP = 25
-
 COMPLIANCE_PROFILE_ALIASES = {
     "pci": "compliance_pci",
     "pci_dss": "compliance_pci",
@@ -3361,8 +3359,9 @@ class AuditOrchestrator:
         try:
             cap = int(cap_raw)
         except Exception:
-            cap = DEFAULT_NORMAL_BROAD_NUCLEI_RATE_CAP
-        cap = max(1, cap)
+            cap = 0
+        if cap <= 0:
+            return rate
         if rate <= 0:
             return cap
         return min(rate, cap)

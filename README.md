@@ -308,6 +308,7 @@ Notes:
 - Agentic planning uses a `profile` field (`fast|standard|aggressive|compliance_*`) to guide assessment intensity and compliance posture.
 - Baseline pipeline uses fast port discovery (`rustscan` and `masscan` fallback) before nmap service detection when applicable.
 - Baseline web coverage runs one broad nuclei pass across deduplicated live targets, then deep scans on prioritized top targets.
+- Broad baseline `nuclei` and targeted follow-up `nuclei` are handled separately. `tools.nuclei.rate_limit` applies normally; an optional `tools.nuclei.normal_mode_broad_rate_limit` can cap only the broad baseline pass. Set it to `0` to fully honor the configured `rate_limit`.
 - Agentic loop applies repeat-policy and low-novelty guards to avoid noisy loops and stop on diminishing returns.
 - Domain expansion can use `subfinder` (when enabled), with in-scope filtering, optional DNS resolve validation, and bounded promotion to web probing.
 - Compliance profiles tune tool settings and annotate findings with control references when evidence supports a requirement.
@@ -551,14 +552,18 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
 - Fast discovery tuning: `tools.nmap.fast_discovery`, `tools.nmap.fast_discovery_ports`, `tools.nmap.fast_discovery_max_ports`.
 - Set a default Nuclei throttling rate via `tools.nuclei.rate_limit` (overridden by `--nuclei-rate`).
+- Optionally cap only the broad multi-target baseline Nuclei pass in normal mode via `tools.nuclei.normal_mode_broad_rate_limit`. Use `0` to disable that cap and fully respect `rate_limit`.
 - Optionally scope Nuclei templates with `tools.nuclei.tags` or `tools.nuclei.severity` for faster audits.
+- `katana` is enabled by default and participates in baseline deep web coverage unless you disable `tools.katana.enabled`.
 - Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
 - Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.min_steps_success`, `tools.browser_use.require_done`, `tools.browser_use.auto_session`, `tools.browser_use.headless`, `tools.browser_use.session`, `tools.browser_use.profile`, `tools.browser_use.command`, `tools.browser_use.model`, `tools.browser_use.allow_deterministic_fallback`, `tools.browser_use.deterministic_max_paths`, `tools.browser_use.auth.{enabled,login_url,notes,username_env,password_env,cookie_env,include_secrets_in_task}`.
-- Browser-use credentials: set `tools.browser_use.api_key`, or set `tools.browser_use.api_key_env`, or export `BROWSER_USE_API_KEY` in the shell running Supabash.
+- Browser-use credentials: set `tools.browser_use.api_key`, or set `tools.browser_use.api_key_env`, or export `BROWSER_USE_API_KEY` in the shell running Supabash. Prefer env vars for shared machines/repos instead of storing live keys in `config.yaml`.
 - Agentic browser-use tasks are evidence-aware: Supabash now passes prior findings + rationale/hypothesis into each browser run, then feeds browser observations back into planner context for the next step.
 - Browser-use resilience: when `run` returns incomplete (`done=false`) and fallback is enabled, Supabash performs deterministic browser probes (`open/state/get`) in the same session to still collect actionable evidence for replanning.
 - Agentic planner quality controls: Supabash tracks duplicate-rate, unique findings, open high-risk cluster count, and post-action gain to decide whether to continue, pivot, or stop.
 - Coverage-debt behavior: unresolved HIGH/CRITICAL clusters are prioritized first, and endpoint-level evidence such as `/api/v1/status/config` or `/rest/v1/` is preserved instead of being collapsed back to host root.
+- SQLMap harvesting is conservative by design: Supabash strips evidence suffixes from discovered URLs and blocks object-store style query candidates such as `list-type`, `prefix`, and `delimiter` from becoming automatic SQLMap targets.
+- Object-store readiness checks no longer treat `HTTP 200 /` alone as a confirmed HIGH anonymous bucket listing; HIGH requires listing-style proof such as S3/MinIO listing markers.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.

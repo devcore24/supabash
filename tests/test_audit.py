@@ -919,7 +919,7 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertEqual(len(nuclei_entries), 1)
         cleanup_artifact(output)
 
-    def test_normal_mode_caps_broad_nuclei_rate_limit(self):
+    def test_normal_mode_caps_broad_nuclei_rate_limit_when_explicitly_configured(self):
         class FakeNmapMultiWeb:
             def scan(self, target, ports=None, arguments=None, **kwargs):
                 return {
@@ -962,6 +962,16 @@ class TestAuditOrchestrator(unittest.TestCase):
 
         orch = AuditOrchestrator(scanners=scanners, llm_client=None)
         output = artifact_path("audit_normal_mode_broad_nuclei_cap.json")
+        original_tool_config = orch._tool_config
+
+        def tool_config(name):
+            cfg = original_tool_config(name)
+            if str(name) == "nuclei":
+                cfg = dict(cfg)
+                cfg["normal_mode_broad_rate_limit"] = 25
+            return cfg
+
+        orch._tool_config = tool_config
         report = orch.run("localhost", output, use_llm=False, mode="normal", nuclei_rate_limit=10000)
 
         self.assertEqual(len(nuclei_scanner.calls), 1)
@@ -969,6 +979,57 @@ class TestAuditOrchestrator(unittest.TestCase):
             self.assertEqual(int(nuclei_scanner.calls[0]["kwargs"].get("rate_limit") or 0), 25)
         notes = report.get("summary_notes") if isinstance(report.get("summary_notes"), list) else []
         self.assertTrue(any("broad nuclei rate capped" in str(note or "").lower() for note in notes))
+        cleanup_artifact(output)
+
+    def test_normal_mode_respects_explicit_nuclei_rate_when_no_broad_cap_is_configured(self):
+        class FakeNmapMultiWeb:
+            def scan(self, target, ports=None, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 3000, "protocol": "tcp", "state": "open", "service": "http"},
+                                    {"port": 3001, "protocol": "tcp", "state": "open", "service": "http"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxAlive:
+            def scan(self, targets, **kwargs):
+                return {"success": True, "command": "httpx test", "alive": [str(t) for t in targets]}
+
+        class CaptureNuclei:
+            def __init__(self):
+                self.calls = []
+
+            def scan(self, target, **kwargs):
+                self.calls.append({"target": target, "kwargs": dict(kwargs)})
+                return {"success": True, "command": "nuclei test", "findings": []}
+
+        nuclei_scanner = CaptureNuclei()
+        scanners = {
+            "nmap": FakeNmapMultiWeb(),
+            "httpx": FakeHttpxAlive(),
+            "whatweb": FakeScanner("whatweb"),
+            "nuclei": nuclei_scanner,
+            "gobuster": FakeScanner("gobuster"),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+
+        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
+        output = artifact_path("audit_normal_mode_no_broad_nuclei_cap.json")
+        report = orch.run("localhost", output, use_llm=False, mode="normal", nuclei_rate_limit=777)
+
+        self.assertEqual(len(nuclei_scanner.calls), 1)
+        if nuclei_scanner.calls:
+            self.assertEqual(int(nuclei_scanner.calls[0]["kwargs"].get("rate_limit") or 0), 777)
+        notes = report.get("summary_notes") if isinstance(report.get("summary_notes"), list) else []
+        self.assertFalse(any("broad nuclei rate capped" in str(note or "").lower() for note in notes))
         cleanup_artifact(output)
 
     def test_readiness_probe_receives_all_confirmed_web_targets(self):

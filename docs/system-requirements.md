@@ -86,6 +86,16 @@ Credential options for Supabash:
 - or set `tools.browser_use.api_key` in `config.yaml`
 - or set `tools.browser_use.api_key_env` and let Supabash map that env var to `BROWSER_USE_API_KEY`
 
+Prefer environment variables over storing a live Browser-Use key in a repo-tracked `config.yaml`.
+
+## Runtime notes
+
+- `katana` is enabled by default in the current config template and participates in deep web baseline coverage unless disabled.
+- `tools.nuclei.rate_limit` is the main runtime throttle for both baseline and targeted Nuclei scans.
+- `tools.nuclei.normal_mode_broad_rate_limit` is optional and affects only the broad multi-target baseline pass in `normal` mode.
+- Set `tools.nuclei.normal_mode_broad_rate_limit: 0` to fully honor `tools.nuclei.rate_limit`.
+- SQLMap target harvesting is conservative: Supabash strips evidence suffixes from harvested URLs and blocks object-store listing-style query params such as `list-type`, `prefix`, and `delimiter` from becoming automatic SQLMap targets.
+
 ## Python dependencies
 ```bash
 python3 -m venv venv

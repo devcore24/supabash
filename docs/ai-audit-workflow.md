@@ -12,6 +12,7 @@ The output is a **Supabash Audit** report intended for compliance preparation an
 1) **Baseline audit (deterministic, no LLM)**
    - Runs the standard audit pipeline with LLM disabled.
    - Produces a complete baseline report.
+   - Current baseline order is: fast discovery -> nmap/httpx -> broad nuclei on live web targets -> deep web tools on prioritized targets -> readiness probes -> selective follow-up helpers such as sqlmap/supabase checks.
    - Implemented by calling `AuditOrchestrator.run()` from `audit.py`.
 
 2) **Agentic expansion (optional, tool-calling)**
@@ -74,6 +75,12 @@ Even if the model proposes a tool:
 - Threads/rate limits are clamped
 - Compliance profiles can override aggressive settings
 
+Baseline-specific notes:
+- Broad baseline `nuclei` is distinct from targeted follow-up `nuclei`.
+- `tools.nuclei.rate_limit` is the normal default for both.
+- `tools.nuclei.normal_mode_broad_rate_limit` is optional and only affects the broad multi-target baseline pass in `normal` mode.
+- If `tools.nuclei.normal_mode_broad_rate_limit=0`, Supabash fully honors `tools.nuclei.rate_limit`.
+
 ### 4.1) Browser-use tasking and feedback loop
 For `browser_use` actions, Supabash composes an evidence-aware task brief that includes:
 - Planner rationale/hypothesis/expected evidence
@@ -84,6 +91,7 @@ For `browser_use` actions, Supabash composes an evidence-aware task brief that i
 After execution, browser observations (completion status, steps, findings/URLs) are added back to run state so the next planner iteration sees what was already tried and what evidence was produced.
 If browser-use returns an incomplete run (`done=false`), Supabash can perform deterministic browser probes (`open/state/get`) as a fallback (`tools.browser_use.allow_deterministic_fallback`) and merge that evidence back into planner context.
 Browser-discovered URLs are post-validated with `httpx` before they materially influence gain or cluster closure.
+Deterministic browser fallback can also emit structured endpoint observations for non-HTML/API-style responses when the evidence is strong enough, instead of only emitting discovery URLs.
 
 ### 4.2) Coverage-debt prioritization and stopping
 Supabash tracks open HIGH/CRITICAL finding clusters during the run.
@@ -92,6 +100,7 @@ Supabash tracks open HIGH/CRITICAL finding clusters during the run.
 - Endpoint-level targets are preserved for follow-up actions (for example `/api/v1/status/config`, `/rest/v1/`) instead of collapsing them back to `/`.
 - If normal candidates are exhausted, Supabash can synthesize fallback `httpx` / `browser_use` / `nuclei` actions directly from unresolved cluster evidence.
 - Once high-risk clusters are closed and recent marginal gain is low, the planner stops with a post-closure diminishing-returns decision instead of spending low-value cleanup actions.
+- Endpoint-level browser observations can close matching high-risk clusters when the target/path and risk family align; broad host-only correlation is intentionally constrained.
 
 ### 5) Graceful fallback is built‑in
 If tool‑calling fails or isn’t supported, Supabash skips the agentic phase and still writes the baseline report.
@@ -127,3 +136,5 @@ The combined report also exposes run-quality metrics such as:
 - Tool calling cannot bypass hard constraints or enable disabled tools.
 - Report output is deterministic and auditable.
 - Low-signal duplicate `INFO` findings are suppressed in the final finding list while raw tool evidence remains preserved in the evidence/result artifacts.
+- Deep web follow-up can skip a target that becomes unavailable after baseline pressure instead of continuing to hammer an unhealthy service.
+- Disabled tools should be recorded as skipped rather than being reported as if they ran.

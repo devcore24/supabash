@@ -45,6 +45,7 @@ supabash ai-audit "http://127.0.0.1:3003/WebGoat" --compliance soc2 --mode norma
 ```
 
 You can also store the Browser-Use key in `config.yaml` under `tools.browser_use.api_key` instead of exporting `BROWSER_USE_API_KEY` each time.
+For shared repos or shared lab machines, prefer env vars over storing a live key in `config.yaml`.
 
 If `browser_use` reports missing API/LLM configuration during agentic runs, reset browser-use sessions and retry in the same shell:
 
@@ -70,6 +71,14 @@ This writes:
 in the same report folder.
 
 Use the comparator as a benchmark aid, not a strict pass/fail oracle. WebGoat is intentionally vulnerable and useful for measuring coverage gaps, but the generic localhost engine should still be validated on mixed targets (for example WebGoat + DVWA + Juice Shop + Supabase mock) so behavior does not overfit to one lab application.
+
+## 2c) Stability notes for fragile lab apps
+
+- Very high `tools.nuclei.rate_limit` values can destabilize memory-fragile demo apps during the broad baseline pass.
+- If you want a separate safety ceiling only for the broad multi-target baseline in `normal` mode, set `tools.nuclei.normal_mode_broad_rate_limit` to a positive number.
+- Set `tools.nuclei.normal_mode_broad_rate_limit: 0` to fully respect `tools.nuclei.rate_limit`.
+- If a target becomes unavailable after baseline probes, Supabash can now skip deeper per-target web follow-up instead of continuing to pressure it.
+- For fragile targets, prefer smaller labs, `light` mode, or a lower `tools.nuclei.rate_limit` while doing stability-focused regression testing.
 
 ## 3) Optional automated test
 

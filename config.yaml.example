@@ -78,6 +78,9 @@ tools:
     enabled: true
     timeout_seconds: 1800
     rate_limit: 10
+    # Optional safety cap for the multi-target broad baseline nuclei pass in normal mode.
+    # Set to 0 to fully respect `rate_limit` even during the broad baseline pass.
+    normal_mode_broad_rate_limit: 0
     tags: ""
     severity: ""
   gobuster:
@@ -87,7 +90,7 @@ tools:
     enabled: true
     timeout_seconds: 1800
   katana:
-    enabled: false
+    enabled: true
     timeout_seconds: 1800
     depth: 3
     concurrency: 10
