@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from pathlib import Path
@@ -190,6 +191,31 @@ class FakeNmapScannerSingleWebPort:
                                 "service": "http",
                                 "product": "nginx",
                                 "version": "1.0",
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+
+
+class FakeNmapScannerSupabaseOnly:
+    def scan(self, target, arguments=None, **kwargs):
+        return {
+            "success": True,
+            "command": f"nmap {target} -oX - -sV --script ssl-enum-ciphers -p-",
+            "scan_data": {
+                "hosts": [
+                    {
+                        "ip": "127.0.0.1",
+                        "ports": [
+                            {
+                                "port": 4001,
+                                "protocol": "tcp",
+                                "state": "open",
+                                "service": "http",
+                                "product": "postgrest",
+                                "version": "11",
                             }
                         ],
                     }
@@ -568,6 +594,47 @@ class FakeLLMSelectBrowserUse8080:
         return (
             [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
             {"provider": "fake", "model": "fake-browser-use-planner", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMSelectCoveredHttpx4001:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        if self.plan_calls == 1:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "httpx",
+                                    "arguments": {"profile": "soc2", "target": "http://localhost:4001"},
+                                    "reasoning": "Repeat a simple host-level status check on the Supabase endpoint.",
+                                    "hypothesis": "The host root may be enough to resolve the remaining exposure.",
+                                    "expected_evidence": "HTTP response details from the already-known host root.",
+                                    "priority": 5,
+                                }
+                            ],
+                            "stop": False,
+                            "notes": "Start from the known host root.",
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-covered-httpx-planner", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True, "notes": "Done."}}],
+            {"provider": "fake", "model": "fake-covered-httpx-planner", "usage": {"total_tokens": 4}},
         )
 
     def chat_with_meta(self, messages, temperature=0.2):
@@ -1380,10 +1447,68 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         ]
         self.assertEqual(len(actions), 1)
         if actions:
-            self.assertEqual(actions[0].get("target"), "http://localhost:9090")
+            self.assertEqual(actions[0].get("target"), "http://localhost:9090/api/v1/status/config")
         trace = report.get("ai_audit", {}).get("decision_trace", [])
         self.assertIsInstance(trace, list)
         self.assertTrue(any((t.get("decision") or {}).get("result") == "executed" for t in trace if isinstance(t, dict)))
+
+    def test_coverage_debt_injects_path_preserving_httpx_action_for_unresolved_rest_api_cluster(self):
+        scanners = {
+            "nmap": FakeNmapScannerSupabaseOnly(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "supabase_audit": SimpleNamespace(
+                scan=lambda target, **kwargs: {
+                    "success": True,
+                    "command": f"supabase_audit {target}",
+                    "exposures": [
+                        {
+                            "type": "rls_misconfig",
+                            "url": "http://localhost:4001/rest/v1/",
+                            "status": 200,
+                        }
+                    ],
+                }
+            ),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectCoveredHttpx4001())
+        orchestrator._run_readiness_probe = lambda **kwargs: {"success": True, "findings": []}
+        output = artifact_path("ai_audit_coverage_debt_rest_path.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+        )
+
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("phase") == "agentic"
+        ]
+        self.assertEqual(len(actions), 1)
+        if actions:
+            self.assertEqual(actions[0].get("tool"), "httpx")
+            self.assertEqual(actions[0].get("target"), "http://localhost:4001/rest/v1/")
+
+        trace = report.get("ai_audit", {}).get("decision_trace", [])
+        self.assertIsInstance(trace, list)
+        self.assertTrue(
+            any(
+                isinstance(step, dict)
+                and isinstance(step.get("coverage_debt_pivot"), dict)
+                and any(
+                    str((candidate or {}).get("target") or "").strip() == "http://localhost:4001/rest/v1/"
+                    for candidate in (step.get("coverage_debt_pivot", {}).get("injected") or [])
+                    if isinstance(candidate, dict)
+                )
+                for step in trace
+            )
+        )
 
     def test_gobuster_wildcard_target_pivots_to_ffuf_without_repeating_gobuster(self):
         scanners = _build_scanners()

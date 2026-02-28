@@ -1488,6 +1488,24 @@ class AuditOrchestrator:
                 classes.add(value)
         return classes
 
+    def _suppress_low_signal_duplicate_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        kept: List[Dict[str, Any]] = []
+        seen_nuclei_info: set[str] = set()
+        for finding in findings or []:
+            if not isinstance(finding, dict):
+                continue
+            tool = str(finding.get("tool") or "").strip().lower()
+            severity = str(finding.get("severity") or "INFO").strip().upper() or "INFO"
+            dedup_key = str(finding.get("dedup_key") or "").strip()
+            if not dedup_key:
+                dedup_key = self._finding_dedup_key(finding)
+            if tool == "nuclei" and severity == "INFO" and dedup_key:
+                if dedup_key in seen_nuclei_info:
+                    continue
+                seen_nuclei_info.add(dedup_key)
+            kept.append(finding)
+        return kept
+
     def _build_finding_metrics(self, findings: List[Dict[str, Any]]) -> Dict[str, Any]:
         items = [f for f in (findings or []) if isinstance(f, dict)]
         total = len(items)
@@ -2152,7 +2170,8 @@ class AuditOrchestrator:
                     finding.setdefault("target", entry_target)
                 if entry_profile:
                     finding.setdefault("profile", entry_profile)
-        return self._annotate_finding_keys(findings)
+        findings = self._annotate_finding_keys(findings)
+        return self._suppress_low_signal_duplicate_findings(findings)
 
     def _apply_compliance_tags(
         self,

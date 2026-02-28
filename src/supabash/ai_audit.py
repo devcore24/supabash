@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from threading import Event
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 from supabash.audit import AuditOrchestrator
 from supabash.agent import MethodologyPlanner
@@ -1137,6 +1137,30 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     candidates.sort(key=_rank)
                     return candidates[0]
 
+                def _preserve_allowed_web_target_path(target: str) -> Optional[str]:
+                    text = str(target or "").strip()
+                    if not text:
+                        return None
+                    parse_input = text if "://" in text else f"http://{text}"
+                    try:
+                        parsed = urlparse(parse_input)
+                        scheme = str(parsed.scheme or "http").strip().lower() or "http"
+                        host = str(parsed.hostname or "").strip().lower()
+                        if scheme not in ("http", "https") or not host:
+                            return None
+                        port = int(parsed.port or (443 if scheme == "https" else 80))
+                    except Exception:
+                        return None
+                    if _preferred_allowed_web_target((host, port)) is None:
+                        return None
+                    path = str(parsed.path or "")
+                    if not path and (text.endswith("/") or parse_input.endswith("/")):
+                        path = "/"
+                    query = str(parsed.query or "")
+                    default_port = 443 if scheme == "https" else 80
+                    netloc = host if port == default_port else f"{host}:{port}"
+                    return urlunparse((scheme, netloc, path, "", query, ""))
+
                 def _canonicalize_web_action_target(tool: str, target: str) -> str:
                     text = str(target or "").strip()
                     if not text:
@@ -1144,6 +1168,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     tool_name = str(tool or "").strip().lower()
                     if tool_name in ("sqlmap", "browser_use"):
                         return text
+                    preserved = _preserve_allowed_web_target_path(text)
+                    if preserved:
+                        try:
+                            parsed = urlparse(preserved)
+                            if (
+                                (str(parsed.path or "").strip() and str(parsed.path or "").strip() != "/")
+                                or str(parsed.query or "").strip()
+                                or text.endswith("/")
+                            ):
+                                return preserved
+                        except Exception:
+                            return preserved
                     host_port = _web_target_host_port_key(text)
                     if host_port is None:
                         return text
@@ -1213,6 +1249,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return normalized_candidate
                     if text in allowed_web_targets:
                         return text
+                    preserved = _preserve_allowed_web_target_path(text)
+                    if preserved:
+                        try:
+                            parsed = urlparse(preserved)
+                            if (
+                                (str(parsed.path or "").strip() and str(parsed.path or "").strip() != "/")
+                                or str(parsed.query or "").strip()
+                                or text.endswith("/")
+                            ):
+                                return preserved
+                        except Exception:
+                            return preserved
                     host_port = _web_target_host_port_key(text)
                     if host_port is None:
                         return None
@@ -2520,13 +2568,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         risk_counts[rc] = int(risk_counts.get(rc, 0)) + 1
 
                     if not risk_counts:
-                        preferred = ["whatweb", "gobuster", "ffuf", "katana"]
-                    elif any(k in risk_counts for k in ("unauthenticated_exposure", "data_plane_exposure")):
-                        preferred = ["gobuster", "ffuf", "whatweb", "katana"]
+                        preferred = ["httpx", "browser_use", "nuclei", "whatweb", "gobuster", "ffuf", "katana"]
                     elif "secret_exposure" in risk_counts:
-                        preferred = ["whatweb", "gobuster", "ffuf", "katana"]
+                        preferred = ["httpx", "browser_use", "whatweb", "nuclei", "gobuster", "ffuf", "katana"]
+                    elif any(
+                        k in risk_counts
+                        for k in ("unauthenticated_exposure", "data_plane_exposure", "general_security_signal")
+                    ):
+                        preferred = ["httpx", "browser_use", "nuclei", "whatweb", "gobuster", "ffuf", "katana"]
                     else:
-                        preferred = ["whatweb", "gobuster", "ffuf", "katana"]
+                        preferred = ["httpx", "browser_use", "nuclei", "whatweb", "gobuster", "ffuf", "katana"]
                     return [t for t in preferred if t in allowed_tools]
 
                 def _coverage_debt_candidate_targets(
@@ -2555,7 +2606,23 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         seen.add(u)
                         out.append(u)
 
-                    # 1) Prefer blocked nuclei targets (same host:port surface).
+                    def _add_allowed_surface_url(value: Any) -> None:
+                        preserved = _preserve_allowed_web_target_path(str(value or "").strip())
+                        if preserved:
+                            _add(preserved)
+
+                    # 1) Prefer concrete URLs from unresolved cluster evidence.
+                    for cluster in open_clusters[:10]:
+                        if not isinstance(cluster, dict):
+                            continue
+                        for sample in cluster.get("evidence_samples", []) or []:
+                            text = str(sample or "").strip()
+                            if not text:
+                                continue
+                            for url in re.findall(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE):
+                                _add_allowed_surface_url(str(url).rstrip(".,;"))
+
+                    # 2) Prefer blocked nuclei targets (same host:port surface).
                     for cand in repeat_blocked_actions or []:
                         if not isinstance(cand, dict):
                             continue
@@ -2567,14 +2634,6 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         if hp:
                             for mapped in by_host_port.get(hp, []):
                                 _add(mapped)
-
-                    # 2) High-risk web targets from current evidence graph.
-                    risk_scores = _target_risk_scores_now()
-                    ranked_risk_targets = [
-                        t for _, t in sorted([(int(v), k) for k, v in risk_scores.items() if int(v) > 0], key=lambda x: (-x[0], x[1]))
-                    ]
-                    for target in ranked_risk_targets[:8]:
-                        _add(target)
 
                     # 3) Cluster labels -> host/path candidates on in-scope host:port surfaces.
                     for cluster in open_clusters[:10]:
@@ -2603,9 +2662,19 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             else:
                                 mapped_bases = by_host.get(host_part, [])
                             for base in mapped_bases:
-                                _add(base)
                                 if path_part and path_part != "/":
-                                    _add(f"{str(base).rstrip('/')}{path_part}")
+                                    _add_allowed_surface_url(f"{str(base).rstrip('/')}{path_part}")
+                                else:
+                                    _add_allowed_surface_url(base if str(base).endswith("/") else f"{str(base).rstrip('/')}/")
+                                _add(base)
+
+                    # 4) High-risk web targets from current evidence graph.
+                    risk_scores = _target_risk_scores_now()
+                    ranked_risk_targets = [
+                        t for _, t in sorted([(int(v), k) for k, v in risk_scores.items() if int(v) > 0], key=lambda x: (-x[0], x[1]))
+                    ]
+                    for target in ranked_risk_targets[:8]:
+                        _add(target)
 
                     if not out:
                         for target in allowed_web_targets[:6]:
@@ -2619,18 +2688,6 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 ) -> List[Dict[str, Any]]:
                     if int(coverage_debt_pivot_count) >= int(coverage_debt_pivot_cap):
                         return []
-                    blocked_nuclei = []
-                    for cand in repeat_blocked_actions or []:
-                        if not isinstance(cand, dict):
-                            continue
-                        if str(cand.get("tool") or "").strip().lower() != "nuclei":
-                            continue
-                        key = _action_repeat_key(cand)
-                        reason = repeat_blocked_reason_map.get(key or ("", ""), "repeat_policy")
-                        blocked_nuclei.append((cand, reason))
-                    if not blocked_nuclei:
-                        return []
-
                     tool_order = _coverage_debt_pivot_tool_order(open_clusters)
                     if not tool_order:
                         return []
@@ -2640,6 +2697,18 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                     profile = requested_compliance or "standard"
                     reason_by_tool = {
+                        "httpx": (
+                            "Coverage-debt pivot: revalidate the unresolved high-risk endpoint directly and "
+                            "capture concrete status/title/header evidence on the specific path."
+                        ),
+                        "browser_use": (
+                            "Coverage-debt pivot: validate unresolved high-risk exposure through an "
+                            "interactive web workflow and capture audit-grade endpoint evidence."
+                        ),
+                        "nuclei": (
+                            "Coverage-debt pivot: run targeted template validation against the unresolved "
+                            "high-risk endpoint for reproducible proof."
+                        ),
                         "whatweb": (
                             "Coverage-debt pivot: fingerprint unresolved high-risk service to confirm "
                             "component/header context before remediation."
@@ -2658,10 +2727,22 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         ),
                     }
                     expected_by_tool = {
+                        "httpx": "HTTP status/title/header evidence for the unresolved high-risk endpoint.",
+                        "browser_use": "Rendered workflow observations and concrete endpoint artifacts tied to unresolved exposure.",
+                        "nuclei": "Template-level evidence confirming or disproving the unresolved high-risk hypothesis.",
                         "whatweb": "Service fingerprint and security-relevant headers linked to unresolved clusters.",
                         "gobuster": "Additional high-value paths/endpoints supporting or disproving unresolved cluster impact.",
                         "ffuf": "HTTP hits on sensitive/admin/config paths relevant to unresolved high-risk findings.",
                         "katana": "Discovered endpoint graph and candidate URLs associated with unresolved high-risk areas.",
+                    }
+                    priority_by_tool = {
+                        "httpx": 1,
+                        "browser_use": 2,
+                        "nuclei": 3,
+                        "whatweb": 5,
+                        "gobuster": 6,
+                        "ffuf": 7,
+                        "katana": 8,
                     }
 
                     out: List[Dict[str, Any]] = []
@@ -2678,7 +2759,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     "high-risk clusters."
                                 ),
                                 "expected_evidence": expected_by_tool.get(tool, "Additional evidence for unresolved clusters."),
-                                "priority": 3,
+                                "priority": int(priority_by_tool.get(tool, 5)),
                             }
                             key = _action_repeat_key(action)
                             if key and key in seen_keys:
@@ -3006,6 +3087,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "count": c.get("count"),
                             "targets": c.get("targets", [])[:4],
                             "tools": c.get("tools", [])[:4],
+                            "evidence_samples": c.get("evidence_samples", [])[:3],
                         }
                         for c in clusters
                         if int(c.get("severity_rank", 0)) >= 4 and not bool(c.get("seen_in_agentic"))
@@ -3589,17 +3671,19 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 trace_item["coverage_debt_pivot"] = {
                                     "attempted": True,
                                     "pivot_count": int(coverage_debt_pivot_count),
-                                    "reason": "nuclei_repeat_blocked_with_open_high_risk",
+                                    "reason": (
+                                        "nuclei_repeat_blocked_with_open_high_risk"
+                                        if repeat_blocked
+                                        else "coverage_debt_no_actionable_candidates"
+                                    ),
                                     "injected_count": len(pivot_candidates),
                                     "injected": [_action_trace_view(a) for a in pivot_candidates[:6]],
                                 }
                                 note(
                                     "llm_decision",
                                     "planner",
-                                    (
-                                        "coverage debt pivot injected "
-                                        f"{len(pivot_candidates)} fallback candidate(s) after nuclei repeat blocking"
-                                    ),
+                                    "coverage debt pivot injected "
+                                    f"{len(pivot_candidates)} cluster-derived candidate(s)",
                                     agg=agg,
                                 )
 
@@ -3624,7 +3708,53 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                         ],
                                     }
                                 else:
-                                    if not replan_attempted:
+                                    pivot_candidates = _build_coverage_debt_pivot_actions(
+                                        open_high_risk_clusters,
+                                        repeat_blocked,
+                                        repeat_blocked_reasons,
+                                    )
+                                    if pivot_candidates:
+                                        coverage_debt_pivot_count = int(coverage_debt_pivot_count) + 1
+                                        actionable = list(pivot_candidates)
+                                        trace_item["coverage_debt_pivot"] = {
+                                            "attempted": True,
+                                            "pivot_count": int(coverage_debt_pivot_count),
+                                            "reason": "no_open_high_risk_linked_candidates",
+                                            "injected_count": len(pivot_candidates),
+                                            "injected": [_action_trace_view(a) for a in pivot_candidates[:6]],
+                                        }
+                                        note(
+                                            "llm_decision",
+                                            "planner",
+                                            (
+                                                "coverage debt pivot injected "
+                                                f"{len(pivot_candidates)} cluster-derived candidate(s)"
+                                            ),
+                                            agg=agg,
+                                        )
+                                        linked_actionable = [
+                                            a for a in actionable if _action_links_open_high_risk_cluster(a)
+                                        ]
+                                        if linked_actionable:
+                                            actionable = linked_actionable
+                                            trace_item["coverage_debt_filter"] = {
+                                                "active": True,
+                                                "open_high_risk_cluster_count": int(coverage_debt_open_count),
+                                                "linked_candidates_count": len(linked_actionable),
+                                                "unresolved_clusters_preview": [
+                                                    {
+                                                        "cluster_id": str(c.get("cluster_id") or ""),
+                                                        "severity": str(c.get("severity") or ""),
+                                                        "risk_class": str(c.get("risk_class") or ""),
+                                                        "title": str(c.get("title") or ""),
+                                                    }
+                                                    for c in open_high_risk_clusters[:6]
+                                                    if isinstance(c, dict)
+                                                ],
+                                            }
+                                        else:
+                                            actionable = []
+                                    if not actionable and not replan_attempted:
                                         replan_attempted = True
                                         excluded_actions_for_replan = _covered_action_exclusions(sorted_candidates)
                                         trace_item["replan"] = {
@@ -3643,15 +3773,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                             agg=agg,
                                         )
                                         continue
-                                    trace_item["unresolved_high_risk_clusters"] = open_high_risk_clusters[:10]
-                                    trace_item["decision"] = {
-                                        "result": "stop",
-                                        "reason": "unresolved_high_risk_no_actionable_candidates",
-                                    }
-                                    trace_item["finished_at"] = time.time()
-                                    ai_obj.setdefault("decision_trace", []).append(trace_item)
-                                    action = None
-                                    break
+                                    if not actionable:
+                                        trace_item["unresolved_high_risk_clusters"] = open_high_risk_clusters[:10]
+                                        trace_item["decision"] = {
+                                            "result": "stop",
+                                            "reason": "unresolved_high_risk_no_actionable_candidates",
+                                        }
+                                        trace_item["finished_at"] = time.time()
+                                        ai_obj.setdefault("decision_trace", []).append(trace_item)
+                                        action = None
+                                        break
 
                             actionable.sort(
                                 key=lambda a: (

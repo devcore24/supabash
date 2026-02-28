@@ -454,6 +454,46 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertIn("dedup_key", findings[0])
         self.assertIn("risk_class", findings[0])
 
+    def test_collect_findings_suppresses_duplicate_info_nuclei_noise(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        agg = {
+            "results": [
+                {
+                    "tool": "nuclei",
+                    "success": True,
+                    "data": {
+                        "findings": [
+                            {
+                                "severity": "info",
+                                "name": "HTTP Missing Security Headers",
+                                "matched_at": "http://localhost:8080",
+                                "type": "http",
+                            },
+                            {
+                                "severity": "info",
+                                "name": "HTTP Missing Security Headers",
+                                "matched_at": "http://localhost:8080",
+                                "type": "http",
+                            },
+                            {
+                                "severity": "high",
+                                "name": "Prometheus Monitoring System - Unauthenticated",
+                                "matched_at": "http://localhost:9090/api/v1/status/config",
+                                "type": "http",
+                            },
+                        ]
+                    },
+                }
+            ]
+        }
+
+        findings = orch._collect_findings(agg)
+        self.assertEqual(len(findings), 2)
+        info_findings = [f for f in findings if str(f.get("severity") or "").upper() == "INFO"]
+        high_findings = [f for f in findings if str(f.get("severity") or "").upper() == "HIGH"]
+        self.assertEqual(len(info_findings), 1)
+        self.assertEqual(len(high_findings), 1)
+
     def test_handles_failure(self):
         scanners = {
             "nmap": FakeFailScanner("nmap"),
