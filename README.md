@@ -222,6 +222,21 @@ SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest discover -s tests -q
 For a clear breakdown of how `ai-audit` selects tools and produces its final report:
 - [AI Audit Workflow](docs/ai-audit-workflow.md)
 
+## 🧠 GenAI / LLM Security Roadmap
+
+Supabash is also being planned as a universal AI security workflow for GenAI applications, agents, RAG systems, browser agents, coding agents, and MCP-connected systems.
+
+Key design choice:
+
+- keep one main AI audit workflow
+- avoid command sprawl
+- move specialized red-team / blue-team / benchmark behavior into internal modules and planner logic
+
+Roadmap and reasoning:
+
+- strategy and external references: [AI / LLM Security Roadmap](docs/ai-llm-security-roadmap.md)
+- planned implementation phases: [TODO.md](TODO.md)
+
 ## 💻 Usage
 
 Once installed, the `supabash` command is available globally.

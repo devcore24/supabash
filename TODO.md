@@ -90,6 +90,38 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
 
 ---
 
+## 🎯 Phase 14: AI / LLM Security Expansion (Planned)
+*Goal: evolve `ai-audit` into a universal AI security workflow for GenAI, agent, RAG, browser-agent, and MCP targets without adding command clutter.*
+
+- [ ] **Keep one main AI audit workflow**
+    - [ ] Reuse `ai-audit` and chat as the main operator interface instead of adding many new AI-specific commands.
+    - [ ] Let the planner infer whether a run is acting in a red-team, blue-team, benchmark, or regression role.
+    - [ ] Keep AI security work modular internally, not command-heavy externally.
+- [ ] **Add AI target modeling**
+    - [ ] Identify target classes such as chatbot, RAG app, tool-using agent, browser agent, coding agent, API wrapper, and MCP-connected system.
+    - [ ] Capture target capabilities, sinks, trust boundaries, and retrieval/tool context in run metadata.
+- [ ] **Add AI attack corpus ingestion**
+    - [ ] Ingest external prompt / jailbreak corpora such as L1B3RT4S as payload sources and mutation seeds.
+    - [ ] Normalize payloads by tactic family instead of storing them as one-off prompt files.
+    - [ ] Keep this layer provider-aware but framework-agnostic.
+- [ ] **Add sink-aware exploit validation**
+    - [ ] Evaluate whether model output reaches real sinks such as shell, SQL, browser/HTML, markdown, tool calls, secrets, or data exfiltration paths.
+    - [ ] Score impact based on exploitability, not only model compliance with a prompt.
+- [ ] **Cover current OWASP GenAI risk families**
+    - [ ] Prioritize prompt injection, improper output handling, sensitive information disclosure, tool misuse, and retrieval/memory poisoning.
+    - [ ] Map findings to current OWASP GenAI 2025 terminology instead of older naming.
+- [ ] **Expand into agent / MCP security**
+    - [ ] Add scenarios for tool-call hijacking, approval bypass, unsafe autonomous actions, MCP misuse, and agent runtime abuse.
+    - [ ] Add replayable evidence for tool invocation chains and downstream effects.
+- [ ] **Build blue-team validation and regression**
+    - [ ] Replay successful attacks after prompt, policy, or application changes.
+    - [ ] Validate guardrails such as prompt isolation, schema enforcement, auth gating, output sanitization, and secret redaction.
+- [ ] **Track modern reference frameworks**
+    - [ ] Keep strategy aligned with OWASP GenAI, OWASP agentic guidance, and MITRE ATLAS.
+    - [ ] Benchmark ideas and payload sources against projects like PyRIT, garak, promptfoo, Inspect, LLM Guard, and PurpleLlama.
+
+---
+
 ## 🎯 Phase 9: Readiness Report Clarity Sprint (Current)
 *Goal: make Supabash readiness reports clearer and more auditor-usable than manual experimental reports while staying deterministic.*
 
