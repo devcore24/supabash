@@ -127,6 +127,25 @@ class FakeHttpxScannerWithStatus404Noise:
         }
 
 
+class FakeHttpxScannerWithStatus501SeedNoise:
+    def scan(self, targets, **kwargs):
+        alive = [str(x) for x in (targets or [])]
+        results = []
+        for url in alive:
+            text = str(url)
+            if text.endswith(("/login", "/signin", "/admin")):
+                status = 501
+            else:
+                status = 200
+            results.append({"url": text, "status_code": status})
+        return {
+            "success": True,
+            "command": "httpx -silent ...",
+            "alive": alive,
+            "results": results,
+        }
+
+
 class FakeWhatwebScanner:
     def scan(self, target, **kwargs):
         return {
@@ -518,6 +537,46 @@ class FakeBrowserUse404DiscoveryScanner:
         }
 
 
+class FakeBrowserUseS3DiscoveryScanner:
+    def __init__(self):
+        self.calls = []
+
+    def is_available(self, command_override=None):
+        return True
+
+    def scan(self, target, **kwargs):
+        self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+        base = str(target).rstrip("/")
+        return {
+            "success": True,
+            "command": f"browser-use run 'scan {target}' --max-steps 6",
+            "urls": [
+                f"{base}/",
+                f"{base}/?delimiter=/",
+                f"{base}/metrics",
+                f"{base}/login",
+                f"{base}/signin",
+                f"{base}/admin",
+            ],
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Anonymous S3-compatible bucket listing verified in browser workflow",
+                    "evidence": f"{base}/ returned S3-compatible listing content without explicit authentication workflow (HTTP 200; marker=ListAllMyBucketsResult).",
+                    "type": "browser_observation",
+                    "confidence": "high",
+                }
+            ],
+            "completed": True,
+            "observation": {
+                "done": True,
+                "steps": 3,
+                "focus_hits": 1,
+                "focused_endpoint_artifacts": 1,
+            },
+        }
+
+
 class FakeBrowserUseCrossOriginScanner(FakeBrowserUseScanner):
     def scan(self, target, **kwargs):
         self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
@@ -847,6 +906,52 @@ class FakeLLMSelectBrowserUse9090:
         return (
             [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
             {"provider": "fake", "model": "fake-browser-use-9090", "usage": {"total_tokens": 4}},
+        )
+
+    def chat_with_meta(self, messages, temperature=0.2):
+        return (
+            json.dumps({"summary": "Synthetic summary.", "findings": []}),
+            {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+        )
+
+
+class FakeLLMThreeBrowserUseTargets:
+    def __init__(self):
+        self.plan_calls = 0
+
+    def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+        self.plan_calls += 1
+        target_by_call = {
+            1: "http://localhost:4001",
+            2: "http://localhost:8080",
+            3: "http://localhost:9090/api/v1/status/config",
+        }
+        target = target_by_call.get(self.plan_calls)
+        if target:
+            return (
+                [
+                    {
+                        "name": "propose_actions",
+                        "arguments": {
+                            "actions": [
+                                {
+                                    "tool_name": "browser_use",
+                                    "arguments": {"profile": "soc2", "target": target},
+                                    "reasoning": "Validate unresolved high-risk exposure on the selected origin.",
+                                    "hypothesis": "The selected target is still the best closure-grade browser candidate.",
+                                    "expected_evidence": "Concrete browser evidence linked to the unresolved cluster.",
+                                    "priority": 1,
+                                }
+                            ],
+                            "stop": False,
+                        },
+                    }
+                ],
+                {"provider": "fake", "model": "fake-browser-use-3step", "usage": {"total_tokens": 8}},
+            )
+        return (
+            [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+            {"provider": "fake", "model": "fake-browser-use-3step", "usage": {"total_tokens": 4}},
         )
 
     def chat_with_meta(self, messages, temperature=0.2):
@@ -2768,6 +2873,199 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertNotIn("http://localhost:8080/api/v1/status/config/login", discovery_evidence)
         self.assertNotIn("http://localhost:8080/api/v1/status/config/signin", discovery_evidence)
         self.assertNotIn("http://localhost:8080/api/v1/status/config/admin", discovery_evidence)
+
+    def test_browser_use_validation_suppresses_501_seed_noise_on_root_target(self):
+        scanners = {
+            "nmap": FakeNmapScannerSingleWebPort(),
+            "httpx": FakeHttpxScannerWithStatus501SeedNoise(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseS3DiscoveryScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse8080())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Anonymous S3-compatible bucket listing accessible",
+                    "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                    "type": "s3_bucket_listing",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_browser_use_validation_suppresses_501_seed_noise.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        browser_entries = [
+            r
+            for r in (report.get("results") or [])
+            if isinstance(r, dict) and r.get("tool") == "browser_use" and r.get("phase") == "agentic"
+        ]
+        self.assertTrue(browser_entries)
+        data = browser_entries[0].get("data", {}) if isinstance(browser_entries[0].get("data"), dict) else {}
+        self.assertEqual(
+            data.get("urls"),
+            ["http://localhost:8080/", "http://localhost:8080/?delimiter=/", "http://localhost:8080/metrics"],
+        )
+        validation_block = data.get("browser_discovery_validation") if isinstance(data.get("browser_discovery_validation"), dict) else {}
+        hygiene = validation_block.get("url_hygiene") if isinstance(validation_block.get("url_hygiene"), dict) else {}
+        self.assertEqual(int(hygiene.get("suppressed_by_status", 0)), 3)
+        findings = report.get("findings") if isinstance(report.get("findings"), list) else []
+        discovery_evidence = [str(f.get("evidence") or "") for f in findings if isinstance(f, dict) and f.get("type") == "browser_discovery"]
+        self.assertNotIn("http://localhost:8080/login", discovery_evidence)
+        self.assertNotIn("http://localhost:8080/signin", discovery_evidence)
+        self.assertNotIn("http://localhost:8080/admin", discovery_evidence)
+
+    def test_browser_use_total_cap_allows_new_unresolved_high_risk_surface(self):
+        class FakeNmapScannerPorts4001_8080_9090:
+            def scan(self, target, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {"port": 4001, "protocol": "tcp", "state": "open", "service": "http", "product": "supabase", "version": "1"},
+                                    {"port": 8080, "protocol": "tcp", "state": "open", "service": "http", "product": "minio", "version": "1"},
+                                    {"port": 9090, "protocol": "tcp", "state": "open", "service": "http", "product": "prometheus", "version": "1"},
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeBrowserUseThreeSurfaceScanner:
+            def __init__(self):
+                self.calls = []
+
+            def is_available(self, command_override=None):
+                return True
+
+            def scan(self, target, **kwargs):
+                self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+                text = str(target).rstrip("/")
+                if text == "http://localhost:4001":
+                    return {
+                        "success": True,
+                        "command": f"browser-use run 'scan {target}'",
+                        "urls": [text, f"{text}/rest/v1/"],
+                        "findings": [
+                            {
+                                "severity": "CRITICAL",
+                                "title": "Supabase service role key exposed",
+                                "evidence": f"{text} returned a service_role token without authentication.",
+                                "type": "browser_observation",
+                                "confidence": "high",
+                            }
+                        ],
+                        "completed": True,
+                        "observation": {"done": True, "steps": 2, "focus_hits": 1, "focused_endpoint_artifacts": 1},
+                    }
+                if text == "http://localhost:8080":
+                    return {
+                        "success": True,
+                        "command": f"browser-use run 'scan {target}'",
+                        "urls": [f"{text}/", f"{text}/?delimiter=/"],
+                        "findings": [
+                            {
+                                "severity": "HIGH",
+                                "title": "Anonymous S3-compatible bucket listing verified in browser workflow",
+                                "evidence": f"{text}/ returned S3-compatible listing content without explicit authentication workflow (HTTP 200; marker=ListAllMyBucketsResult).",
+                                "type": "browser_observation",
+                                "confidence": "high",
+                            }
+                        ],
+                        "completed": True,
+                        "observation": {"done": True, "steps": 2, "focus_hits": 1, "focused_endpoint_artifacts": 1},
+                    }
+                return {
+                    "success": True,
+                    "command": f"browser-use run 'scan {target}'",
+                    "urls": [text],
+                    "findings": [
+                        {
+                            "severity": "HIGH",
+                            "title": "Unauthenticated configuration exposure verified in browser workflow",
+                            "evidence": f"{text} returned configuration-like content without authentication workflow.",
+                            "type": "browser_observation",
+                            "confidence": "high",
+                        }
+                    ],
+                    "completed": True,
+                    "observation": {"done": True, "steps": 2, "focus_hits": 1, "focused_endpoint_artifacts": 1},
+                }
+
+        browser = FakeBrowserUseThreeSurfaceScanner()
+        scanners = {
+            "nmap": FakeNmapScannerPorts4001_8080_9090(),
+            "httpx": FakeHttpxScannerWithStatus(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": browser,
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMThreeBrowserUseTargets())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "CRITICAL",
+                    "title": "Supabase service role key exposed",
+                    "evidence": "http://localhost:4001 (HTTP 200); marker=service_role",
+                    "type": "secret_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Anonymous S3-compatible bucket listing accessible",
+                    "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                    "type": "s3_bucket_listing",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                },
+            ],
+        }
+        output = artifact_path("ai_audit_browser_use_new_surface_beyond_total_cap.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=3,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        self.assertEqual(len(browser.calls), 3)
+        targets = [str(call.get("target") or "") for call in browser.calls]
+        self.assertEqual(
+            targets,
+            ["http://localhost:4001", "http://localhost:8080", "http://localhost:9090/api/v1/status/config"],
+        )
+        cluster_overview = report.get("finding_cluster_overview", {})
+        self.assertEqual(int(cluster_overview.get("open_high_risk_cluster_count", 0)), 0)
 
     def test_ai_audit_persists_normalized_summary_findings(self):
         class SummaryNormalizationLLM:

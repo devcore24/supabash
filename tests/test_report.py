@@ -500,6 +500,69 @@ class TestReport(unittest.TestCase):
         suppressed = meta.get("suppressed_summary_items") or []
         self.assertTrue(any(item.get("reason") == "generic_replaced_by_concrete" for item in suppressed))
 
+    def test_normalize_report_summary_dedupes_family_backfills_and_keeps_room_for_other_high_signal(self):
+        summary = {
+            "summary": "Top issues observed.",
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Supabase service role key exposed",
+                    "evidence": "http://localhost:4001 returned key material.",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Anonymous S3-compatible bucket listing enabled (unauthenticated)",
+                    "evidence": "http://localhost:8080/ returned bucket listing markers.",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Supabase REST API accessible without authentication (potential RLS bypass risk)",
+                    "evidence": "http://localhost:4001/rest/v1/ returned 200.",
+                },
+            ],
+        }
+        findings = [
+            {
+                "severity": "CRITICAL",
+                "title": "Supabase service role key exposed",
+                "tool": "supabase_audit",
+                "evidence": "service_role key leaked at http://localhost:4001",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Anonymous S3-compatible bucket listing accessible",
+                "tool": "readiness_probe",
+                "risk_class": "unauthenticated_exposure",
+                "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Anonymous S3-compatible bucket listing verified in browser workflow",
+                "tool": "browser_use",
+                "risk_class": "unauthenticated_exposure",
+                "type": "browser_observation",
+                "confidence": "high",
+                "evidence": "http://localhost:8080/?delimiter=/ returned S3-compatible listing content without explicit authentication workflow.",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Prometheus config endpoint accessible without authentication",
+                "tool": "readiness_probe",
+                "risk_class": "unauthenticated_exposure",
+                "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+            },
+        ]
+
+        normalized, meta = normalize_report_summary(summary, findings)
+
+        summary_findings = normalized.get("findings") or []
+        titles = [str(item.get("title") or "") for item in summary_findings if isinstance(item, dict)]
+        s3_titles = [title for title in titles if "Anonymous S3-compatible bucket listing" in title]
+        self.assertEqual(len(s3_titles), 1)
+        self.assertIn("Prometheus config endpoint accessible without authentication", titles)
+        added = meta.get("added_findings") or []
+        self.assertTrue(any(item.get("title") == "Prometheus config endpoint accessible without authentication" for item in added))
+
     def test_recommended_next_actions_include_explicit_critical_recommendation(self):
         report = {
             "target": "localhost",

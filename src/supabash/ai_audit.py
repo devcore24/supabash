@@ -3723,7 +3723,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             return "tool_low_gain_repeat_cap"
                     if pair_count >= int(limits.get("max_per_pair", 1)):
                         return "tool_target_repeat_cap"
-                    if tool == "nuclei" and baseline_broad_nuclei_targets and tool_count >= int(limits.get("max_total", 1)):
+                    if (
+                        tool == "browser_use"
+                        and tool_count >= int(limits.get("max_total", 1))
+                        and pair_count < int(limits.get("max_per_pair", 1))
+                        and _action_links_open_high_risk_cluster(action)
+                    ):
+                        # Allow one more browser validation on a new unresolved high-risk surface
+                        # even after the global browser-use total cap is reached.
+                        pass
+                    elif tool == "nuclei" and baseline_broad_nuclei_targets and tool_count >= int(limits.get("max_total", 1)):
                         return "tool_repeat_cap"
                     if tool_count >= int(limits.get("max_total", 1)) and (novelty <= 1 or gain_score <= 0):
                         return "tool_repeat_cap"
@@ -3856,6 +3865,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     validation_block["validated_count"] = len(validated_urls)
                     results_rows = result.get("results") if isinstance(result.get("results"), list) else []
                     if results_rows:
+                        seeded_501_paths = {
+                            "/login",
+                            "/signin",
+                            "/admin",
+                            "/manager/html",
+                            "/host-manager/html",
+                        }
                         status_map: Dict[str, Any] = {}
                         for row in results_rows:
                             if not isinstance(row, dict):
@@ -3880,7 +3896,16 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     status_int = int(status) if status is not None else None
                                 except Exception:
                                     status_int = None
-                                if status_int in {404, 410}:
+                                suppress_for_status = status_int in {404, 410}
+                                if not suppress_for_status and status_int == 501:
+                                    try:
+                                        parsed_url = urlparse(str(url))
+                                        candidate_path = str(parsed_url.path or "").strip() or "/"
+                                    except Exception:
+                                        candidate_path = "/"
+                                    if candidate_path in seeded_501_paths:
+                                        suppress_for_status = True
+                                if suppress_for_status:
                                     url_hygiene["suppressed_by_status"] = int(url_hygiene.get("suppressed_by_status", 0)) + 1
                                     continue
                                 kept_urls.append(str(url))

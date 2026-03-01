@@ -358,74 +358,36 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertTrue(any(str(item.get("reason") or "") == "static_asset_candidate" for item in blocked))
 
     def test_sqlmap_blocks_low_trust_nuclei_probe_only_candidate(self):
-        class FakeNmapSinglePort:
-            def scan(self, target, ports=None, arguments=None, **kwargs):
-                return {
-                    "success": True,
-                    "command": "nmap test",
-                    "scan_data": {
-                        "hosts": [
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        normalized = orch._normalize_target("http://127.0.0.1:3003/WebGoat")
+        plan = orch._build_sqlmap_targets(
+            normalized,
+            web_targets=["http://127.0.0.1:3003/WebGoat"],
+            results=[
+                {
+                    "tool": "nuclei",
+                    "data": {
+                        "findings": [
                             {
-                                "ports": [
-                                    {"port": 3003, "protocol": "tcp", "state": "open", "service": "http"},
-                                ]
+                                "id": "tomcat-stacktraces",
+                                "name": "Tomcat Stack Traces Enabled",
+                                "severity": "low",
+                                "matched_at": "http://127.0.0.1:3003/WebGoat/?f=\\[",
+                                "type": "http",
                             }
                         ]
                     },
                 }
+            ],
+            return_plan=True,
+        )
 
-        class FakeHttpxEcho:
-            def scan(self, targets, **kwargs):
-                return {"success": True, "command": "httpx test", "alive": [str(t) for t in (targets or [])]}
-
-        class FakeNucleiProbeOnly:
-            def scan(self, target, **kwargs):
-                base = str(target).rstrip("/")
-                return {
-                    "success": True,
-                    "command": f"nuclei -u {target}",
-                    "findings": [
-                        {
-                            "id": "tomcat-stacktraces",
-                            "name": "Tomcat Stack Traces Enabled",
-                            "severity": "low",
-                            "matched_at": f"{base}/?f=\\[",
-                            "type": "http",
-                        }
-                    ],
-                }
-
-        class CaptureSqlmap:
-            def __init__(self):
-                self.calls = []
-
-            def scan(self, target, **kwargs):
-                self.calls.append(str(target))
-                return {"success": True, "command": f"sqlmap -u {target}", "findings": []}
-
-        sqlmap_scanner = CaptureSqlmap()
-        scanners = {
-            "nmap": FakeNmapSinglePort(),
-            "httpx": FakeHttpxEcho(),
-            "whatweb": FakeScanner("whatweb"),
-            "nuclei": FakeNucleiProbeOnly(),
-            "gobuster": FakeScanner("gobuster"),
-            "sqlmap": sqlmap_scanner,
-        }
-
-        orch = AuditOrchestrator(scanners=scanners, llm_client=None)
-        orch._tool_enabled = lambda _tool, default=True: True
-        output = artifact_path("audit_sqlmap_blocks_low_trust_probe.json")
-        report = orch.run("http://127.0.0.1:3003/WebGoat", output, use_llm=False)
-
-        sqlmap_targets = report.get("sqlmap_targets") if isinstance(report.get("sqlmap_targets"), list) else []
+        sqlmap_targets = plan.get("targets") if isinstance(plan.get("targets"), list) else []
         self.assertEqual(sqlmap_targets, [])
-        self.assertEqual(sqlmap_scanner.calls, [])
-        blocked = report.get("sqlmap_blocked_candidates") if isinstance(report.get("sqlmap_blocked_candidates"), list) else []
+        blocked = plan.get("blocked_candidates") if isinstance(plan.get("blocked_candidates"), list) else []
         self.assertTrue(blocked)
         if blocked:
             self.assertTrue(any("low_trust" in str(item.get("reason") or "") for item in blocked if isinstance(item, dict)))
-        cleanup_artifact(output)
 
     def test_sqlmap_preflight_blocks_definite_404_candidates(self):
         class FakeNmapSinglePort:

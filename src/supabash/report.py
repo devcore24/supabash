@@ -102,6 +102,15 @@ SUMMARY_GENERIC_TITLES = {
     "discovered endpoint",
     "browser discovered endpoint",
 }
+SUMMARY_TITLE_FAMILY_SUFFIXES = (
+    "verified in browser workflow",
+    "enabled unauthenticated",
+    "accessible without authentication",
+    "potential rls bypass risk",
+    "without authentication",
+    "enabled",
+    "accessible",
+)
 
 
 def _normalize_mapping_text(value: Any) -> str:
@@ -152,6 +161,25 @@ def _summary_extract_urls(value: Any) -> List[str]:
 
 def _is_generic_summary_title(value: Any) -> bool:
     return _summary_title_norm(value) in SUMMARY_GENERIC_TITLES
+
+
+def _summary_family_key(title: Any, risk_class: Any = "") -> str:
+    base = _summary_title_norm(title)
+    changed = True
+    while changed and base:
+        changed = False
+        for suffix in SUMMARY_TITLE_FAMILY_SUFFIXES:
+            if base.endswith(suffix):
+                trimmed = base[: -len(suffix)].strip()
+                if trimmed:
+                    base = trimmed
+                    changed = True
+                break
+    base = re.sub(r"\s+", " ", base).strip()
+    risk_key = _norm_key(risk_class)
+    if risk_key and base:
+        return f"{risk_key}|{base}"
+    return base or risk_key
 
 
 def _is_validation_grade_finding(item: Dict[str, Any]) -> bool:
@@ -426,13 +454,17 @@ def normalize_report_summary(
     normalized_entries: List[Dict[str, Any]] = []
     represented_raw_keys: Set[str] = set()
     represented_summary_keys: Set[str] = set()
+    represented_family_keys: Set[str] = set()
 
     cluster_weight_by_title: Dict[str, int] = {}
+    cluster_weight_by_family: Dict[str, int] = {}
     if isinstance(finding_clusters, list):
         for cluster in finding_clusters:
             if not isinstance(cluster, dict):
                 continue
             title_key = _summary_title_norm(cluster.get("title"))
+            family_key = _summary_family_key(cluster.get("title"), cluster.get("risk_class"))
+            bare_family_key = _summary_family_key(cluster.get("title"))
             if not title_key:
                 continue
             try:
@@ -440,6 +472,16 @@ def normalize_report_summary(
                     int(cluster_weight_by_title.get(title_key, 0)),
                     int(cluster.get("count", 0) or 0),
                 )
+                if family_key:
+                    cluster_weight_by_family[family_key] = max(
+                        int(cluster_weight_by_family.get(family_key, 0)),
+                        int(cluster.get("count", 0) or 0),
+                    )
+                if bare_family_key:
+                    cluster_weight_by_family[bare_family_key] = max(
+                        int(cluster_weight_by_family.get(bare_family_key, 0)),
+                        int(cluster.get("count", 0) or 0),
+                    )
             except Exception:
                 continue
 
@@ -503,6 +545,21 @@ def normalize_report_summary(
             meta["severity_reconciliations"].append(
                 {"title": title or original_title, "from": current_sev, "to": final_sev}
             )
+        family_keys_for_entry: Set[str] = set()
+        family_key = _summary_family_key(title or original_title)
+        bare_family_key = _summary_family_key(title or original_title, "")
+        if family_key:
+            family_keys_for_entry.add(family_key)
+        if bare_family_key:
+            family_keys_for_entry.add(bare_family_key)
+        for match in matches:
+            match_family_key = _summary_family_key(match.get("title"), match.get("risk_class"))
+            match_bare_family_key = _summary_family_key(match.get("title"))
+            if match_family_key:
+                family_keys_for_entry.add(match_family_key)
+            if match_bare_family_key:
+                family_keys_for_entry.add(match_bare_family_key)
+        represented_family_keys.update(family_keys_for_entry)
         normalized_entries.append(
             _build_summary_entry(
                 title=title,
@@ -527,7 +584,15 @@ def normalize_report_summary(
         if _is_generic_summary_title(finding.get("title")):
             continue
         title_key = _summary_title_norm(finding.get("title"))
-        if not title_key or title_key in represented_raw_keys or title_key in represented_summary_keys:
+        family_key = _summary_family_key(finding.get("title"), finding.get("risk_class"))
+        bare_family_key = _summary_family_key(finding.get("title"))
+        if (
+            not title_key
+            or title_key in represented_raw_keys
+            or title_key in represented_summary_keys
+            or (family_key and family_key in represented_family_keys)
+            or (bare_family_key and bare_family_key in represented_family_keys)
+        ):
             continue
         if not _is_validation_grade_finding(finding):
             continue
@@ -539,8 +604,12 @@ def normalize_report_summary(
         support_count = max(
             int(title_support_count.get(title_key, 0)),
             int(cluster_weight_by_title.get(title_key, 0)),
+            int(cluster_weight_by_family.get(family_key, 0)) if family_key else 0,
+            int(cluster_weight_by_family.get(bare_family_key, 0)) if bare_family_key else 0,
         )
         candidate = {
+            "family_key": family_key,
+            "bare_family_key": bare_family_key,
             "title": str(finding.get("title") or "").strip(),
             "severity": severity,
             "support_count": support_count,
@@ -552,7 +621,8 @@ def normalize_report_summary(
                 supporting_findings=matches,
             ),
         }
-        existing = candidate_map.get(title_key)
+        candidate_key = bare_family_key or family_key or title_key
+        existing = candidate_map.get(candidate_key)
         if not existing or (
             SUMMARY_SEVERITY_RANK[candidate["severity"]] > SUMMARY_SEVERITY_RANK[existing["severity"]]
             or (
@@ -566,7 +636,7 @@ def normalize_report_summary(
                 existing["title"],
             )
         ):
-            candidate_map[title_key] = candidate
+            candidate_map[candidate_key] = candidate
 
     backfill_candidates = sorted(
         candidate_map.values(),
@@ -586,6 +656,11 @@ def normalize_report_summary(
             continue
         normalized_entries.append(entry)
         represented_summary_keys.add(_summary_title_norm(entry.get("title")))
+        family_keys_to_add = {
+            str(candidate.get("family_key") or "").strip(),
+            str(candidate.get("bare_family_key") or "").strip(),
+        }
+        represented_family_keys.update({x for x in family_keys_to_add if x})
         meta["added_findings"].append(
             {
                 "title": str(entry.get("title") or "").strip(),
