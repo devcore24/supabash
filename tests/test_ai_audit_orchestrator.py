@@ -112,6 +112,21 @@ class FakeHttpxScannerWithStatus:
         }
 
 
+class FakeHttpxScannerWithStatus404Noise:
+    def scan(self, targets, **kwargs):
+        alive = [str(x) for x in (targets or [])]
+        results = []
+        for url in alive:
+            status = 404 if str(url).endswith(("/login", "/signin", "/admin")) else 200
+            results.append({"url": url, "status_code": status})
+        return {
+            "success": True,
+            "command": "httpx -silent ...",
+            "alive": alive,
+            "results": results,
+        }
+
+
 class FakeWhatwebScanner:
     def scan(self, target, **kwargs):
         return {
@@ -459,6 +474,44 @@ class FakeBrowserUseTargetOnlyScanner:
             "observation": {
                 "done": True,
                 "steps": 2,
+                "focus_hits": 1,
+                "focused_endpoint_artifacts": 1,
+            },
+        }
+
+
+class FakeBrowserUse404DiscoveryScanner:
+    def __init__(self):
+        self.calls = []
+
+    def is_available(self, command_override=None):
+        return True
+
+    def scan(self, target, **kwargs):
+        self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
+        base = str(target).rstrip("/")
+        return {
+            "success": True,
+            "command": f"browser-use run 'scan {target}' --max-steps 6",
+            "urls": [
+                base,
+                f"{base}/login",
+                f"{base}/signin",
+                f"{base}/admin",
+            ],
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Unauthenticated configuration exposure verified in browser workflow",
+                    "evidence": f"{base} returned configuration-like content without authentication workflow.",
+                    "type": "browser_observation",
+                    "confidence": "high",
+                }
+            ],
+            "completed": True,
+            "observation": {
+                "done": True,
+                "steps": 3,
                 "focus_hits": 1,
                 "focused_endpoint_artifacts": 1,
             },
@@ -2662,6 +2715,158 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             self.assertEqual(int(validation_block.get("validated_count", 0)), 1)
             status_by_url = validation_block.get("status_by_url") or {}
             self.assertEqual(status_by_url.get("http://localhost:8080/api/v1/status/config"), 200)
+
+    def test_browser_use_validation_suppresses_404_discovery_noise(self):
+        scanners = {
+            "nmap": FakeNmapScannerSingleWebPort(),
+            "httpx": FakeHttpxScannerWithStatus404Noise(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUse404DiscoveryScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse8080())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:8080/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_browser_use_validation_suppresses_404_noise.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        browser_entries = [
+            r
+            for r in (report.get("results") or [])
+            if isinstance(r, dict) and r.get("tool") == "browser_use" and r.get("phase") == "agentic"
+        ]
+        self.assertTrue(browser_entries)
+        data = browser_entries[0].get("data", {}) if isinstance(browser_entries[0].get("data"), dict) else {}
+        self.assertEqual(data.get("urls"), ["http://localhost:8080/"])
+        validation_block = data.get("browser_discovery_validation") if isinstance(data.get("browser_discovery_validation"), dict) else {}
+        hygiene = validation_block.get("url_hygiene") if isinstance(validation_block.get("url_hygiene"), dict) else {}
+        self.assertEqual(int(hygiene.get("suppressed_by_status", 0)), 3)
+        findings = report.get("findings") if isinstance(report.get("findings"), list) else []
+        discovery_evidence = [str(f.get("evidence") or "") for f in findings if isinstance(f, dict) and f.get("type") == "browser_discovery"]
+        self.assertNotIn("http://localhost:8080/api/v1/status/config/login", discovery_evidence)
+        self.assertNotIn("http://localhost:8080/api/v1/status/config/signin", discovery_evidence)
+        self.assertNotIn("http://localhost:8080/api/v1/status/config/admin", discovery_evidence)
+
+    def test_ai_audit_persists_normalized_summary_findings(self):
+        class SummaryNormalizationLLM:
+            def __init__(self):
+                self.plan_calls = 0
+
+            def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+                self.plan_calls += 1
+                if self.plan_calls == 1:
+                    return (
+                        [
+                            {
+                                "name": "propose_actions",
+                                "arguments": {
+                                    "actions": [
+                                        {
+                                            "tool_name": "browser_use",
+                                            "arguments": {
+                                                "profile": "soc2",
+                                                "target": "http://localhost:4001",
+                                                "max_steps": 8,
+                                            },
+                                            "reasoning": "Validate Supabase key exposure.",
+                                            "priority": 1,
+                                        }
+                                    ],
+                                    "stop": False,
+                                },
+                            }
+                        ],
+                        {"provider": "fake", "model": "fake-summary-normalization-planner", "usage": {"total_tokens": 8}},
+                    )
+                return (
+                    [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+                    {"provider": "fake", "model": "fake-summary-normalization-planner", "usage": {"total_tokens": 4}},
+                )
+
+            def chat_with_meta(self, messages, temperature=0.2):
+                return (
+                    json.dumps(
+                        {
+                            "summary": "Synthetic summary.",
+                            "findings": [
+                                {
+                                    "severity": "HIGH",
+                                    "title": "Supabase service role key exposed (credential/secret leakage)",
+                                    "evidence": "key observed in client-accessible content.",
+                                }
+                            ],
+                        }
+                    ),
+                    {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+                )
+
+        scanners = {
+            "nmap": FakeNmapScannerSupabaseOnly(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseSupabaseScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=SummaryNormalizationLLM())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Anonymous S3-compatible bucket listing accessible",
+                    "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                    "type": "s3_bucket_listing",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_summary_normalization_persisted.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+        summary_findings = summary.get("findings") if isinstance(summary.get("findings"), list) else []
+        self.assertTrue(summary_findings)
+        self.assertEqual(str(summary_findings[0].get("severity") or "").upper(), "CRITICAL")
+        self.assertTrue(
+            any("Anonymous S3-compatible bucket listing accessible" in str(item.get("title") or "") for item in summary_findings)
+        )
+        normalization = report.get("summary_normalization") if isinstance(report.get("summary_normalization"), dict) else {}
+        self.assertTrue(normalization.get("severity_reconciliations"))
+        self.assertTrue(normalization.get("added_findings"))
 
     def test_post_closure_low_value_followups_are_stopped_before_execution(self):
         scanners = {

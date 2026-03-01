@@ -95,6 +95,525 @@ NOT_ASSESSABLE_AREAS: Dict[str, List[str]] = {
     ],
 }
 
+SUMMARY_SEVERITY_RANK = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+SUMMARY_INV_SEVERITY_RANK = {v: k for k, v in SUMMARY_SEVERITY_RANK.items()}
+SUMMARY_GENERIC_TITLES = {
+    "browser driven security signal",
+    "discovered endpoint",
+    "browser discovered endpoint",
+}
+
+
+def _normalize_mapping_text(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^\s*Potential\s+Gap:\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _norm_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _norm_summary_severity(value: Any) -> str:
+    s = str(value or "INFO").strip().upper()
+    return s if s in SUMMARY_SEVERITY_RANK else "INFO"
+
+
+def _summary_title_norm(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"\s+\([^()]+\)\s*$", "", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _summary_titles_match(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    return left in right or right in left
+
+
+def _summary_extract_urls(value: Any) -> List[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [
+        str(x).rstrip(".,;)]>}\"'")
+        for x in re.findall(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE)
+    ]
+
+
+def _is_generic_summary_title(value: Any) -> bool:
+    return _summary_title_norm(value) in SUMMARY_GENERIC_TITLES
+
+
+def _is_validation_grade_finding(item: Dict[str, Any]) -> bool:
+    if not isinstance(item, dict):
+        return False
+    severity = _norm_summary_severity(item.get("severity"))
+    if severity not in {"CRITICAL", "HIGH"}:
+        return False
+    tool = str(item.get("tool") or "").strip().lower()
+    finding_type = str(item.get("type") or "").strip().lower()
+    confidence = str(item.get("confidence") or "").strip().lower()
+    evidence = str(item.get("evidence") or "")
+    evidence_low = evidence.lower()
+    title_low = str(item.get("title") or "").lower()
+    markers = (
+        "http 200",
+        "http 200)",
+        "listallmybucketsresult",
+        "listbucketresult",
+        "service_role",
+        "service role",
+        "/api/v1/status/config",
+        "scrape_configs",
+        "marker=",
+    )
+    if tool in {"readiness_probe", "supabase_audit", "sqlmap", "nuclei", "sslscan", "nikto"}:
+        return True
+    if tool == "browser_use" and finding_type == "browser_observation" and confidence == "high":
+        return True
+    return any(token in evidence_low or token in title_low for token in markers)
+
+
+def _summary_validation_strength(item: Dict[str, Any]) -> int:
+    if not isinstance(item, dict):
+        return 0
+    score = 0
+    tool = str(item.get("tool") or "").strip().lower()
+    finding_type = str(item.get("type") or "").strip().lower()
+    confidence = str(item.get("confidence") or "").strip().lower()
+    evidence_low = str(item.get("evidence") or "").lower()
+    if tool in {"readiness_probe", "supabase_audit"}:
+        score += 4
+    if tool in {"nuclei", "sqlmap", "sslscan", "nikto"}:
+        score += 3
+    if tool == "browser_use" and finding_type == "browser_observation":
+        score += 2
+    if confidence == "high":
+        score += 2
+    if "http 200" in evidence_low or "(http 200)" in evidence_low:
+        score += 1
+    if any(token in evidence_low for token in ("listallmybucketsresult", "listbucketresult", "service_role", "/api/v1/status/config")):
+        score += 2
+    return score
+
+
+def _collect_summary_item_support(
+    summary_item: Dict[str, Any],
+    tool_items: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Set[str]]:
+    title_key = _summary_title_norm(summary_item.get("title"))
+    matches: List[Dict[str, Any]] = []
+    raw_keys: Set[str] = set()
+    for item in tool_items:
+        if not isinstance(item, dict):
+            continue
+        raw_title_key = _summary_title_norm(item.get("title"))
+        if not raw_title_key:
+            continue
+        if _summary_titles_match(title_key, raw_title_key):
+            matches.append(item)
+            raw_keys.add(raw_title_key)
+    return matches, raw_keys
+
+
+def _merge_summary_group(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    evidence_items: List[str] = []
+    recommendation_items: List[str] = []
+    best_severity = "INFO"
+    best_rank = SUMMARY_SEVERITY_RANK[best_severity]
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if not merged:
+            merged = dict(item)
+        severity = _norm_summary_severity(item.get("severity"))
+        severity_rank = SUMMARY_SEVERITY_RANK[severity]
+        if severity_rank > best_rank:
+            best_rank = severity_rank
+            best_severity = severity
+
+        raw_evidence_items = item.get("evidence_items")
+        if isinstance(raw_evidence_items, list):
+            for value in raw_evidence_items:
+                text = str(value or "").strip()
+                if text and text not in evidence_items:
+                    evidence_items.append(text)
+        else:
+            evidence = str(item.get("evidence") or "").strip()
+            if evidence and evidence not in evidence_items:
+                evidence_items.append(evidence)
+
+        raw_recommendation_items = item.get("recommendation_items")
+        if isinstance(raw_recommendation_items, list):
+            for value in raw_recommendation_items:
+                text = str(value or "").strip()
+                if text and text not in recommendation_items:
+                    recommendation_items.append(text)
+        else:
+            recommendation = str(item.get("recommendation") or "").strip()
+            if recommendation and recommendation not in recommendation_items:
+                recommendation_items.append(recommendation)
+
+    if not merged:
+        return {}
+
+    merged["severity"] = best_severity
+    if evidence_items:
+        merged["evidence"] = evidence_items[0]
+        merged["evidence_items"] = evidence_items
+    if recommendation_items:
+        merged["recommendation"] = recommendation_items[0]
+        merged["recommendation_items"] = recommendation_items
+    return merged
+
+
+def _collect_generic_summary_concrete_support(
+    summary_item: Dict[str, Any],
+    tool_items: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], Set[str]]:
+    urls: Set[str] = set()
+    raw_evidence_items = summary_item.get("evidence_items")
+    if isinstance(raw_evidence_items, list):
+        for value in raw_evidence_items:
+            urls.update(_summary_extract_urls(value))
+    else:
+        urls.update(_summary_extract_urls(summary_item.get("evidence")))
+
+    if not urls:
+        return [], set()
+
+    matches: List[Dict[str, Any]] = []
+    raw_keys: Set[str] = set()
+    for item in tool_items:
+        if not isinstance(item, dict):
+            continue
+        raw_title = str(item.get("title") or "").strip()
+        raw_title_key = _summary_title_norm(raw_title)
+        if not raw_title_key or _is_generic_summary_title(raw_title):
+            continue
+        haystacks = [
+            str(item.get("evidence") or ""),
+            str(item.get("title") or ""),
+            str(item.get("target") or ""),
+        ]
+        if any(url and any(url in haystack for haystack in haystacks) for url in urls):
+            matches.append(item)
+            raw_keys.add(raw_title_key)
+    return matches, raw_keys
+
+
+def _build_summary_entry(
+    *,
+    title: str,
+    severity: str,
+    summary_item: Optional[Dict[str, Any]] = None,
+    supporting_findings: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    item = summary_item if isinstance(summary_item, dict) else {}
+    support = [x for x in (supporting_findings or []) if isinstance(x, dict)]
+    evidence_items: List[str] = []
+    recommendation_items: List[str] = []
+    corroborating_tools: List[str] = []
+    compliance_mapping_items: List[str] = []
+    mapping_sources: List[str] = []
+
+    raw_evidence_items = item.get("evidence_items")
+    if isinstance(raw_evidence_items, list):
+        for value in raw_evidence_items:
+            text = str(value or "").strip()
+            if text and text not in evidence_items:
+                evidence_items.append(text)
+    else:
+        initial_evidence = str(item.get("evidence") or "").strip()
+        if initial_evidence:
+            evidence_items.append(initial_evidence)
+
+    raw_recommendation_items = item.get("recommendation_items")
+    if isinstance(raw_recommendation_items, list):
+        for value in raw_recommendation_items:
+            text = str(value or "").strip()
+            if text and text not in recommendation_items:
+                recommendation_items.append(text)
+    else:
+        initial_rec = str(item.get("recommendation") or "").strip()
+        if initial_rec:
+            recommendation_items.append(initial_rec)
+
+    for finding in support:
+        evidence = str(finding.get("evidence") or "").strip()
+        tool = str(finding.get("tool") or "").strip()
+        if evidence:
+            support_text = f"{tool}: {evidence}" if tool else evidence
+            if support_text not in evidence_items:
+                evidence_items.append(support_text)
+        rec = str(finding.get("recommendation") or "").strip()
+        if rec and rec not in recommendation_items:
+            recommendation_items.append(rec)
+        if tool and tool not in corroborating_tools:
+            corroborating_tools.append(tool)
+        if tool and tool not in mapping_sources:
+            mapping_sources.append(tool)
+        compliance_mappings = finding.get("compliance_mappings")
+        if isinstance(compliance_mappings, list):
+            for mapping in compliance_mappings:
+                if not isinstance(mapping, dict):
+                    continue
+                reference = str(mapping.get("reference") or "").strip()
+                confidence = str(mapping.get("confidence") or "").strip().lower()
+                if not reference:
+                    continue
+                text = (
+                    _normalize_mapping_text(f"{reference} (mapping confidence: {confidence})")
+                    if confidence in ("low", "medium", "high")
+                    else _normalize_mapping_text(reference)
+                )
+                if text and text not in compliance_mapping_items:
+                    compliance_mapping_items.append(text)
+        compliance_tags = finding.get("compliance_tags")
+        if isinstance(compliance_tags, list):
+            for tag in compliance_tags:
+                text = _normalize_mapping_text(tag)
+                if text and text not in compliance_mapping_items:
+                    compliance_mapping_items.append(text)
+
+    return {
+        "severity": _norm_summary_severity(severity),
+        "title": title,
+        "evidence": evidence_items[0] if evidence_items else "",
+        "evidence_items": evidence_items,
+        "recommendation": recommendation_items[0] if recommendation_items else "",
+        "recommendation_items": recommendation_items,
+        "corroborating_tools": corroborating_tools,
+        "compliance_mapping_items": compliance_mapping_items,
+        "mapping_sources": mapping_sources,
+    }
+
+
+def normalize_report_summary(
+    summary: Any,
+    findings: List[Dict[str, Any]],
+    *,
+    finding_clusters: Optional[List[Dict[str, Any]]] = None,
+    max_summary_findings: int = 5,
+) -> Tuple[Any, Dict[str, Any]]:
+    if not isinstance(summary, dict):
+        return summary, {}
+
+    raw_findings = [x for x in (findings or []) if isinstance(x, dict)]
+    summary_items = [x for x in (summary.get("findings") or []) if isinstance(x, dict)]
+    max_items = max(1, int(max_summary_findings or 5))
+    meta: Dict[str, Any] = {
+        "source": "deterministic",
+        "severity_reconciliations": [],
+        "added_findings": [],
+        "suppressed_summary_items": [],
+    }
+    if not summary_items:
+        return summary, {}
+
+    normalized_entries: List[Dict[str, Any]] = []
+    represented_raw_keys: Set[str] = set()
+    represented_summary_keys: Set[str] = set()
+
+    cluster_weight_by_title: Dict[str, int] = {}
+    if isinstance(finding_clusters, list):
+        for cluster in finding_clusters:
+            if not isinstance(cluster, dict):
+                continue
+            title_key = _summary_title_norm(cluster.get("title"))
+            if not title_key:
+                continue
+            try:
+                cluster_weight_by_title[title_key] = max(
+                    int(cluster_weight_by_title.get(title_key, 0)),
+                    int(cluster.get("count", 0) or 0),
+                )
+            except Exception:
+                continue
+
+    grouped_summary_items: Dict[str, List[Dict[str, Any]]] = {}
+    grouped_order: List[str] = []
+    for item in summary_items:
+        if not isinstance(item, dict):
+            continue
+        title_key = _summary_title_norm(item.get("title"))
+        if not title_key:
+            continue
+        if title_key not in grouped_summary_items:
+            grouped_summary_items[title_key] = []
+            grouped_order.append(title_key)
+        grouped_summary_items[title_key].append(item)
+
+    for title_key in grouped_order:
+        item_group = grouped_summary_items.get(title_key) or []
+        item = _merge_summary_group(item_group)
+        original_title = str(item.get("title") or "").strip()
+        title_key = _summary_title_norm(original_title)
+        if not title_key:
+            continue
+        matches, raw_keys = _collect_summary_item_support(item, raw_findings)
+        if _is_generic_summary_title(original_title):
+            concrete_support, concrete_keys = _collect_generic_summary_concrete_support(item, raw_findings)
+            for concrete_item in concrete_support:
+                if concrete_item not in matches:
+                    matches.append(concrete_item)
+            raw_keys.update(concrete_keys)
+        represented_raw_keys.update(raw_keys)
+        represented_summary_keys.add(title_key)
+        current_sev = _norm_summary_severity(item.get("severity"))
+        best_rank = SUMMARY_SEVERITY_RANK[current_sev]
+        concrete_matches = [
+            f for f in matches if not _is_generic_summary_title(f.get("title")) and str(f.get("title") or "").strip()
+        ]
+        title = original_title
+        if _is_generic_summary_title(original_title) and concrete_matches:
+            concrete_matches.sort(
+                key=lambda f: (
+                    -SUMMARY_SEVERITY_RANK[_norm_summary_severity(f.get("severity"))],
+                    -_summary_validation_strength(f),
+                    str(f.get("title") or ""),
+                )
+            )
+            title = str(concrete_matches[0].get("title") or "").strip() or original_title
+            meta["suppressed_summary_items"].append(
+                {
+                    "title": original_title,
+                    "reason": "generic_replaced_by_concrete",
+                    "replacement_title": title,
+                }
+            )
+        for match in matches:
+            match_rank = SUMMARY_SEVERITY_RANK[_norm_summary_severity(match.get("severity"))]
+            if match_rank > best_rank:
+                best_rank = match_rank
+        final_sev = SUMMARY_INV_SEVERITY_RANK.get(best_rank, current_sev)
+        if final_sev != current_sev:
+            meta["severity_reconciliations"].append(
+                {"title": title or original_title, "from": current_sev, "to": final_sev}
+            )
+        normalized_entries.append(
+            _build_summary_entry(
+                title=title,
+                severity=final_sev,
+                summary_item=item,
+                supporting_findings=matches,
+            )
+        )
+
+    candidate_map: Dict[str, Dict[str, Any]] = {}
+    title_support_count: Dict[str, int] = {}
+    for finding in raw_findings:
+        title_key = _summary_title_norm(finding.get("title"))
+        if not title_key:
+            continue
+        title_support_count[title_key] = int(title_support_count.get(title_key, 0)) + 1
+
+    for finding in raw_findings:
+        severity = _norm_summary_severity(finding.get("severity"))
+        if severity not in {"CRITICAL", "HIGH"}:
+            continue
+        if _is_generic_summary_title(finding.get("title")):
+            continue
+        title_key = _summary_title_norm(finding.get("title"))
+        if not title_key or title_key in represented_raw_keys or title_key in represented_summary_keys:
+            continue
+        if not _is_validation_grade_finding(finding):
+            continue
+        matches = [
+            f
+            for f in raw_findings
+            if _summary_titles_match(title_key, _summary_title_norm(f.get("title")))
+        ]
+        support_count = max(
+            int(title_support_count.get(title_key, 0)),
+            int(cluster_weight_by_title.get(title_key, 0)),
+        )
+        candidate = {
+            "title": str(finding.get("title") or "").strip(),
+            "severity": severity,
+            "support_count": support_count,
+            "validation_strength": _summary_validation_strength(finding),
+            "entry": _build_summary_entry(
+                title=str(finding.get("title") or "").strip(),
+                severity=severity,
+                summary_item=None,
+                supporting_findings=matches,
+            ),
+        }
+        existing = candidate_map.get(title_key)
+        if not existing or (
+            SUMMARY_SEVERITY_RANK[candidate["severity"]] > SUMMARY_SEVERITY_RANK[existing["severity"]]
+            or (
+                candidate["support_count"],
+                candidate["validation_strength"],
+                candidate["title"],
+            )
+            > (
+                existing["support_count"],
+                existing["validation_strength"],
+                existing["title"],
+            )
+        ):
+            candidate_map[title_key] = candidate
+
+    backfill_candidates = sorted(
+        candidate_map.values(),
+        key=lambda item: (
+            -SUMMARY_SEVERITY_RANK[_norm_summary_severity(item.get("severity"))],
+            -int(item.get("support_count", 0)),
+            -int(item.get("validation_strength", 0)),
+            str(item.get("title") or ""),
+        ),
+    )
+
+    for candidate in backfill_candidates:
+        if len(normalized_entries) >= max_items:
+            break
+        entry = candidate.get("entry") if isinstance(candidate.get("entry"), dict) else None
+        if not isinstance(entry, dict):
+            continue
+        normalized_entries.append(entry)
+        represented_summary_keys.add(_summary_title_norm(entry.get("title")))
+        meta["added_findings"].append(
+            {
+                "title": str(entry.get("title") or "").strip(),
+                "severity": str(entry.get("severity") or "").strip().upper(),
+                "reason": "high_signal_backfill",
+            }
+        )
+
+    if len(normalized_entries) > max_items:
+        for item in normalized_entries[max_items:]:
+            if not isinstance(item, dict):
+                continue
+            meta["suppressed_summary_items"].append(
+                {
+                    "title": str(item.get("title") or "").strip(),
+                    "severity": str(item.get("severity") or "").strip().upper(),
+                    "reason": "max_summary_findings_cap",
+                }
+            )
+        normalized_entries = normalized_entries[:max_items]
+
+    normalized_summary = dict(summary)
+    normalized_summary["findings"] = normalized_entries
+
+    if not any(meta.get(key) for key in ("severity_reconciliations", "added_findings", "suppressed_summary_items")):
+        return normalized_summary, {}
+    return normalized_summary, meta
+
 
 def _has_payload(data: Any) -> bool:
     if data is None:
@@ -618,6 +1137,14 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     target = report.get("target", "unknown")
     summary = report.get("summary")
     raw_findings = report.get("findings", [])
+    finding_clusters = report.get("finding_clusters") if isinstance(report.get("finding_clusters"), list) else None
+    summary_for_render, summary_meta = normalize_report_summary(
+        summary,
+        [x for x in raw_findings if isinstance(x, dict)],
+        finding_clusters=finding_clusters,
+    )
+    if isinstance(summary_for_render, dict):
+        summary = summary_for_render
     has_summary = bool(summary)
     has_findings = isinstance(raw_findings, list) and len(raw_findings) > 0
     lines.append(f"# Supabash Audit Report\n")
@@ -665,14 +1192,6 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         if finished:
             lines.append(f"- finished_at: {finished}")
 
-    def _normalize_mapping_text(value: Any) -> str:
-        text = str(value or "").strip()
-        if not text:
-            return ""
-        text = re.sub(r"^\s*Potential\s+Gap:\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
-
     # TOC (anchors match GitHub-style headings)
     lines.append("\n## Table of Contents")
     toc = [
@@ -719,187 +1238,11 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         for e in errors[:3]:
             lines.append(f"- {e}")
 
-    def _norm_key(value: Any) -> str:
-        text = str(value or "").strip().lower()
-        text = re.sub(r"[^a-z0-9]+", " ", text)
-        return re.sub(r"\s+", " ", text).strip()
-
-    def _merge_summary_findings(
-        summary_items: List[Dict[str, Any]],
-        tool_items: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        grouped: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        order: List[Tuple[str, str]] = []
-
-        for item in summary_items:
-            if not isinstance(item, dict):
-                continue
-            sev = str(item.get("severity") or "INFO").upper()
-            title = str(item.get("title") or "").strip()
-            if not title:
-                continue
-            key = (sev, _norm_key(title))
-            if key not in grouped:
-                grouped[key] = {
-                    "severity": sev,
-                    "title": title,
-                    "evidence_items": [],
-                    "recommendation_items": [],
-                    "corroborating_tools": [],
-                    "compliance_mapping_items": [],
-                    "mapping_sources": [],
-                }
-                order.append(key)
-            evidence = str(item.get("evidence") or "").strip()
-            if evidence and evidence not in grouped[key]["evidence_items"]:
-                grouped[key]["evidence_items"].append(evidence)
-            rec = str(item.get("recommendation") or "").strip()
-            if rec and rec not in grouped[key]["recommendation_items"]:
-                grouped[key]["recommendation_items"].append(rec)
-
-        # Enrich summary items with corroborating evidence from tool findings.
-        for item in tool_items:
-            if not isinstance(item, dict):
-                continue
-            sev = str(item.get("severity") or "INFO").upper()
-            title = str(item.get("title") or "").strip()
-            if not title:
-                continue
-            key = (sev, _norm_key(title))
-            if key not in grouped:
-                continue
-            evidence = str(item.get("evidence") or "").strip()
-            tool = str(item.get("tool") or "").strip()
-            if not evidence:
-                continue
-            support = f"{tool}: {evidence}" if tool else evidence
-            if support not in grouped[key]["evidence_items"]:
-                grouped[key]["evidence_items"].append(support)
-            if tool and tool not in grouped[key]["corroborating_tools"]:
-                grouped[key]["corroborating_tools"].append(tool)
-            if tool and tool not in grouped[key]["mapping_sources"]:
-                grouped[key]["mapping_sources"].append(tool)
-            compliance_mappings = item.get("compliance_mappings")
-            if isinstance(compliance_mappings, list):
-                for mapping in compliance_mappings:
-                    if not isinstance(mapping, dict):
-                        continue
-                    reference = str(mapping.get("reference") or "").strip()
-                    confidence = str(mapping.get("confidence") or "").strip().lower()
-                    if not reference:
-                        continue
-                    if confidence in ("low", "medium", "high"):
-                        text = _normalize_mapping_text(f"{reference} (mapping confidence: {confidence})")
-                    else:
-                        text = _normalize_mapping_text(reference)
-                    if text not in grouped[key]["compliance_mapping_items"]:
-                        grouped[key]["compliance_mapping_items"].append(text)
-            compliance_tags = item.get("compliance_tags")
-            if isinstance(compliance_tags, list):
-                for tag in compliance_tags:
-                    text = _normalize_mapping_text(tag)
-                    if text and text not in grouped[key]["compliance_mapping_items"]:
-                        grouped[key]["compliance_mapping_items"].append(text)
-
-        merged: List[Dict[str, Any]] = []
-        for key in order:
-            item = grouped[key]
-            evidence_items = item.get("evidence_items") or []
-            rec_items = item.get("recommendation_items") or []
-            merged.append(
-                {
-                    "severity": item.get("severity", "INFO"),
-                    "title": item.get("title", ""),
-                    "evidence": evidence_items[0] if evidence_items else "",
-                    "evidence_items": evidence_items,
-                    "recommendation": rec_items[0] if rec_items else "",
-                    "recommendation_items": rec_items,
-                    "corroborating_tools": item.get("corroborating_tools", []),
-                    "compliance_mapping_items": item.get("compliance_mapping_items", []),
-                    "mapping_sources": item.get("mapping_sources", []),
-                }
-            )
-        return merged
-
     summary_findings: List[Dict[str, Any]] = []
     if isinstance(summary, dict):
         sf = summary.get("findings", [])
         if isinstance(sf, list):
-            summary_findings = _merge_summary_findings(
-                [x for x in sf if isinstance(x, dict)],
-                [x for x in raw_findings if isinstance(x, dict)],
-            )
-    if summary_findings and isinstance(raw_findings, list):
-        sev_rank = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
-        inv_rank = {v: k for k, v in sev_rank.items()}
-
-        def _norm_sev(value: Any) -> str:
-            s = str(value or "INFO").strip().upper()
-            return s if s in sev_rank else "INFO"
-
-        def _title_norm(value: Any) -> str:
-            text = str(value or "").strip().lower()
-            # Strip trailing tool marker, e.g. "(nuclei)".
-            text = re.sub(r"\s+\([^()]+\)\s*$", "", text)
-            text = re.sub(r"[^a-z0-9]+", " ", text)
-            text = re.sub(r"\s+", " ", text).strip()
-            return text
-
-        raw_max_by_title: Dict[str, int] = {}
-        for f in raw_findings:
-            if not isinstance(f, dict):
-                continue
-            title_key = _title_norm(f.get("title"))
-            if not title_key:
-                continue
-            rank = sev_rank[_norm_sev(f.get("severity"))]
-            raw_max_by_title[title_key] = max(raw_max_by_title.get(title_key, 0), rank)
-
-        summary_keys: Set[str] = set()
-        for sf_item in summary_findings:
-            if not isinstance(sf_item, dict):
-                continue
-            title_key = _title_norm(sf_item.get("title"))
-            if title_key:
-                summary_keys.add(title_key)
-            current_rank = sev_rank[_norm_sev(sf_item.get("severity"))]
-            best_rank = raw_max_by_title.get(title_key, current_rank)
-            if best_rank <= current_rank and title_key:
-                for raw_key, raw_rank in raw_max_by_title.items():
-                    if not raw_key:
-                        continue
-                    if title_key in raw_key or raw_key in title_key:
-                        if raw_rank > best_rank:
-                            best_rank = raw_rank
-            if best_rank > current_rank:
-                sf_item["severity"] = inv_rank.get(best_rank, "INFO")
-
-        # Ensure any CRITICAL tool findings are reflected in summary findings.
-        for f in raw_findings:
-            if not isinstance(f, dict):
-                continue
-            if _norm_sev(f.get("severity")) != "CRITICAL":
-                continue
-            title = str(f.get("title") or "").strip()
-            title_key = _title_norm(title)
-            if not title_key or title_key in summary_keys:
-                continue
-            summary_findings.append(
-                {
-                    "severity": "CRITICAL",
-                    "title": re.sub(r"\s+\([^()]+\)\s*$", "", title).strip() or title,
-                    "evidence": str(f.get("evidence") or "").strip(),
-                    "evidence_items": [str(f.get("evidence") or "").strip()] if str(f.get("evidence") or "").strip() else [],
-                    "recommendation": str(f.get("recommendation") or "").strip(),
-                    "recommendation_items": [str(f.get("recommendation") or "").strip()]
-                    if str(f.get("recommendation") or "").strip()
-                    else [],
-                    "corroborating_tools": [str(f.get("tool") or "").strip()] if str(f.get("tool") or "").strip() else [],
-                    "compliance_mapping_items": [],
-                    "mapping_sources": [],
-                }
-            )
-            summary_keys.add(title_key)
+            summary_findings = [x for x in sf if isinstance(x, dict)]
     evidence_artifact_index: Dict[str, List[str]] = {}
     evidence_manifest_path = ""
     evidence_pack_for_summary = report.get("evidence_pack")
@@ -932,6 +1275,24 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                 for note in summary_notes:
                     if isinstance(note, str) and note.strip():
                         lines.append(f"- {note.strip()}")
+            normalization_meta = (
+                report.get("summary_normalization")
+                if isinstance(report.get("summary_normalization"), dict)
+                else summary_meta
+            )
+            if isinstance(normalization_meta, dict) and any(
+                normalization_meta.get(key) for key in ("severity_reconciliations", "added_findings", "suppressed_summary_items")
+            ):
+                lines.append("\n### Summary Normalization")
+                sev_fixes = normalization_meta.get("severity_reconciliations")
+                if isinstance(sev_fixes, list) and sev_fixes:
+                    lines.append(f"- severity_reconciliations: {len(sev_fixes)}")
+                added = normalization_meta.get("added_findings")
+                if isinstance(added, list) and added:
+                    lines.append(f"- added_findings: {len(added)}")
+                suppressed = normalization_meta.get("suppressed_summary_items")
+                if isinstance(suppressed, list) and suppressed:
+                    lines.append(f"- suppressed_summary_items: {len(suppressed)}")
             llm_meta = report.get("llm")
             if isinstance(llm_meta, dict):
                 calls = llm_meta.get("calls")
@@ -1495,7 +1856,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
             def _norm_text(value: Any) -> str:
                 return str(value or "").strip().lower()
 
-            def _norm_key(value: Any) -> str:
+            def _risk_norm_key(value: Any) -> str:
                 s = _norm_text(value)
                 s = re.sub(r"\s+", " ", s)
                 return s
@@ -1558,7 +1919,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     rules.append(f"rule:llm_risk_synthesis (aggregated from {len(findings)} tool findings)")
                 return rules
 
-            tool_title_keys = {_norm_key(f.get("title")) for f in agg_findings if isinstance(f, dict)}
+            tool_title_keys = {_risk_norm_key(f.get("title")) for f in agg_findings if isinstance(f, dict)}
             promoted_detail_lines: List[str] = []
             for sf in summary_findings:
                 if not isinstance(sf, dict):
@@ -1566,7 +1927,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                 sev = str(sf.get("severity", "INFO")).upper()
                 if sev == "INFO":
                     continue
-                title_key = _norm_key(sf.get("title"))
+                title_key = _risk_norm_key(sf.get("title"))
                 title_text = str(sf.get("title") or "").strip()
                 # Show details only for likely promoted/aggregated summary-level statements.
                 if title_key and title_key in tool_title_keys:

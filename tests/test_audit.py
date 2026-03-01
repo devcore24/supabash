@@ -180,6 +180,59 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertNotIn("http://127.0.0.1:9090", targets)
         cleanup_artifact(output)
 
+    def test_run_persists_normalized_summary_findings(self):
+        scanners = {
+            "nmap": FakeScanner("nmap"),
+            "whatweb": FakeScanner("whatweb"),
+            "gobuster": FakeScanner("gobuster"),
+            "sqlmap": FakeScanner("sqlmap"),
+        }
+
+        class FakeLLM:
+            def chat(self, messages, temperature=0.2):
+                return json.dumps(
+                    {
+                        "summary": "Synthetic summary.",
+                        "findings": [
+                            {
+                                "severity": "HIGH",
+                                "title": "Supabase service role key exposed (credential/secret leakage)",
+                                "evidence": "Key observed in HTTP response body.",
+                            }
+                        ],
+                    }
+                )
+
+        orchestrator = AuditOrchestrator(scanners=scanners, llm_client=FakeLLM())
+        output = artifact_path("audit_summary_normalized.json")
+        normalized_findings = [
+            {
+                "severity": "CRITICAL",
+                "title": "Supabase service role key exposed",
+                "tool": "supabase_audit",
+                "evidence": "key=eyJ... detected in source=http://localhost:4001",
+                "recommendation": "Rotate service role key immediately.",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Anonymous S3-compatible bucket listing accessible",
+                "tool": "readiness_probe",
+                "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+            },
+        ]
+        with patch.object(orchestrator, "_collect_findings", return_value=normalized_findings):
+            report = orchestrator.run("example.com", output)
+
+        summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+        summary_findings = summary.get("findings") if isinstance(summary.get("findings"), list) else []
+        self.assertTrue(summary_findings)
+        self.assertEqual(str(summary_findings[0].get("severity") or "").upper(), "CRITICAL")
+        self.assertTrue(
+            any("Anonymous S3-compatible bucket listing accessible" in str(item.get("title") or "") for item in summary_findings)
+        )
+        self.assertIn("summary_normalization", report)
+        cleanup_artifact(output)
+
     def test_sqlmap_targets_include_harvested_parameterized_urls(self):
         class FakeNmapSinglePort:
             def scan(self, target, ports=None, arguments=None, **kwargs):

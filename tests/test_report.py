@@ -5,7 +5,13 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-from supabash.report import COMPLIANCE_COVERAGE_ROWS, build_recommended_next_actions, generate_markdown, write_markdown
+from supabash.report import (
+    COMPLIANCE_COVERAGE_ROWS,
+    build_recommended_next_actions,
+    generate_markdown,
+    normalize_report_summary,
+    write_markdown,
+)
 from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
@@ -416,6 +422,83 @@ class TestReport(unittest.TestCase):
         md = generate_markdown(report)
         self.assertIn("- **CRITICAL** Supabase service role key exposed", md)
         self.assertIn("| CRITICAL | 1 |", md)
+
+    def test_normalize_report_summary_upgrades_severity_and_backfills_validated_high_signal(self):
+        summary = {
+            "summary": "Top issues observed.",
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Supabase service role key exposed (credential/secret leakage)",
+                    "evidence": "key observed in HTTP response body.",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Unauthenticated Prometheus configuration endpoint accessible",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                },
+            ],
+        }
+        findings = [
+            {
+                "severity": "CRITICAL",
+                "title": "Supabase service role key exposed",
+                "tool": "supabase_audit",
+                "evidence": "key=eyJ... detected in source=http://localhost:4001",
+                "recommendation": "Rotate service role key immediately.",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Anonymous S3-compatible bucket listing accessible",
+                "tool": "readiness_probe",
+                "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                "recommendation": "Disable anonymous object-store listing.",
+            },
+        ]
+
+        normalized, meta = normalize_report_summary(summary, findings)
+
+        self.assertIsInstance(normalized, dict)
+        normalized_findings = normalized.get("findings") or []
+        self.assertEqual(normalized_findings[0]["severity"], "CRITICAL")
+        self.assertTrue(
+            any("Anonymous S3-compatible bucket listing accessible" in str(x.get("title") or "") for x in normalized_findings)
+        )
+        self.assertEqual(meta.get("source"), "deterministic")
+        self.assertTrue(meta.get("severity_reconciliations"))
+        self.assertTrue(meta.get("added_findings"))
+
+    def test_normalize_report_summary_prefers_concrete_title_over_generic_browser_signal(self):
+        summary = {
+            "summary": "A browser issue was observed.",
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Browser-driven security signal",
+                    "evidence": "http://localhost:9090/api/v1/status/config returned configuration-like content.",
+                }
+            ],
+        }
+        findings = [
+            {
+                "severity": "HIGH",
+                "title": "Unauthenticated configuration exposure verified in browser workflow",
+                "tool": "browser_use",
+                "type": "browser_observation",
+                "confidence": "high",
+                "evidence": "http://localhost:9090/api/v1/status/config returned configuration-like content without authentication workflow.",
+            }
+        ]
+
+        normalized, meta = normalize_report_summary(summary, findings)
+
+        summary_findings = normalized.get("findings") or []
+        self.assertEqual(
+            str(summary_findings[0].get("title") or ""),
+            "Unauthenticated configuration exposure verified in browser workflow",
+        )
+        suppressed = meta.get("suppressed_summary_items") or []
+        self.assertTrue(any(item.get("reason") == "generic_replaced_by_concrete" for item in suppressed))
 
     def test_recommended_next_actions_include_explicit_critical_recommendation(self):
         report = {

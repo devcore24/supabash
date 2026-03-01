@@ -318,6 +318,25 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertTrue(any(u.endswith("/WebGoat/api/v1/status/config") for u in urls))
         self.assertFalse(any(":3003/127.0.0.1:3003/" in u for u in urls))
 
+    def test_extract_urls_canonicalizes_malformed_trailing_punctuation(self):
+        scanner = BrowserUseScanner()
+        payload = {
+            "data": {
+                "result": (
+                    "Validated http://localhost:8080/?delimiter=/) and "
+                    "http://localhost:8080/metrics."
+                )
+            }
+        }
+        urls = scanner._extract_urls(
+            payload["data"]["result"],
+            target="http://localhost:8080",
+            payload=payload,
+            result_text=payload["data"]["result"],
+        )
+        self.assertIn("http://localhost:8080/?delimiter=/", urls)
+        self.assertNotIn("http://localhost:8080/?delimiter=/)", urls)
+
     def test_extract_html_signals_detects_config_exposure_marker(self):
         scanner = BrowserUseScanner()
         findings = []
@@ -423,6 +442,19 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertIn("--session", first_call)
         self.assertIn("audit-session", first_call)
         self.assertNotIn("--session", second_call)
+
+    def test_deterministic_probe_does_not_seed_generic_login_paths_for_focused_api_target(self):
+        scanner = BrowserUseScanner()
+        urls = scanner._derive_probe_urls(
+            "http://localhost:9090/api/v1/status/config",
+            "",
+            max_paths=8,
+            prioritized_urls=["http://localhost:9090/api/v1/status/config"],
+        )
+        self.assertIn("http://localhost:9090/api/v1/status/config", urls)
+        self.assertFalse(any(url.endswith("/login") for url in urls))
+        self.assertFalse(any(url.endswith("/signin") for url in urls))
+        self.assertFalse(any(url.endswith("/admin") for url in urls))
 
     def test_scan_uses_deterministic_fallback_when_run_fails(self):
         run_timeout = CommandResult(

@@ -363,8 +363,8 @@ class BrowserUseScanner:
         if not analysis_text:
             analysis_text = text
         urls = self._extract_urls(analysis_text, target=target, payload=payload, result_text=payload_result)
-        findings = self._extract_findings(analysis_text)
-        return {"urls": urls, "findings": findings, "result_text": payload_result}
+        findings = self._extract_findings(analysis_text, target=target)
+        return {"urls": urls, "findings": findings, "result_text": payload_result, "target": target}
 
     def _extract_cli_status(self, output: str, payload: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         text = str(output or "").strip()
@@ -416,8 +416,12 @@ class BrowserUseScanner:
     ) -> List[str]:
         out: List[str] = []
         seen: Set[str] = set()
+        try:
+            parsed_target = urlparse(str(target or "").strip())
+        except Exception:
+            parsed_target = None
         for m in re.finditer(r"https?://[^\s'\"<>`]+", text or "", flags=re.IGNORECASE):
-            candidate = str(m.group(0) or "").strip().rstrip(".,;")
+            candidate = self._sanitize_extracted_url(str(m.group(0) or "").strip(), parsed_base=parsed_target)
             if not candidate or candidate in seen:
                 continue
             seen.add(candidate)
@@ -427,13 +431,19 @@ class BrowserUseScanner:
         if isinstance(payload, dict) and len(out) < 200:
             data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
             if isinstance(data, dict):
-                current_url = str(data.get("url") or data.get("current_url") or "").strip()
-                if current_url.startswith(("http://", "https://")) and current_url not in seen:
+                current_url = self._sanitize_extracted_url(
+                    str(data.get("url") or data.get("current_url") or "").strip(),
+                    parsed_base=parsed_target,
+                )
+                if current_url and current_url not in seen:
                     seen.add(current_url)
                     out.append(current_url)
             if result_text:
                 for m in re.finditer(r"https?://[^\s'\"<>`]+", result_text or "", flags=re.IGNORECASE):
-                    candidate = str(m.group(0) or "").strip().rstrip(".,;")
+                    candidate = self._sanitize_extracted_url(
+                        str(m.group(0) or "").strip(),
+                        parsed_base=parsed_target,
+                    )
                     if not candidate or candidate in seen:
                         continue
                     seen.add(candidate)
@@ -444,9 +454,13 @@ class BrowserUseScanner:
             out.append(target)
         return out
 
-    def _extract_findings(self, text: str) -> List[Dict[str, Any]]:
+    def _extract_findings(self, text: str, *, target: str) -> List[Dict[str, Any]]:
         findings: List[Dict[str, Any]] = []
         seen = set()
+        try:
+            parsed_target = urlparse(str(target or "").strip())
+        except Exception:
+            parsed_target = None
         signal_tokens = (
             "vuln",
             "vulnerability",
@@ -493,7 +507,7 @@ class BrowserUseScanner:
             elif "misconfig" in low or "insecure" in low:
                 title = "Potential security misconfiguration signal"
 
-            evidence = line[:400]
+            evidence = self._sanitize_urls_in_text(line[:400], parsed_base=parsed_target)
             dedup_key = f"{sev}|{title}|{evidence}"
             if dedup_key in seen:
                 continue
@@ -531,6 +545,11 @@ class BrowserUseScanner:
         steps: Optional[int] = None
         data_success: Optional[bool] = None
         run_id: Optional[str] = None
+        parsed_target = str(parsed.get("target") or "").strip() if isinstance(parsed, dict) else ""
+        try:
+            parsed_base = urlparse(parsed_target) if parsed_target else None
+        except Exception:
+            parsed_base = None
         result_text = str(parsed.get("result_text") or "").strip() if isinstance(parsed, dict) else ""
         if isinstance(payload, dict):
             run_id_raw = payload.get("id")
@@ -551,6 +570,8 @@ class BrowserUseScanner:
                         steps = None
                 if not result_text:
                     result_text = self._payload_result_text(payload)
+        if result_text:
+            result_text = self._sanitize_urls_in_text(result_text, parsed_base=parsed_base)
         urls_count = len(parsed.get("urls") or []) if isinstance(parsed, dict) else 0
         findings_count = len(parsed.get("findings") or []) if isinstance(parsed, dict) else 0
         evidence_score = 0
@@ -826,7 +847,7 @@ class BrowserUseScanner:
             candidate = str(url or "").strip()
             if not candidate:
                 return
-            normalized = self._normalize_same_origin_url(candidate, parsed_base=parsed_base)
+            normalized = self._sanitize_extracted_url(candidate, parsed_base=parsed_base)
             if not normalized:
                 return
             if normalized in seen:
@@ -885,31 +906,35 @@ class BrowserUseScanner:
             if len(out) >= max_paths:
                 return out[:max_paths]
 
-        seed_paths = [
-            "/login",
-            "/signin",
-            "/admin",
-            "/manager/html",
-            "/host-manager/html",
-            "/api",
-            "/swagger",
-            "/swagger-ui",
-            "/graphql",
-            "/actuator",
-            "/metrics",
-        ]
-        for rel in seed_paths:
-            prefixed = f"{base_origin}{base_path_prefix}{rel}" if base_path_prefix else ""
-            for candidate in [prefixed, f"{base_origin}{rel}"]:
-                if not candidate:
-                    continue
-                if candidate not in seen:
-                    seen.add(candidate)
-                    out.append(candidate)
+        allow_seed_paths = bool(root_html) or not base_path_prefix
+        if allow_seed_paths:
+            seed_paths = [
+                "/login",
+                "/signin",
+                "/admin",
+                "/manager/html",
+                "/host-manager/html",
+                "/api",
+                "/swagger",
+                "/swagger-ui",
+                "/graphql",
+                "/actuator",
+                "/metrics",
+            ]
+            for rel in seed_paths:
+                prefixed = f"{base_origin}{base_path_prefix}{rel}" if base_path_prefix else ""
+                for candidate in [prefixed, f"{base_origin}{rel}"]:
+                    if not candidate:
+                        continue
+                    normalized = self._normalize_same_origin_url(candidate, parsed_base=parsed_base)
+                    if not normalized or normalized in seen:
+                        continue
+                    seen.add(normalized)
+                    out.append(normalized)
+                    if len(out) >= max_paths:
+                        break
                 if len(out) >= max_paths:
                     break
-            if len(out) >= max_paths:
-                break
         if root_html:
             for match in re.finditer(r"""(?:href|action)\s*=\s*["']([^"']+)["']""", root_html, flags=re.IGNORECASE):
                 raw = str(match.group(1) or "").strip()
@@ -1139,8 +1164,56 @@ class BrowserUseScanner:
             return False
         return True
 
+    def _strip_trailing_url_artifacts(self, value: str) -> str:
+        text = str(value or "").strip()
+        while text:
+            last = text[-1]
+            if last in ",;>.":
+                text = text[:-1].rstrip()
+                continue
+            if last == ")" and text.count("(") < text.count(")"):
+                text = text[:-1].rstrip()
+                continue
+            if last == "]" and text.count("[") < text.count("]"):
+                text = text[:-1].rstrip()
+                continue
+            if last == "}" and text.count("{") < text.count("}"):
+                text = text[:-1].rstrip()
+                continue
+            break
+        return text
+
+    def _sanitize_extracted_url(self, candidate: str, *, parsed_base=None) -> Optional[str]:
+        text = self._strip_trailing_url_artifacts(candidate)
+        if not text.startswith(("http://", "https://")):
+            return None
+        try:
+            parsed = urlparse(text)
+        except Exception:
+            return None
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return None
+        if parsed_base is not None and getattr(parsed_base, "netloc", None) == parsed.netloc:
+            normalized = self._normalize_same_origin_url(text, parsed_base=parsed_base)
+            if normalized:
+                return normalized
+            return None
+        return text
+
+    def _sanitize_urls_in_text(self, value: str, *, parsed_base=None) -> str:
+        text = str(value or "")
+        if not text:
+            return ""
+
+        def repl(match: re.Match) -> str:
+            raw = str(match.group(0) or "")
+            sanitized = self._sanitize_extracted_url(raw, parsed_base=parsed_base)
+            return sanitized if sanitized else self._strip_trailing_url_artifacts(raw)
+
+        return re.sub(r"https?://[^\s'\"<>`]+", repl, text, flags=re.IGNORECASE)
+
     def _normalize_same_origin_url(self, candidate: str, *, parsed_base) -> Optional[str]:
-        text = str(candidate or "").strip()
+        text = self._strip_trailing_url_artifacts(candidate)
         if not text:
             return None
         try:

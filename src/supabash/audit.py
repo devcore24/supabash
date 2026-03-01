@@ -53,7 +53,11 @@ from supabash.llm import LLMClient
 from supabash import prompts
 from supabash.llm_context import prepare_json_payload
 from supabash.report_order import stable_sort_results
-from supabash.report import build_compliance_coverage_matrix, build_recommended_next_actions
+from supabash.report import (
+    build_compliance_coverage_matrix,
+    build_recommended_next_actions,
+    normalize_report_summary,
+)
 from supabash.report_schema import SCHEMA_VERSION, annotate_schema_validation
 from supabash.aggressive_caps import apply_aggressive_caps
 
@@ -5555,6 +5559,17 @@ class AuditOrchestrator:
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
+        normalized_summary, summary_meta = normalize_report_summary(
+            agg.get("summary"),
+            findings if isinstance(findings, list) else [],
+            finding_clusters=agg.get("finding_clusters") if isinstance(agg.get("finding_clusters"), list) else None,
+        )
+        if isinstance(normalized_summary, dict):
+            agg["summary"] = normalized_summary
+        if isinstance(summary_meta, dict) and summary_meta:
+            agg["summary_normalization"] = summary_meta
+        else:
+            agg.pop("summary_normalization", None)
         try:
             agg["finding_metrics"] = self._build_finding_metrics(findings if isinstance(findings, list) else [])
         except Exception:

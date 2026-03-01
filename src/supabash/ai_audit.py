@@ -15,7 +15,11 @@ from supabash import prompts
 from supabash.llm import ToolCallingNotSupported, ToolCallingError
 from supabash.llm_context import prepare_json_payload
 from supabash.report_order import stable_sort_results
-from supabash.report import build_compliance_coverage_matrix, build_recommended_next_actions
+from supabash.report import (
+    build_compliance_coverage_matrix,
+    build_recommended_next_actions,
+    normalize_report_summary,
+)
 from supabash.report_schema import annotate_schema_validation
 
 
@@ -1326,7 +1330,65 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     text = str(value or "").strip()
                     if not text:
                         return []
-                    return [str(x).rstrip(".,;)]>}\"'") for x in re.findall(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE)]
+                    return [
+                        str(x).rstrip(".,;)]>}\"'")
+                        for x in re.findall(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE)
+                    ]
+
+                def _strip_browser_url_artifacts(value: Any) -> str:
+                    text = str(value or "").strip()
+                    while text:
+                        last = text[-1]
+                        if last in ",;>.":
+                            text = text[:-1].rstrip()
+                            continue
+                        if last == ")" and text.count("(") < text.count(")"):
+                            text = text[:-1].rstrip()
+                            continue
+                        if last == "]" and text.count("[") < text.count("]"):
+                            text = text[:-1].rstrip()
+                            continue
+                        if last == "}" and text.count("{") < text.count("}"):
+                            text = text[:-1].rstrip()
+                            continue
+                        break
+                    return text
+
+                def _sanitize_browser_url_candidate(value: Any, *, base_target: str = "") -> str:
+                    text = _strip_browser_url_artifacts(value)
+                    if not text.startswith(("http://", "https://")):
+                        return ""
+                    try:
+                        parsed = urlparse(text)
+                    except Exception:
+                        return ""
+                    if not parsed.scheme or not parsed.netloc:
+                        return ""
+                    if base_target:
+                        try:
+                            parsed_base = urlparse(str(base_target or "").strip())
+                        except Exception:
+                            parsed_base = None
+                        if parsed_base and parsed_base.netloc == parsed.netloc:
+                            path = re.sub(r"/{2,}", "/", str(parsed.path or "/"))
+                            if path.startswith("//"):
+                                return ""
+                            text = f"{parsed.scheme}://{parsed.netloc}{path}"
+                            if parsed.query:
+                                text = f"{text}?{parsed.query}"
+                    return text
+
+                def _sanitize_browser_urls_in_text(value: Any, *, base_target: str = "") -> str:
+                    text = str(value or "")
+                    if not text:
+                        return ""
+
+                    def repl(match: re.Match) -> str:
+                        raw = str(match.group(0) or "")
+                        sanitized = _sanitize_browser_url_candidate(raw, base_target=base_target)
+                        return sanitized if sanitized else _strip_browser_url_artifacts(raw)
+
+                    return re.sub(r"https?://[^\s'\"<>`]+", repl, text, flags=re.IGNORECASE)
 
                 def _normalize_browser_scope_path(value: Any) -> str:
                     text = str(value or "").strip() or "/"
@@ -3719,6 +3781,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "validated_count": 0,
                         "validated_urls": [],
                         "httpx_success": False,
+                        "url_hygiene": {
+                            "canonicalized": [],
+                            "suppressed_malformed": 0,
+                            "suppressed_by_status": 0,
+                            "suppressed_duplicate": 0,
+                            "same_origin_filtered": 0,
+                        },
                     }
                     data["browser_discovery_validation"] = validation_block
 
@@ -3729,17 +3798,31 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     base_hp = _web_target_host_port_key(base_target)
                     candidates: List[str] = []
                     seen_candidates: Set[str] = set()
+                    url_hygiene = validation_block.get("url_hygiene") if isinstance(validation_block.get("url_hygiene"), dict) else {}
+                    sanitized_urls_for_data: List[str] = []
                     for raw in urls_raw:
-                        url = str(raw or "").strip()
-                        if not url or url in seen_candidates:
+                        original_url = str(raw or "").strip()
+                        url = _sanitize_browser_url_candidate(original_url, base_target=base_target)
+                        if not url:
+                            url_hygiene["suppressed_malformed"] = int(url_hygiene.get("suppressed_malformed", 0)) + 1
+                            continue
+                        if url != original_url:
+                            canonicalized = url_hygiene.setdefault("canonicalized", [])
+                            if isinstance(canonicalized, list):
+                                canonicalized.append({"from": original_url, "to": url})
+                        if url in seen_candidates:
+                            url_hygiene["suppressed_duplicate"] = int(url_hygiene.get("suppressed_duplicate", 0)) + 1
                             continue
                         hp = _web_target_host_port_key(url)
                         if base_hp is not None and hp is not None and hp != base_hp:
+                            url_hygiene["same_origin_filtered"] = int(url_hygiene.get("same_origin_filtered", 0)) + 1
                             continue
                         seen_candidates.add(url)
                         candidates.append(url)
+                        sanitized_urls_for_data.append(url)
                         if len(candidates) >= 16:
                             break
+                    data["urls"] = sanitized_urls_for_data[:100]
                     if not candidates:
                         return
 
@@ -3790,6 +3873,24 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             status_map[url] = status
                         if status_map:
                             validation_block["status_by_url"] = status_map
+                            kept_urls: List[str] = []
+                            for url in data.get("urls") or []:
+                                status = status_map.get(url)
+                                try:
+                                    status_int = int(status) if status is not None else None
+                                except Exception:
+                                    status_int = None
+                                if status_int in {404, 410}:
+                                    url_hygiene["suppressed_by_status"] = int(url_hygiene.get("suppressed_by_status", 0)) + 1
+                                    continue
+                                kept_urls.append(str(url))
+                            data["urls"] = kept_urls[:100]
+                            validation_block["validated_urls"] = [
+                                str(url)
+                                for url in validated_urls
+                                if str(url) in set(data.get("urls") or [])
+                            ][:32]
+                            validation_block["validated_count"] = len(validation_block["validated_urls"])
 
                 def _restrict_browser_use_result_scope(
                     action: Dict[str, Any],
@@ -3815,7 +3916,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         removed_urls = 0
                         seen_urls: Set[str] = set()
                         for raw in urls_raw:
-                            url = str(raw or "").strip()
+                            url = _sanitize_browser_url_candidate(raw, base_target=base_target)
                             if not url:
                                 continue
                             hp = _web_target_host_port_key(url)
@@ -3840,11 +3941,21 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         for item in findings_raw:
                             if not isinstance(item, dict):
                                 continue
+                            sanitized_item = dict(item)
+                            for field_name in ("evidence", "title", "target"):
+                                raw_value = sanitized_item.get(field_name)
+                                if isinstance(raw_value, str) and raw_value.strip():
+                                    sanitized_item[field_name] = _sanitize_browser_urls_in_text(
+                                        raw_value,
+                                        base_target=base_target,
+                                    )
                             explicit_urls: List[str] = []
                             for field_name in ("evidence", "title", "target"):
-                                raw_value = item.get(field_name)
+                                raw_value = sanitized_item.get(field_name)
                                 if isinstance(raw_value, str) and raw_value.strip().startswith(("http://", "https://")):
-                                    explicit_urls.append(raw_value.strip())
+                                    explicit_urls.append(
+                                        _sanitize_browser_url_candidate(raw_value.strip(), base_target=base_target)
+                                    )
                                 explicit_urls.extend(_urls_from_text(raw_value))
                             explicit_urls = [str(x).strip() for x in explicit_urls if str(x).strip()]
                             if explicit_urls:
@@ -3859,7 +3970,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 if off_origin_seen and not same_origin_seen:
                                     removed_findings += 1
                                     continue
-                            filtered_findings.append(item)
+                            filtered_findings.append(sanitized_item)
                         data["findings"] = filtered_findings
                         if removed_findings > 0:
                             scope_filter = data.get("scope_filter") if isinstance(data.get("scope_filter"), dict) else {}
@@ -5082,6 +5193,17 @@ class AIAuditOrchestrator(AuditOrchestrator):
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
+        normalized_summary, summary_meta = normalize_report_summary(
+            agg.get("summary"),
+            findings if isinstance(findings, list) else [],
+            finding_clusters=agg.get("finding_clusters") if isinstance(agg.get("finding_clusters"), list) else None,
+        )
+        if isinstance(normalized_summary, dict):
+            agg["summary"] = normalized_summary
+        if isinstance(summary_meta, dict) and summary_meta:
+            agg["summary_normalization"] = summary_meta
+        else:
+            agg.pop("summary_normalization", None)
         try:
             agg["finding_metrics"] = self._build_finding_metrics(findings if isinstance(findings, list) else [])
         except Exception:
