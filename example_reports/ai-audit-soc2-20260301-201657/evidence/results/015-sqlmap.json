@@ -1,10 +1,10 @@
 {
-  "tool": "wpscan",
+  "tool": "sqlmap",
   "status": "skipped",
-  "target": "http://localhost:3001",
+  "target": null,
   "command": null,
   "phase": "baseline",
-  "reason": "WordPress not detected by whatweb",
+  "reason": "No parameterized URL detected in input/discovered endpoints",
   "error": null,
   "fallback_for": null,
   "data": null

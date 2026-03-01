@@ -1,0 +1,137 @@
+{
+  "tool": "rustscan",
+  "status": "success",
+  "target": null,
+  "command": "rustscan -a localhost -r 1-65535 -b 2000 --ulimit 5000 -- --open -oG -",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "scan_data": {
+      "hosts": [
+        {
+          "ip": "127.0.0.1",
+          "ports": [
+            {
+              "port": 3000,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "ppp"
+            },
+            {
+              "port": 3001,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "nessus"
+            },
+            {
+              "port": 3002,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "exlm-agent"
+            },
+            {
+              "port": 3003,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "cgms"
+            },
+            {
+              "port": 4000,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "remoteanything"
+            },
+            {
+              "port": 4001,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "newoak"
+            },
+            {
+              "port": 4341,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "lisp-data"
+            },
+            {
+              "port": 5050,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "mmcc"
+            },
+            {
+              "port": 5432,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "postgresql"
+            },
+            {
+              "port": 6379,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "redis"
+            },
+            {
+              "port": 8080,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "http-proxy"
+            },
+            {
+              "port": 9090,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "zeus-admin"
+            },
+            {
+              "port": 9093,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "copycat"
+            },
+            {
+              "port": 9100,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "jetdirect"
+            },
+            {
+              "port": 9796,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "unknown"
+            },
+            {
+              "port": 19090,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "unknown"
+            },
+            {
+              "port": 35449,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "unknown"
+            },
+            {
+              "port": 35967,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "unknown"
+            },
+            {
+              "port": 42613,
+              "protocol": "tcp",
+              "state": "open",
+              "service": "unknown"
+            }
+          ]
+        }
+      ]
+    },
+    "command": "rustscan -a localhost -r 1-65535 -b 2000 --ulimit 5000 -- --open -oG -"
+  }
+}

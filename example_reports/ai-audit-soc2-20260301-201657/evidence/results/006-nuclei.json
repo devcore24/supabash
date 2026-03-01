@@ -1,7 +1,7 @@
 {
-  "tool": "katana",
+  "tool": "nuclei",
   "status": "skipped",
-  "target": "http://localhost:8080",
+  "target": null,
   "command": null,
   "phase": "baseline",
   "reason": "Disabled by config (tools.<name>.enabled=false)",

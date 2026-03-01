@@ -1,10 +1,10 @@
 {
-  "tool": "wpscan",
+  "tool": "nuclei",
   "status": "skipped",
-  "target": "http://localhost:8080",
+  "target": "http://localhost:3000",
   "command": null,
   "phase": "baseline",
-  "reason": "WordPress not detected by whatweb",
+  "reason": "Disabled by config (tools.<name>.enabled=false)",
   "error": null,
   "fallback_for": null,
   "data": null

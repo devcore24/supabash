@@ -1,0 +1,253 @@
+{
+  "version": 2,
+  "generated_at": 1772393027.4479866,
+  "generated_at_utc": "2026-03-01 19:23:47 UTC",
+  "report_file": "ai-audit-soc2-20260301-201657.json",
+  "report_kind": "ai_audit",
+  "schema_version": "1.0",
+  "artifact_count": 22,
+  "artifact_status_counts": {
+    "success": 13,
+    "failed": 0,
+    "skipped": 9
+  },
+  "runtime": {
+    "python_version": "3.14.2",
+    "platform": "Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "executable": "/home/devcore24/projects/supabash/venv/bin/python3.14",
+    "working_directory": "/home/devcore24/projects/supabash",
+    "schema_version": "1.0",
+    "report_kind": "ai_audit",
+    "target": "localhost",
+    "scan_host": "localhost",
+    "compliance_profile": "compliance_soc2",
+    "compliance_framework": "SOC 2 Type II",
+    "started_at_utc": "2026-03-01 19:16:57 UTC",
+    "finished_at_utc": "2026-03-01 19:23:39 UTC",
+    "duration_seconds": 401.884,
+    "llm_providers": [
+      "openai"
+    ],
+    "llm_models": [
+      "gpt-5.2"
+    ],
+    "llm_usage": {
+      "total_tokens": 22182,
+      "cost_usd": 0.059059
+    },
+    "tool_versions": {
+      "nmap": "7.94SVN",
+      "httpx": "v1.8.1",
+      "whatweb": "0.5.5",
+      "nuclei": "v2.9.8",
+      "gobuster": "3.6",
+      "katana": "v1.3.0",
+      "dnsenum": "1.2.6",
+      "sslscan": "2.1.2",
+      "sqlmap": "1.8.4#stable"
+    },
+    "nuclei": {
+      "engine_version": "v2.9.8"
+    }
+  },
+  "artifacts": [
+    {
+      "kind": "tool_result",
+      "tool": "nmap",
+      "status": "success",
+      "path": "evidence/results/000-nmap.json",
+      "sha256": "02643b6e6cc228916796218b31b1110c52b3cb94256335c7b52f9965b368dde2",
+      "bytes": 5095,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "rustscan",
+      "status": "success",
+      "path": "evidence/results/001-rustscan.json",
+      "sha256": "878c036d21c22c4a6491f74456ed14630c372da4d9537bad1a2b5b8382361a68",
+      "bytes": 3469,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "httpx",
+      "status": "success",
+      "path": "evidence/results/002-httpx.json",
+      "sha256": "9c967fe4720dd4bacd8d60cdcce452cd13b2eefff7f7150dd8612aca865613e7",
+      "bytes": 15601,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "whatweb",
+      "status": "success",
+      "path": "evidence/results/003-whatweb.json",
+      "sha256": "b249111c4e51b7a8d49aa7d2736367df81cd42c5b84ea84e7a6520898a3c7b0a",
+      "bytes": 1199,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "whatweb",
+      "status": "success",
+      "path": "evidence/results/004-whatweb.json",
+      "sha256": "896e15ea120b96da383f41e9a28670435ee9c2a0560a9d0efc9b700bfb6bd31f",
+      "bytes": 2333,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "whatweb",
+      "status": "success",
+      "path": "evidence/results/005-whatweb.json",
+      "sha256": "ff90ac29cfb69887528eeaf9334147589cfc483942b1995e2ae60f0eec564e46",
+      "bytes": 1342,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "nuclei",
+      "status": "skipped",
+      "path": "evidence/results/006-nuclei.json",
+      "sha256": "defc20d4f2c3ff8d5cc79f67e77e8b3a00dd4ff2a797f0fafa60a30e69f8c51c",
+      "bytes": 225,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "nuclei",
+      "status": "skipped",
+      "path": "evidence/results/007-nuclei.json",
+      "sha256": "e09bc36814811c5f5b456ec5e04edb410e759a1d27dc3f30a2d130f668c5e8f1",
+      "bytes": 244,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "nuclei",
+      "status": "skipped",
+      "path": "evidence/results/008-nuclei.json",
+      "sha256": "6ef3fcc25166e90bb3e1817685f8f2ab180d0d3c6ef5bc1537ce9f374d201d6b",
+      "bytes": 244,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "nuclei",
+      "status": "skipped",
+      "path": "evidence/results/009-nuclei.json",
+      "sha256": "7b47e88e8e6fc4d23270f9c0d536dd40a18c798844df86698a5c90a86073b012",
+      "bytes": 244,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "gobuster",
+      "status": "success",
+      "path": "evidence/results/010-gobuster.json",
+      "sha256": "fa976789b9520b400332c2e38b41478b8b2916ec7f9be401a5543c2000e6d212",
+      "bytes": 602,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "katana",
+      "status": "success",
+      "path": "evidence/results/011-katana.json",
+      "sha256": "520dd7ae92310aa3e98b10ef1bbacb81047523411caf7bf6f0b36a7c736a35c4",
+      "bytes": 7576,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "dnsenum",
+      "status": "skipped",
+      "path": "evidence/results/012-dnsenum.json",
+      "sha256": "182472f10cfca5d527f47b46a1b7da26bf9ca35b582e088be6d5b7b291016de6",
+      "bytes": 226,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "sslscan",
+      "status": "skipped",
+      "path": "evidence/results/013-sslscan.json",
+      "sha256": "be78b642c276bfc0808127281127bf6851eb583a286d7ddb0fb8ca0ed8bdcf6f",
+      "bytes": 225,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "enum4linux-ng",
+      "status": "skipped",
+      "path": "evidence/results/014-enum4linux-ng.json",
+      "sha256": "8f82bbc5473be6006a97a0b4f6c31a892a351c04b94656c19b9de1c44a5b6f79",
+      "bytes": 216,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "sqlmap",
+      "status": "skipped",
+      "path": "evidence/results/015-sqlmap.json",
+      "sha256": "978567921860d3fb10c82c316226370b79276a680fceb480ded11b7b193bde72",
+      "bytes": 237,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "searchsploit",
+      "status": "skipped",
+      "path": "evidence/results/016-searchsploit.json",
+      "sha256": "d9467eab2125555a4ed80ff38adac7e993a9956a0fee29870da5ab2fc5e109ba",
+      "bytes": 231,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "supabase_audit",
+      "status": "success",
+      "path": "evidence/results/017-supabase_audit.json",
+      "sha256": "dcf27d6689b7d882b5f3130ef05ba23e4c864b427c64e71eef5c8ad4fdebdaa3",
+      "bytes": 2994,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "browser_use",
+      "status": "success",
+      "path": "evidence/results/018-browser_use.json",
+      "sha256": "5746530d58e2335d482d98c2c0e659ec896db6b9b3cd9feac36ca8e35251088a",
+      "bytes": 17574,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "browser_use",
+      "status": "success",
+      "path": "evidence/results/019-browser_use.json",
+      "sha256": "10e07748ee26787606e97e5d7201ef6bf9a78e7806afcaf73e124da481fea72d",
+      "bytes": 15746,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "browser_use",
+      "status": "success",
+      "path": "evidence/results/020-browser_use.json",
+      "sha256": "2c91c06a608de8bf7760c31c65be23fdb46b297770cbdd2acbe29fec666818a0",
+      "bytes": 15174,
+      "created_at": 1772393027.4479866
+    },
+    {
+      "kind": "tool_result",
+      "tool": "readiness_probe",
+      "status": "success",
+      "path": "evidence/results/021-readiness_probe.json",
+      "sha256": "7c37aa742622444e5662dc0ecda2b5cbaa56a406a48fb0b1b2eff287b025ce72",
+      "bytes": 22723,
+      "created_at": 1772393027.4479866
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "tool": "gobuster",
+  "status": "success",
+  "target": "http://localhost:3000",
+  "command": "gobuster dir -u http://localhost:3000 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "findings": [
+      "\u001b[2K/admin                (Status: 200) [Size: 7369]"
+    ],
+    "command": "gobuster dir -u http://localhost:3000 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error"
+  }
+}

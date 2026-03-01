@@ -1,0 +1,1329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.45;
+      margin: 20px;
+      color: #111;
+    }
+    h1, h2, h3, h4 {
+      margin-top: 1.1em;
+      margin-bottom: 0.5em;
+    }
+    p, ul, ol {
+      margin: 0.5em 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.6em 0 1em 0;
+      font-size: 0.95em;
+    }
+    th, td {
+      border: 1px solid #cfcfcf;
+      padding: 6px 8px;
+      vertical-align: top;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+    th {
+      background: #f5f5f5;
+      text-align: left;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow-wrap: normal;
+      word-break: normal;
+    }
+    .tools-run-table {
+      table-layout: fixed;
+    }
+    .tools-run-table th:nth-child(1),
+    .tools-run-table td:nth-child(1) {
+      width: 14%;
+    }
+    .tools-run-table th:nth-child(2),
+    .tools-run-table td:nth-child(2) {
+      width: 12%;
+    }
+    .tools-run-table th:nth-child(3),
+    .tools-run-table td:nth-child(3) {
+      width: 74%;
+    }
+    .tools-run-table td:nth-child(2) {
+      white-space: nowrap;
+    }
+    .tools-run-table td:nth-child(3) code {
+      display: block;
+    }
+    .compliance-matrix-table {
+      table-layout: fixed;
+    }
+    .compliance-matrix-table th:nth-child(1),
+    .compliance-matrix-table td:nth-child(1) {
+      width: 34%;
+    }
+    .compliance-matrix-table th:nth-child(2),
+    .compliance-matrix-table td:nth-child(2) {
+      width: 12%;
+      white-space: nowrap;
+    }
+    .compliance-matrix-table th:nth-child(3),
+    .compliance-matrix-table td:nth-child(3) {
+      width: 20%;
+    }
+    .compliance-matrix-table th:nth-child(4),
+    .compliance-matrix-table td:nth-child(4) {
+      width: 34%;
+    }
+    code {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border: 1px solid #ddd;
+      padding: 8px;
+      background: #fafafa;
+    }
+  </style>
+</head>
+<body>
+<h1 id="supabash-audit-report">Supabash Audit Report</h1>
+<p><strong>Target:</strong> localhost<br>
+<strong>Assessment Type:</strong> Supabash Audit<br>
+<strong>Run Type:</strong> ai-audit<br>
+<strong>Compliance Profile:</strong> SOC 2 Type II<br>
+<strong>Compliance Focus:</strong> Security and availability controls with evidence of exposure management and vulnerability assessment.  </p>
+<h2 id="run-info">Run Info</h2>
+<ul>
+<li>started_at: 2026-03-01 19:16:57 UTC</li>
+<li>finished_at: 2026-03-01 19:23:39 UTC</li>
+</ul>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ul>
+<li><a href="#summary">Summary</a></li>
+<li><a href="#methodology">Methodology</a></li>
+<li><a href="#scope--assumptions">Scope &amp; Assumptions</a></li>
+<li><a href="#compliance-coverage-matrix">Compliance Coverage Matrix</a></li>
+<li><a href="#not-assessable-automatically">Not Assessable Automatically</a></li>
+<li><a href="#evidence-pack">Evidence Pack</a></li>
+<li><a href="#reproducibility-trace">Reproducibility Trace</a></li>
+<li><a href="#llm-reasoning-trace">LLM Reasoning Trace</a></li>
+<li><a href="#agentic-expansion">Agentic Expansion</a></li>
+<li><a href="#findings-overview">Findings Overview</a></li>
+<li><a href="#finding-quality-metrics">Finding Quality Metrics</a></li>
+<li><a href="#findings-detailed">Findings (Detailed)</a></li>
+<li><a href="#recommended-next-actions">Recommended Next Actions</a></li>
+<li><a href="#tools-run">Tools Run</a></li>
+<li><a href="#commands-executed">Commands Executed</a></li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p>The localhost environment exposes multiple high-risk misconfigurations, including leaked Supabase credentials and unauthenticated access to data-plane services (Supabase REST and S3-compatible storage). Immediate credential rotation and access control hardening are required to prevent unauthorized data access or privilege escalation.</p>
+<h3 id="notes">Notes</h3>
+<ul>
+<li>Fast port discovery (rustscan) found 19 open port(s); scoped nmap service detection to discovered ports.</li>
+<li>SQLMap candidate quality filter blocked 6 low-trust/non-viable harvested URL(s).</li>
+<li>Agentic phase delta: 22 finding(s), 22 unique signatures, net-new unique 22, reconfirmed unique 0, duplicate-only findings 0.</li>
+</ul>
+<h3 id="summary-normalization">Summary Normalization</h3>
+<ul>
+<li>severity_reconciliations: 1</li>
+<li>added_findings: 2</li>
+</ul>
+<h3 id="llm-usage">LLM Usage</h3>
+<ul>
+<li>total_tokens=22182</li>
+<li>cost_usd=0.059059</li>
+<li>provider=openai</li>
+<li>model=gpt-5.2</li>
+</ul>
+<h3 id="findings">Findings</h3>
+<ul>
+<li><strong>CRITICAL</strong> Supabase service role key exposed (credential leakage)</li>
+<li>Evidence:<ul>
+<li>Supabase audit found a service_role JWT in page content: "key=eyJhbG….sig" from http://localhost:4001; browser observation also reports both 'anon' and 'service_role' JWTs embedded in HTML source of http://localhost:4001/.</li>
+<li>supabase_audit: key=eyJhbG….sig, source=http://localhost:4001</li>
+</ul>
+</li>
+<li>Recommendations:<ul>
+<li>Immediately rotate/revoke the leaked service_role key; remove all Supabase keys from client-side code/HTML; move privileged operations server-side; review logs for misuse and re-issue dependent secrets.</li>
+<li>Rotate the service role key immediately and remove it from client-side code.</li>
+</ul>
+</li>
+<li>Compliance Mapping:<ul>
+<li>Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium)</li>
+<li>Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li>Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high)</li>
+</ul>
+</li>
+<li>Mapping Basis: corroborated by supabase_audit findings</li>
+<li>Evidence Artifacts: <code>evidence/results/017-supabase_audit.json</code></li>
+<li>Manifest Reference: <code>evidence/manifest.json</code></li>
+<li><strong>HIGH</strong> Supabase REST API accessible without authentication (possible RLS disabled/misapplied)</li>
+<li>Evidence:<ul>
+<li>Cluster evidence shows Supabase REST endpoint responding without auth: http://localhost:4001/rest/v1/ returned HTTP 200 (reported twice; includes 'RLS may be disabled' signal).</li>
+<li>supabase_audit: http://localhost:4001/rest/v1/ (HTTP 200)</li>
+</ul>
+</li>
+<li>Recommendations:<ul>
+<li>Require authentication for REST endpoints, validate JWT enforcement, and ensure Row Level Security (RLS) is enabled and correctly configured for all tables; restrict network exposure (bind to localhost/internal network) where appropriate.</li>
+<li>Enforce RLS and require API keys/auth for REST endpoints.</li>
+</ul>
+</li>
+<li>Compliance Mapping:<ul>
+<li>Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li>Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+</ul>
+</li>
+<li>Mapping Basis: corroborated by supabase_audit findings</li>
+<li>Evidence Artifacts: <code>evidence/results/017-supabase_audit.json</code></li>
+<li>Manifest Reference: <code>evidence/manifest.json</code></li>
+<li><strong>HIGH</strong> Anonymous S3-compatible bucket listing accessible (information disclosure)</li>
+<li>Evidence:<ul>
+<li>Unauthenticated bucket listing responses: http://localhost:8080/ (HTTP 200) marker=ListAllMyBucketsResult; also HTTP 200 for http://localhost:8080/?list-type=2 with same marker (additional variants like ?prefix= and ?delimiter=/ also returned 200).</li>
+<li>readiness_probe: http://localhost:8080/ (HTTP 200); marker=ListAllMyBucketsResult</li>
+<li>readiness_probe: http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult</li>
+<li>readiness_probe: http://localhost:8080/?prefix= (HTTP 200); marker=ListAllMyBucketsResult</li>
+<li>readiness_probe: http://localhost:8080/?delimiter=/ (HTTP 200); marker=ListAllMyBucketsResult</li>
+</ul>
+</li>
+<li>Recommendation: Disable anonymous access and enforce authentication/authorization for the S3-compatible API; apply least-privilege bucket policies, restrict listing actions, and limit exposure via firewall/bind address.</li>
+<li>Compliance Mapping:<ul>
+<li>Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li>Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high)</li>
+<li>Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: high)</li>
+</ul>
+</li>
+<li>Mapping Basis: corroborated by readiness_probe findings</li>
+<li>Evidence Artifacts: <code>evidence/results/021-readiness_probe.json</code></li>
+<li>Manifest Reference: <code>evidence/manifest.json</code></li>
+<li><strong>HIGH</strong> Prometheus config endpoint accessible without authentication</li>
+<li>Evidence: readiness_probe: http://localhost:9090/api/v1/status/config (HTTP 200)</li>
+<li>Compliance Mapping:<ul>
+<li>Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li>Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+</ul>
+</li>
+<li>Mapping Basis: corroborated by readiness_probe findings</li>
+<li>Evidence Artifacts: <code>evidence/results/021-readiness_probe.json</code></li>
+<li>Manifest Reference: <code>evidence/manifest.json</code></li>
+<li><strong>HIGH</strong> Supabase RLS may be disabled</li>
+<li>Evidence: supabase_audit: http://localhost:4001/rest/v1/ (HTTP 200)</li>
+<li>Recommendation: Enable RLS and verify policies for affected tables/views.</li>
+<li>Compliance Mapping:<ul>
+<li>Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li>Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+</ul>
+</li>
+<li>Mapping Basis: corroborated by supabase_audit findings</li>
+<li>Evidence Artifacts: <code>evidence/results/017-supabase_audit.json</code></li>
+<li>Manifest Reference: <code>evidence/manifest.json</code></li>
+</ul>
+<h2 id="methodology">Methodology</h2>
+<ul>
+<li>Baseline: deterministic evidence collection with scope controls and safe defaults.</li>
+<li>Agentic expansion: tool-calling planner proposes additional evidence collection within allowed scope.</li>
+<li>Compliance profile: SOC 2 Type II</li>
+<li>Compliance focus: Security and availability controls with evidence of exposure management and vulnerability assessment.</li>
+</ul>
+<h2 id="scope-assumptions">Scope &amp; Assumptions</h2>
+<ul>
+<li>In scope: localhost, http://localhost:19090, http://localhost:35967, http://localhost:42613, http://localhost:9796, http://localhost:4001, http://localhost:8080, http://localhost:4341 ...</li>
+<li>Authentication context: unauthenticated network/web checks unless explicitly configured otherwise.</li>
+<li>Control mapping note: mapped controls indicate potential relevance and require manual validation.</li>
+<li>Localhost limitation: this run cannot validate external exposure paths or network segmentation boundaries.</li>
+<li>Out of scope: independent attestation/certification decisions and control operation effectiveness testing.</li>
+</ul>
+<h2 id="compliance-coverage-matrix">Compliance Coverage Matrix</h2>
+<table class="compliance-matrix-table">
+<thead>
+<tr>
+<th>Control Area</th>
+<th>Status</th>
+<th>Evidence Source</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Security Surface Inventory</td>
+<td>Covered</td>
+<td>nmap, httpx, whatweb</td>
+<td>basis=corroborated_findings; based on successful tool runs</td>
+</tr>
+<tr>
+<td>Vulnerability &amp; Misconfiguration Checks</td>
+<td>Partial</td>
+<td>gobuster</td>
+<td>basis=corroborated_findings; skipped: nuclei (Disabled by config (tools.<name>.enabled=false)), sqlmap (No parameterized URL detected in input/discovered endpoints)</td>
+</tr>
+<tr>
+<td>Encryption/Transport Control Review</td>
+<td>Partial</td>
+<td>nmap</td>
+<td>basis=corroborated_findings; skipped: sslscan (No TLS candidate ports detected from discovery)</td>
+</tr>
+<tr>
+<td>Access Control Exposure Review</td>
+<td>Partial</td>
+<td>readiness_probe, supabase_audit</td>
+<td>basis=corroborated_findings; skipped: nuclei (Disabled by config (tools.<name>.enabled=false))</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Status legend: <code>Covered</code> = mapped checks succeeded with corroborating evidence, <code>Partial</code> = some mapped checks/evidence present, <code>Not Assessed</code> = no successful mapped checks or signal was inconclusive.</li>
+</ul>
+<h2 id="not-assessable-automatically">Not Assessable Automatically</h2>
+<ul>
+<li>The following areas require manual validation, process evidence, or third-party assessment:</li>
+<li>Policy design/effectiveness over the audit period (not point-in-time scan evidence).</li>
+<li>Access review governance (JML workflow approvals and periodic recertifications).</li>
+<li>Change management control operation evidence (tickets, approvals, segregation).</li>
+<li>Incident response process effectiveness and tabletop/drill execution records.</li>
+</ul>
+<h2 id="evidence-pack">Evidence Pack</h2>
+<ul>
+<li>directory: <code>evidence</code></li>
+<li>manifest: <code>evidence/manifest.json</code></li>
+<li>artifact_count: 22</li>
+</ul>
+<h3 id="runtime-metadata">Runtime Metadata</h3>
+<ul>
+<li>python_version: 3.14.2</li>
+<li>platform: Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39</li>
+<li>llm_providers: openai</li>
+<li>llm_models: gpt-5.2</li>
+</ul>
+<h3 id="tool-versions">Tool Versions</h3>
+<ul>
+<li><code>dnsenum</code>: 1.2.6</li>
+<li><code>gobuster</code>: 3.6</li>
+<li><code>httpx</code>: v1.8.1</li>
+<li><code>katana</code>: v1.3.0</li>
+<li><code>nmap</code>: 7.94SVN</li>
+<li><code>nuclei</code>: v2.9.8</li>
+<li><code>sqlmap</code>: 1.8.4#stable</li>
+<li><code>sslscan</code>: 2.1.2</li>
+<li><code>whatweb</code>: 0.5.5</li>
+</ul>
+<h2 id="reproducibility-trace">Reproducibility Trace</h2>
+<ul>
+<li>file: <code>ai-audit-soc2-20260301-201657-replay.json</code></li>
+<li>markdown_file: <code>ai-audit-soc2-20260301-201657-replay.md</code></li>
+<li>step_count: 4</li>
+<li>version: 1</li>
+</ul>
+<h2 id="llm-reasoning-trace">LLM Reasoning Trace</h2>
+<ul>
+<li>json_file: <code>ai-audit-soc2-20260301-201657-llm-trace.json</code></li>
+<li>markdown_file: <code>ai-audit-soc2-20260301-201657-llm-trace.md</code></li>
+<li>llm_event_count: 21</li>
+<li>decision_steps: 4</li>
+<li>llm_calls: 6</li>
+<li>version: 1</li>
+<li>note: captures explicit planner rationale/messages and decisions; hidden model internals are not included.</li>
+</ul>
+<h2 id="agentic-expansion">Agentic Expansion</h2>
+<ul>
+<li>phase: baseline+agentic</li>
+<li>baseline_finished_at: 2026-03-01 19:20:10 UTC</li>
+<li>max_actions: 10</li>
+<li>notes: Next step chosen to maximize signal with minimal intrusiveness and to anchor subsequent targeted crawling/fuzzing decisions on :3002.</li>
+<li>decision_steps: 4</li>
+<li>planner: tool_calling</li>
+</ul>
+<h3 id="decision-trace-highlights">Decision Trace Highlights</h3>
+<ul>
+<li>step 1: executed</li>
+<li>initial_candidate: tool=browser_use target=http://localhost:4001 priority=1</li>
+<li>selected_action: browser_use target=http://localhost:4001</li>
+<li>step 2: executed</li>
+<li>initial_candidate: tool=browser_use target=http://localhost:8080 priority=5</li>
+<li>selected_action: browser_use target=http://localhost:8080</li>
+<li>step 3: executed</li>
+<li>initial_candidate: tool=browser_use target=http://localhost:9090/api/v1/status/config priority=1</li>
+<li>selected_action: browser_use target=http://localhost:9090/api/v1/status/config</li>
+<li>step 4: stop (all_candidates_already_covered)</li>
+<li>initial_candidate: tool=httpx target=http://localhost:3002 priority=10</li>
+<li>replan: attempted=true reason=all_candidates_already_covered excluded=24</li>
+<li>replan_candidate: tool=httpx target=http://localhost:3002 priority=5</li>
+</ul>
+<h3 id="actions">Actions</h3>
+<ul>
+<li>browser_use target=http://localhost:4001 profile=compliance_soc2: success</li>
+<li>Rationale: SOC2 (CC7.1/CC7.2) requires evidence-driven validation of high-risk exposure. The highest-severity open cluster is secret_exposure at Supabase (service role key) which can enable full database/admin access; validating presence, scope, and exploitability (unauthenticated REST responses) closes the top uncovered risk cluster with concrete, screenshot/source evidence suitable for audit reporting.</li>
+<li>browser_use target=http://localhost:8080 profile=compliance_soc2: success</li>
+<li>Rationale: High-risk cluster indicates unauthenticated data-plane exposure (anonymous S3 bucket listing). For SOC 2 Security/Availability, confirm whether unauthenticated access allows enumeration and potential data access; this provides audit-grade evidence for exposure management and secure configuration control failures.</li>
+<li>browser_use target=http://localhost:9090/api/v1/status/config profile=compliance_soc2: success</li>
+<li>Rationale: Open HIGH cluster requires closure: validate unauthenticated access to Prometheus /api/v1/status/config as evidence for exposure management (SOC 2 CC7.1/CC7.2) and confirm whether configuration data (targets, credentials, remote_write endpoints) is disclosed.</li>
+</ul>
+<h2 id="findings-overview">Findings Overview</h2>
+<h3 id="summary-llm">Summary (LLM)</h3>
+<table>
+<thead>
+<tr>
+<th>Severity</th>
+<th style="text-align: right;">Prioritized (LLM)</th>
+<th style="text-align: right;">Tools Total</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CRITICAL</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>HIGH</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">11</td>
+</tr>
+<tr>
+<td>MEDIUM</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">13</td>
+</tr>
+<tr>
+<td>LOW</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">85</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Note: <code>Prioritized (LLM)</code> reflects risk-synthesis emphasis; <code>Tools Total</code> reflects full collected evidence.</li>
+</ul>
+<h3 id="detailed-tools">Detailed (Tools)</h3>
+<table>
+<thead>
+<tr>
+<th>Severity</th>
+<th style="text-align: right;">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CRITICAL</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>HIGH</td>
+<td style="text-align: right;">11</td>
+</tr>
+<tr>
+<td>MEDIUM</td>
+<td style="text-align: right;">13</td>
+</tr>
+<tr>
+<td>LOW</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td style="text-align: right;">85</td>
+</tr>
+</tbody>
+</table>
+<h2 id="finding-quality-metrics">Finding Quality Metrics</h2>
+<ul>
+<li>total_findings: 113</li>
+<li>unique_findings: 113</li>
+<li>duplicate_findings: 0</li>
+<li>duplicate_groups: 0</li>
+<li>duplicate_rate: 0.0</li>
+<li>critical_high_total: 12</li>
+<li>critical_high_unique: 12</li>
+<li>risk_class_count: 8</li>
+<li>risk_classes: data_plane_exposure, general_security_signal, known_vulnerability, secret_exposure, surface_discovery, transport_security, unauthenticated_exposure, vulnerability_signal</li>
+</ul>
+<h3 id="risk-normalization">Risk Normalization</h3>
+<ul>
+<li>Reduced in summary risk synthesis: HIGH-7, MEDIUM-13, LOW-3, INFO-85</li>
+<li>Basis: LLM summary may aggregate multiple low-signal findings into higher-level operational risk statements.</li>
+</ul>
+<h4 id="normalization-details">Normalization Details</h4>
+<ul>
+<li>CRITICAL Supabase service role key exposed (credential leakage)</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 3003, 4001, 4341, 8080, 9090, 9093, 9796)</li>
+<li>HIGH Supabase REST API accessible without authentication (possible RLS disabled/misapplied)</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 3003, 4001, 4341, 8080, 9090, 9093, 9796)</li>
+<li>HIGH Anonymous S3-compatible bucket listing accessible (information disclosure)</li>
+<li>Derived via: rule:web_surface_aggregation (ports: 3001, 3003, 4001, 4341, 8080, 9090, 9093, 9796)</li>
+</ul>
+<h2 id="findings-detailed">Findings (Detailed)</h2>
+<h3 id="correlated-signals">Correlated Signals</h3>
+<ul>
+<li><strong>HIGH</strong> Anonymous S3-compatible bucket listing accessible: 4 correlated observations across 4 distinct evidence entries; tools=readiness_probe.</li>
+<li><strong>HIGH</strong> Browser-driven security signal: 2 correlated observations across 2 distinct evidence entries; tools=browser_use.</li>
+<li><strong>MEDIUM</strong> Browser-driven security signal: 6 correlated observations across 6 distinct evidence entries; tools=browser_use.</li>
+<li><strong>MEDIUM</strong> Unauthenticated metrics endpoint accessible: 3 correlated observations across 3 distinct evidence entries; tools=readiness_probe.</li>
+<li><strong>INFO</strong> Browser-discovered endpoint: 12 correlated observations across 12 distinct evidence entries; tools=browser_use.</li>
+<li><strong>INFO</strong> Discovered endpoint: 49 correlated observations across 49 distinct evidence entries; tools=katana.</li>
+<li>
+<p><strong>INFO</strong> Tech stack detected: 4 correlated observations across 4 distinct evidence entries; tools=whatweb.</p>
+</li>
+<li>
+<p><strong>INFO</strong> Open port 3000/tcp (nmap)</p>
+</li>
+<li>Evidence: ppp</li>
+<li><strong>INFO</strong> Open port 3001/tcp (nmap)</li>
+<li>Evidence: http Apache httpd 2.4.25</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 3002/tcp (nmap)</li>
+<li>Evidence: exlm-agent</li>
+<li><strong>INFO</strong> Open port 3003/tcp (nmap)</li>
+<li>Evidence: http Apache Tomcat 10.1.36</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 4000/tcp (nmap)</li>
+<li>Evidence: remoteanything</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 4001/tcp (nmap)</li>
+<li>Evidence: http nginx 1.29.4</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 4341/tcp (nmap)</li>
+<li>Evidence: http Node.js Express framework</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 5050/tcp (nmap)</li>
+<li>Evidence: mmcc</li>
+<li><strong>INFO</strong> Open port 5432/tcp (nmap)</li>
+<li>Evidence: postgresql PostgreSQL DB 9.6.0 or later</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Open port 6379/tcp (nmap)</li>
+<li>Evidence: redis Redis key-value store 6.2.11</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Open port 8080/tcp (nmap)</li>
+<li>Evidence: http-proxy</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 9090/tcp (nmap)</li>
+<li>Evidence: http Golang net/http server</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 9093/tcp (nmap)</li>
+<li>Evidence: http Apache Tomcat 10.1.36</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 9100/tcp (nmap)</li>
+<li>Evidence: jetdirect</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 9796/tcp (nmap)</li>
+<li>Evidence: http Node.js Express framework</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 19090/tcp (nmap)</li>
+<li>Evidence: http Golang net/http server</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 35449/tcp (nmap)</li>
+<li>Evidence: http Node.js Express framework</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 35967/tcp (nmap)</li>
+<li>Evidence: unknown</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Open port 42613/tcp (nmap)</li>
+<li>Evidence: http Node.js Express framework</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Country, Email, HTML5, IP, Script, Title, UncommonHeaders, X-Powered-By</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Apache, Cookies, Country, HTTPServer, IP, RedirectLocation</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Apache, Cookies, Country, DVWA, HTTPServer, IP, PasswordField, Title</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Tech stack detected (whatweb)</li>
+<li>Evidence: Country, HTML5, IP, JQuery, Script, Title, UncommonHeaders, X-Frame-Options</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: low)</li>
+<li><strong>INFO</strong> Discovered path (gobuster)</li>
+<li>Evidence: [2K/admin                (Status: 200) [Size: 7369]</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392792019</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392792019</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/app-pages-internals.js</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/app/layout.js</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/app/page.js</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/privacy</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/terms</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/pricing</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392792019</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392793073</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392793073</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392793069</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392793069</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/%5C%22%27</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/%5C%22%27+e+%27%5C%22</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/app/pricing/page.js</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392793041</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392793041</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/app/privacy/page.js</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392794055</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392794081</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392794081</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392794098</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392794098</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392794071</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392794071</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392794055</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/app/terms/page.js</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392793049</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392793049</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392794233</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392793073</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392793069</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392794233</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392793041</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392793055</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392793055</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392794055</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392794071</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392794081</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392794098</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392793049</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392794233</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392793055</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/css/app/layout.css?v=1772392794411</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/webpack.js?v=1772392794411</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Discovered endpoint (katana)</li>
+<li>Evidence: http://localhost:3000/_next/static/chunks/main-app.js?v=1772392794411</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>LOW</strong> Supabase anon key exposed in client content (supabase_audit)</li>
+<li>Evidence: key=eyJhbG….sig, source=http://localhost:4001</li>
+<li>Recommendation: Verify RLS policies and limit anon key usage to least privilege.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>CRITICAL</strong> Supabase service role key exposed (supabase_audit)</li>
+<li>Evidence: key=eyJhbG….sig, source=http://localhost:4001</li>
+<li>Recommendation: Rotate the service role key immediately and remove it from client-side code.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high)</li>
+<li><strong>HIGH</strong> Supabase REST API accessible without authentication (supabase_audit)</li>
+<li>Evidence: http://localhost:4001/rest/v1/ (HTTP 200)</li>
+<li>Recommendation: Enforce RLS and require API keys/auth for REST endpoints.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Supabase RPC endpoint exposed without authentication (supabase_audit)</li>
+<li>Evidence: http://localhost:4001/rest/v1/rpc/ (HTTP 200)</li>
+<li>Recommendation: Restrict RPC access with policies and authentication.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Supabase RLS may be disabled (supabase_audit)</li>
+<li>Evidence: http://localhost:4001/rest/v1/ (HTTP 200)</li>
+<li>Recommendation: Enable RLS and verify policies for affected tables/views.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Supabase RPC 'list_users' callable without authentication (supabase_audit)</li>
+<li>Evidence: http://localhost:4001/rest/v1/rpc/list_users (HTTP 200)</li>
+<li>Recommendation: Require authentication for RPCs and enforce RLS or role checks.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Browser-driven security signal (browser_use)</li>
+<li>Evidence: - Exposed Supabase Keys: Found both 'anon' and 'service_role' JWTs embedded in the HTML source of http://localhost:4001/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium); Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: high)</li>
+<li><strong>MEDIUM</strong> Browser-driven security signal (browser_use)</li>
+<li>Evidence: - Unauthenticated REST Access: Confirmed HTTP 200 responses for unauthenticated GET requests to:</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>HIGH</strong> Potential security misconfiguration signal (browser_use)</li>
+<li>Evidence: - Conclusion: The service is misconfigured, exposing administrative credentials and allowing unauthenticated API access, which indicates that Row Level Security (RLS) is likely not enforced or the gateway is wide open.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:4001/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:4001/rest/v1/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:4001/rest/v1/rpc/list_users</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:4001/rest/v1/users</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Browser-driven security signal (browser_use)</li>
+<li>Evidence: - <strong>S3-Compatible Root Exposure:</strong> <code>GET http://localhost:8080/</code> returns <code>HTTP 200</code> with marker <code>&lt;ListAllMyBucketsResult&gt;&lt;Owner&gt;&lt;ID&gt;anonymous&lt;/ID&gt;&lt;/Owner&gt;&lt;Buckets /&gt;&lt;/ListAllMyBucketsResult&gt;</code>. Confirms unauthenticated access to the S3 control plane.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>MEDIUM</strong> Browser-driven security signal (browser_use)</li>
+<li>Evidence: - <strong>Unauthenticated Metrics Exposure:</strong> <code>GET http://localhost:8080/metrics</code> returns <code>HTTP 200</code> with Prometheus-formatted metrics identifying the service as 'shardseal' (e.g., <code>shardseal_s3_operations_total</code>).</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>HIGH</strong> Browser-driven security signal (browser_use)</li>
+<li>Evidence: - <strong>Resource Probing:</strong> <code>GET http://localhost:8080/test</code> returns <code>HTTP 404/NotImplemented</code> (S3 Error: <code>NoSuchBucket</code>), confirming the service processes bucket-style paths but the specific guessed resource 'test' is absent.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC7.1 (Vulnerability Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Potential security misconfiguration signal (browser_use)</li>
+<li>Evidence: <strong>Conclusion:</strong> The target at :8080 is an unauthenticated S3-compatible service (Shardseal). While no buckets are currently visible to the anonymous user, the lack of authentication on the root and metrics endpoints represents a significant misconfiguration allowing service discovery and potential data exposure if buckets are created with public permissions.</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:8080/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:8080/?delimiter=/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:8080/metrics</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:8080/test</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Browser-driven security signal (browser_use)</li>
+<li>Evidence: 1. <strong>[HIGH] Unauthenticated Access to Prometheus Configuration</strong></li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>MEDIUM</strong> Browser-driven security signal (browser_use)</li>
+<li>Evidence: 2. <strong>[MEDIUM] Unauthenticated Metrics Exposure</strong></li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>MEDIUM</strong> Browser-driven security signal (browser_use)</li>
+<li>Evidence: 3. <strong>[LOW] Unauthenticated Go pprof Debug Endpoint</strong></li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:9090/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:9090/api/v1/status/config</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:9090/metrics</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)</li>
+<li><strong>INFO</strong> Browser-discovered endpoint (browser_use)</li>
+<li>Evidence: http://localhost:9090/debug/pprof/</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium); Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Sensitive services listening on wildcard interfaces (readiness_probe)</li>
+<li>Evidence: ss -lnt shows wildcard listeners on ports: 5432, 6379, 8080, 9090, 9100</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Anonymous S3-compatible bucket listing accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:8080/ (HTTP 200); marker=ListAllMyBucketsResult</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: high)</li>
+<li><strong>HIGH</strong> Anonymous S3-compatible bucket listing accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: high)</li>
+<li><strong>HIGH</strong> Anonymous S3-compatible bucket listing accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:8080/?prefix= (HTTP 200); marker=ListAllMyBucketsResult</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: high)</li>
+<li><strong>HIGH</strong> Anonymous S3-compatible bucket listing accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:8080/?delimiter=/ (HTTP 200); marker=ListAllMyBucketsResult</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC6.8 (Data Classification &amp; Protection) (mapping confidence: high); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: high)</li>
+<li><strong>MEDIUM</strong> Unauthenticated metrics endpoint accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:8080/metrics (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>LOW</strong> Go pprof debug endpoint accessible without authentication (readiness_probe)</li>
+<li>Evidence: http://localhost:9090/debug/pprof/ (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Unauthenticated metrics endpoint accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:9090/metrics (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>HIGH</strong> Prometheus config endpoint accessible without authentication (readiness_probe)</li>
+<li>Evidence: http://localhost:9090/api/v1/status/config (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Unauthenticated metrics endpoint accessible (readiness_probe)</li>
+<li>Evidence: http://localhost:3002/metrics (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>LOW</strong> Debug endpoint accessible without authentication (readiness_probe)</li>
+<li>Evidence: http://localhost:3002/debug/vars (HTTP 200)</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: medium); Potential Gap: SOC 2 CC8.1 (Configuration Management) (mapping confidence: medium)</li>
+<li><strong>MEDIUM</strong> Redis reachable without authentication (readiness_probe)</li>
+<li>Evidence: redis-cli PING returned PONG for localhost:6379</li>
+<li>Compliance Mapping: Potential Gap: SOC 2 CC6.1 (Logical Access) (mapping confidence: high)</li>
+</ul>
+<h2 id="recommended-next-actions">Recommended Next Actions</h2>
+<ol>
+<li>Immediately rotate/revoke the leaked service_role key; remove all Supabase keys from client-side code/HTML; move privileged operations server-side; review logs for misuse and re-issue dependent secrets.</li>
+<li>Require authentication for REST endpoints, validate JWT enforcement, and ensure Row Level Security (RLS) is enabled and correctly configured for all tables; restrict network exposure (bind to localhost/internal network) where appropriate.</li>
+<li>Disable anonymous access and enforce authentication/authorization for the S3-compatible API; apply least-privilege bucket policies, restrict listing actions, and limit exposure via firewall/bind address.</li>
+<li>Restrict monitoring/debug endpoints to trusted admin or monitoring networks only; add authentication/authorization controls where supported.</li>
+<li>Harden Redis: require authentication/ACLs, bind to localhost or private interfaces, and block untrusted network access at the firewall.</li>
+<li>Collect SOC 2 control-operation evidence not assessable by scanning (JML/access reviews, change approvals, incident response drills, and policy governance records).</li>
+<li>After remediation, rerun the readiness assessment and compare deltas in findings severity, exposed services, and evidence artifacts.</li>
+</ol>
+<h2 id="tools-run">Tools Run</h2>
+<table class="tools-run-table">
+<thead>
+<tr>
+<th>Tool</th>
+<th>Status</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>nmap</td>
+<td>success</td>
+<td><code>nmap localhost -oX - -p 3000,3001,3002,3003,4000,4001,4341,5050,5432,6379,8080,9090,9093,9100,9796,19090,35449,35967,42613 -sV --script ssl-enum-ciphers</code></td>
+</tr>
+<tr>
+<td>rustscan</td>
+<td>success</td>
+<td><code>rustscan -a localhost -r 1-65535 -b 2000 --ulimit 5000 -- --open -oG -</code></td>
+</tr>
+<tr>
+<td>httpx</td>
+<td>success</td>
+<td><code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cd3uzjnl/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></td>
+</tr>
+<tr>
+<td>whatweb</td>
+<td>success</td>
+<td><code>whatweb http://localhost:3000 --log-json -</code></td>
+</tr>
+<tr>
+<td>whatweb</td>
+<td>success</td>
+<td><code>whatweb http://localhost:3001 --log-json -</code></td>
+</tr>
+<tr>
+<td>whatweb</td>
+<td>success</td>
+<td><code>whatweb http://localhost:3002 --log-json -</code></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>nuclei</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>gobuster</td>
+<td>success</td>
+<td><code>gobuster dir -u http://localhost:3000 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></td>
+</tr>
+<tr>
+<td>katana</td>
+<td>success</td>
+<td><code>katana -u http://localhost:3000 -depth 3 -concurrency 10 -silent -jsonl</code></td>
+</tr>
+<tr>
+<td>dnsenum</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>sslscan</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>enum4linux-ng</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>sqlmap</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>searchsploit</td>
+<td>skipped</td>
+<td></td>
+</tr>
+<tr>
+<td>supabase_audit</td>
+<td>success</td>
+<td><code>supabase_audit</code></td>
+</tr>
+<tr>
+<td>browser_use</td>
+<td>success</td>
+<td>`/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392820 run 'Perform a focused browser-driven security validation.</td>
+</tr>
+<tr>
+<td>Target URL: http://localhost:4001</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Planner objective: Verify and capture evidence of exposed Supabase service role key and unauthenticated REST access: (1) load http://localhost:4001 and view page source / network responses for any embedded service_role key; (2) request http://localhost:4001/rest/v1/ and attempt a simple unauthenticated GET (e.g., list schemas or a known table if discoverable) to confirm whether RLS is disabled or data is accessible; record HTTP status codes, response bodies/headers, and any key material locations. Limit exploration to read-only requests.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Rationale: SOC2 (CC7.1/CC7.2) requires evidence-driven validation of high-risk exposure. The highest-severity open cluster is secret_exposure at Supabase (service role key) which can enable full database/admin access; validating presence, scope, and exploitability (unauthenticated REST responses) closes the top uncovered risk cluster with concrete, screenshot/source evidence suitable for audit reporting.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Hypothesis: Supabase Studio/gateway on :4001 is misconfigured and publicly serving a service_role JWT and allowing unauthenticated REST API access, potentially bypassing RLS and exposing/modifying data.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Expected evidence: Page source or JS config containing a JWT-like key labeled service_role or anon/service keys; successful unauthenticated HTTP 200 responses from /rest/v1/ endpoints with JSON payloads; headers indicating Supabase; inability/ability to access table endpoints without Authorization; screenshots/har captures showing exact locations of exposed secrets and responses.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Prior findings to validate:</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [LOW] Supabase anon key exposed in client content: key=eyJhbG….sig, source=http://localhost:4001</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [CRITICAL] Supabase service role key exposed: key=eyJhbG….sig, source=http://localhost:4001</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [HIGH] Supabase REST API accessible without authentication: http://localhost:4001/rest/v1/ (HTTP 200)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [MEDIUM] Supabase RPC endpoint exposed without authentication: http://localhost:4001/rest/v1/rpc/ (HTTP 200)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [HIGH] Supabase RLS may be disabled: http://localhost:4001/rest/v1/ (HTTP 200)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [HIGH] Supabase RPC '"'"'list_users'"'"' callable without authentication: http://localhost:4001/rest/v1/rpc/list_users (HTTP 200)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Execution guidance:</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Start at the target URL and map reachable same-origin paths/forms.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Stay on the target origin (same host:port) unless the selected target itself redirects there.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Do not brute-force credentials or run destructive actions.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Run unauthenticated workflow validation only.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Output requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 8`</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>browser_use</td>
+<td>success</td>
+<td>`/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392887 run 'Perform a focused browser-driven security validation.</td>
+</tr>
+<tr>
+<td>Target URL: http://localhost:8080</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Planner objective: Validate anonymous S3-compatible service exposure by requesting root and common listing paths, confirm bucket enumeration and any object listing/download without credentials. Capture HTTP status, response markers (ListAllMyBucketsResult), and any bucket names/keys shown.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Rationale: High-risk cluster indicates unauthenticated data-plane exposure (anonymous S3 bucket listing). For SOC 2 Security/Availability, confirm whether unauthenticated access allows enumeration and potential data access; this provides audit-grade evidence for exposure management and secure configuration control failures.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Hypothesis: The service at :8080 is an S3-compatible endpoint (e.g., MinIO) that permits unauthenticated ListBuckets and possibly ListObjects/GetObject, enabling data discovery/exfiltration without auth.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Expected evidence: HTTP 200 responses containing S3 XML markers (e.g., <ListAllMyBucketsResult>, <ListBucketResult>), bucket names, object keys, or successful unauthenticated GETs for known objects; or conversely 403/401 demonstrating access is actually restricted (to falsify).</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Prior findings to validate:</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [HIGH] Anonymous S3-compatible bucket listing accessible: http://localhost:8080/?delimiter=/ (HTTP 200); marker=ListAllMyBucketsResult</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [MEDIUM] Unauthenticated metrics endpoint accessible: http://localhost:8080/metrics (HTTP 200)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Execution guidance:</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Start at the target URL and map reachable same-origin paths/forms.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Stay on the target origin (same host:port) unless the selected target itself redirects there.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Do not brute-force credentials or run destructive actions.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Run unauthenticated workflow validation only.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Output requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 8`</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>browser_use</td>
+<td>success</td>
+<td>`/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392951 run 'Perform a focused browser-driven security validation.</td>
+</tr>
+<tr>
+<td>Target URL: http://localhost:9090/api/v1/status/config</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Planner objective: Verify whether Prometheus config endpoint is accessible without auth; capture response status/body indicators (e.g., YAML config, scrape configs, external_labels) and any sensitive values. Attempt minimal navigation only; no state changes.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Rationale: Open HIGH cluster requires closure: validate unauthenticated access to Prometheus /api/v1/status/config as evidence for exposure management (SOC 2 CC7.1/CC7.2) and confirm whether configuration data (targets, credentials, remote_write endpoints) is disclosed.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Hypothesis: The Prometheus instance on :9090 exposes /api/v1/status/config to unauthenticated users, leaking operational configuration and possibly secrets (basic_auth, bearer tokens).</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Expected evidence: HTTP 200 without auth and JSON containing a '"'"'yaml'"'"' field with full Prometheus configuration; presence/absence of credential material in scrape_configs/remote_write sections; headers indicating no auth challenge.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Prior findings to validate:</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [LOW] Go pprof debug endpoint accessible without authentication: http://localhost:9090/debug/pprof/ (HTTP 200)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [MEDIUM] Unauthenticated metrics endpoint accessible: http://localhost:9090/metrics (HTTP 200)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- [HIGH] Prometheus config endpoint accessible without authentication: http://localhost:9090/api/v1/status/config (HTTP 200)</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Execution guidance:</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Treat this as a focused API/config validation target, not a generic login crawl.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Start at the exact target URL and stay on the same origin (same host:port) unless it explicitly redirects there.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Prioritize the focused endpoint, directly related same-origin API paths already evidenced, and any real redirects/links observed during the session.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Do not speculate generic /login, /signin, /admin, or manager-style paths unless they are actually linked or returned by the target.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Capture status/content-type/body markers, auth barriers, and any machine-readable configuration or API responses.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>- Do not brute-force credentials or run destructive actions.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Run unauthenticated workflow validation only.</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Output requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 6`</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>readiness_probe</td>
+<td>success</td>
+<td><code>internal readiness probes</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="tool-notes">Tool Notes</h3>
+<ul>
+<li><strong>nuclei</strong>: SKIPPED - Disabled by config (tools.<name>.enabled=false) (x4)</li>
+<li><strong>dnsenum</strong>: SKIPPED - Localhost/loopback target (DNS enumeration N/A)</li>
+<li><strong>sslscan</strong>: SKIPPED - No TLS candidate ports detected from discovery</li>
+<li><strong>enum4linux-ng</strong>: SKIPPED - No SMB ports detected (139/445)</li>
+<li><strong>sqlmap</strong>: SKIPPED - No parameterized URL detected in input/discovered endpoints</li>
+<li><strong>searchsploit</strong>: SKIPPED - Disabled by config (tools.<name>.enabled=false)</li>
+</ul>
+<h2 id="commands-executed">Commands Executed</h2>
+<ul>
+<li><strong>nmap</strong>: <code>nmap localhost -oX - -p 3000,3001,3002,3003,4000,4001,4341,5050,5432,6379,8080,9090,9093,9100,9796,19090,35449,35967,42613 -sV --script ssl-enum-ciphers</code></li>
+<li><strong>rustscan</strong>: <code>rustscan -a localhost -r 1-65535 -b 2000 --ulimit 5000 -- --open -oG -</code></li>
+<li><strong>httpx</strong>: <code>/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cd3uzjnl/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects</code></li>
+<li><strong>whatweb</strong>: <code>whatweb http://localhost:3000 --log-json -</code></li>
+<li><strong>whatweb</strong>: <code>whatweb http://localhost:3001 --log-json -</code></li>
+<li><strong>whatweb</strong>: <code>whatweb http://localhost:3002 --log-json -</code></li>
+<li><strong>gobuster</strong>: <code>gobuster dir -u http://localhost:3000 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error</code></li>
+<li><strong>katana</strong>: <code>katana -u http://localhost:3000 -depth 3 -concurrency 10 -silent -jsonl</code></li>
+<li><strong>supabase_audit</strong>: <code>supabase_audit</code></li>
+<li><strong>browser_use</strong>: `/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392820 run 'Perform a focused browser-driven security validation.
+Target URL: http://localhost:4001
+Planner objective: Verify and capture evidence of exposed Supabase service role key and unauthenticated REST access: (1) load http://localhost:4001 and view page source / network responses for any embedded service_role key; (2) request http://localhost:4001/rest/v1/ and attempt a simple unauthenticated GET (e.g., list schemas or a known table if discoverable) to confirm whether RLS is disabled or data is accessible; record HTTP status codes, response bodies/headers, and any key material locations. Limit exploration to read-only requests.
+Rationale: SOC2 (CC7.1/CC7.2) requires evidence-driven validation of high-risk exposure. The highest-severity open cluster is secret_exposure at Supabase (service role key) which can enable full database/admin access; validating presence, scope, and exploitability (unauthenticated REST responses) closes the top uncovered risk cluster with concrete, screenshot/source evidence suitable for audit reporting.
+Hypothesis: Supabase Studio/gateway on :4001 is misconfigured and publicly serving a service_role JWT and allowing unauthenticated REST API access, potentially bypassing RLS and exposing/modifying data.
+Expected evidence: Page source or JS config containing a JWT-like key labeled service_role or anon/service keys; successful unauthenticated HTTP 200 responses from /rest/v1/ endpoints with JSON payloads; headers indicating Supabase; inability/ability to access table endpoints without Authorization; screenshots/har captures showing exact locations of exposed secrets and responses.
+Prior findings to validate:</li>
+<li>[LOW] Supabase anon key exposed in client content: key=eyJhbG….sig, source=http://localhost:4001</li>
+<li>[CRITICAL] Supabase service role key exposed: key=eyJhbG….sig, source=http://localhost:4001</li>
+<li>[HIGH] Supabase REST API accessible without authentication: http://localhost:4001/rest/v1/ (HTTP 200)</li>
+<li>[MEDIUM] Supabase RPC endpoint exposed without authentication: http://localhost:4001/rest/v1/rpc/ (HTTP 200)</li>
+<li>[HIGH] Supabase RLS may be disabled: http://localhost:4001/rest/v1/ (HTTP 200)</li>
+<li>[HIGH] Supabase RPC '"'"'list_users'"'"' callable without authentication: http://localhost:4001/rest/v1/rpc/list_users (HTTP 200)
+Execution guidance:</li>
+<li>Start at the target URL and map reachable same-origin paths/forms.</li>
+<li>Stay on the target origin (same host:port) unless the selected target itself redirects there.</li>
+<li>For each discovered form, capture action URL, method, parameter names, and client-side validation clues.</li>
+<li>Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.</li>
+<li>Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.</li>
+<li>Do not brute-force credentials or run destructive actions.</li>
+<li>Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.
+Run unauthenticated workflow validation only.
+Output requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 8`</li>
+<li><strong>browser_use</strong>: `/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392887 run 'Perform a focused browser-driven security validation.
+Target URL: http://localhost:8080
+Planner objective: Validate anonymous S3-compatible service exposure by requesting root and common listing paths, confirm bucket enumeration and any object listing/download without credentials. Capture HTTP status, response markers (ListAllMyBucketsResult), and any bucket names/keys shown.
+Rationale: High-risk cluster indicates unauthenticated data-plane exposure (anonymous S3 bucket listing). For SOC 2 Security/Availability, confirm whether unauthenticated access allows enumeration and potential data access; this provides audit-grade evidence for exposure management and secure configuration control failures.
+Hypothesis: The service at :8080 is an S3-compatible endpoint (e.g., MinIO) that permits unauthenticated ListBuckets and possibly ListObjects/GetObject, enabling data discovery/exfiltration without auth.
+Expected evidence: HTTP 200 responses containing S3 XML markers (e.g., <ListAllMyBucketsResult>, <ListBucketResult>), bucket names, object keys, or successful unauthenticated GETs for known objects; or conversely 403/401 demonstrating access is actually restricted (to falsify).
+Prior findings to validate:</li>
+<li>[HIGH] Anonymous S3-compatible bucket listing accessible: http://localhost:8080/?delimiter=/ (HTTP 200); marker=ListAllMyBucketsResult</li>
+<li>[MEDIUM] Unauthenticated metrics endpoint accessible: http://localhost:8080/metrics (HTTP 200)
+Execution guidance:</li>
+<li>Start at the target URL and map reachable same-origin paths/forms.</li>
+<li>Stay on the target origin (same host:port) unless the selected target itself redirects there.</li>
+<li>For each discovered form, capture action URL, method, parameter names, and client-side validation clues.</li>
+<li>Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.</li>
+<li>Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.</li>
+<li>Do not brute-force credentials or run destructive actions.</li>
+<li>Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.
+Run unauthenticated workflow validation only.
+Output requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 8`</li>
+<li><strong>browser_use</strong>: `/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392951 run 'Perform a focused browser-driven security validation.
+Target URL: http://localhost:9090/api/v1/status/config
+Planner objective: Verify whether Prometheus config endpoint is accessible without auth; capture response status/body indicators (e.g., YAML config, scrape configs, external_labels) and any sensitive values. Attempt minimal navigation only; no state changes.
+Rationale: Open HIGH cluster requires closure: validate unauthenticated access to Prometheus /api/v1/status/config as evidence for exposure management (SOC 2 CC7.1/CC7.2) and confirm whether configuration data (targets, credentials, remote_write endpoints) is disclosed.
+Hypothesis: The Prometheus instance on :9090 exposes /api/v1/status/config to unauthenticated users, leaking operational configuration and possibly secrets (basic_auth, bearer tokens).
+Expected evidence: HTTP 200 without auth and JSON containing a '"'"'yaml'"'"' field with full Prometheus configuration; presence/absence of credential material in scrape_configs/remote_write sections; headers indicating no auth challenge.
+Prior findings to validate:</li>
+<li>[LOW] Go pprof debug endpoint accessible without authentication: http://localhost:9090/debug/pprof/ (HTTP 200)</li>
+<li>[MEDIUM] Unauthenticated metrics endpoint accessible: http://localhost:9090/metrics (HTTP 200)</li>
+<li>[HIGH] Prometheus config endpoint accessible without authentication: http://localhost:9090/api/v1/status/config (HTTP 200)
+Execution guidance:</li>
+<li>Treat this as a focused API/config validation target, not a generic login crawl.</li>
+<li>Start at the exact target URL and stay on the same origin (same host:port) unless it explicitly redirects there.</li>
+<li>Prioritize the focused endpoint, directly related same-origin API paths already evidenced, and any real redirects/links observed during the session.</li>
+<li>Do not speculate generic /login, /signin, /admin, or manager-style paths unless they are actually linked or returned by the target.</li>
+<li>Capture status/content-type/body markers, auth barriers, and any machine-readable configuration or API responses.</li>
+<li>Do not brute-force credentials or run destructive actions.
+Run unauthenticated workflow validation only.
+Output requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 6`</li>
+<li><strong>readiness_probe</strong>: <code>internal readiness probes</code></li>
+</ul>
+</body>
+</html>

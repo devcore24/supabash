@@ -1,0 +1,591 @@
+{
+  "tool": "httpx",
+  "status": "success",
+  "target": null,
+  "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cd3uzjnl/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
+  "phase": "baseline",
+  "reason": null,
+  "error": null,
+  "fallback_for": null,
+  "data": {
+    "success": true,
+    "probed": [
+      "https://localhost:19090",
+      "https://localhost:3000",
+      "https://localhost:3001",
+      "https://localhost:3002",
+      "https://localhost:3003",
+      "https://localhost:35449",
+      "https://localhost:35967",
+      "https://localhost:4000",
+      "https://localhost:4001",
+      "https://localhost:42613",
+      "https://localhost:4341",
+      "https://localhost:5050",
+      "https://localhost:8080",
+      "https://localhost:9090",
+      "https://localhost:9093",
+      "https://localhost:9796",
+      "http://localhost:19090",
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://localhost:3002",
+      "http://localhost:3003",
+      "http://localhost:35449",
+      "http://localhost:35967",
+      "http://localhost:4000",
+      "http://localhost:4001",
+      "http://localhost:42613",
+      "http://localhost:4341",
+      "http://localhost:5050",
+      "http://localhost:8080",
+      "http://localhost:9090",
+      "http://localhost:9093",
+      "http://localhost:9796"
+    ],
+    "alive": [
+      "http://localhost:19090",
+      "http://localhost:35967",
+      "http://localhost:42613",
+      "http://localhost:9796",
+      "http://localhost:4001",
+      "http://localhost:8080",
+      "http://localhost:4341",
+      "http://localhost:4000",
+      "http://localhost:3003",
+      "http://localhost:35449",
+      "http://localhost:9093",
+      "http://localhost:3001",
+      "http://localhost:3000",
+      "http://localhost:9090",
+      "http://localhost:3002",
+      "http://localhost:5050"
+    ],
+    "results": [
+      {
+        "timestamp": "2026-03-01T20:19:39.527366995+01:00",
+        "port": "19090",
+        "url": "http://localhost:19090",
+        "input": "http://localhost:19090",
+        "scheme": "http",
+        "content_type": "text/plain",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "644.594\u00b5s",
+        "a": [
+          "127.0.0.1"
+        ],
+        "words": 4,
+        "lines": 1,
+        "status_code": 404,
+        "content_length": 19,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.527446537+01:00",
+        "port": "35967",
+        "url": "http://localhost:35967",
+        "input": "http://localhost:35967",
+        "scheme": "http",
+        "content_type": "text/plain",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "1.903464ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "words": 1,
+        "lines": 1,
+        "status_code": 403,
+        "content_length": 10,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.528916605+01:00",
+        "port": "42613",
+        "url": "http://localhost:42613",
+        "input": "http://localhost:42613",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "73.264939ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Express",
+          "Node.js"
+        ],
+        "words": 1,
+        "lines": 1,
+        "status_code": 401,
+        "content_length": 12,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.52951539+01:00",
+        "port": "9796",
+        "url": "http://localhost:9796",
+        "input": "http://localhost:9796",
+        "title": "Error",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "71.679297ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Express",
+          "Node.js"
+        ],
+        "words": 6,
+        "lines": 10,
+        "status_code": 404,
+        "content_length": 139,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.530182661+01:00",
+        "port": "4001",
+        "url": "http://localhost:4001",
+        "input": "http://localhost:4001",
+        "title": "Supabase Mock",
+        "scheme": "http",
+        "webserver": "nginx/1.29.4",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "71.06509ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Nginx:1.29.4"
+        ],
+        "words": 80,
+        "lines": 17,
+        "status_code": 200,
+        "content_length": 552,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.53020823+01:00",
+        "port": "8080",
+        "url": "http://localhost:8080",
+        "input": "http://localhost:8080",
+        "scheme": "http",
+        "content_type": "application/xml",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "1.150638ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "words": 2,
+        "lines": 1,
+        "status_code": 200,
+        "content_length": 185,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "login",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.530247253+01:00",
+        "port": "4341",
+        "url": "http://localhost:4341",
+        "input": "http://localhost:4341",
+        "title": "Error",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "71.074506ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Express",
+          "Node.js"
+        ],
+        "words": 6,
+        "lines": 10,
+        "status_code": 404,
+        "content_length": 139,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.530967584+01:00",
+        "port": "4000",
+        "url": "http://localhost:4000",
+        "input": "http://localhost:4000",
+        "title": "Error",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "73.498925ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "HSTS"
+        ],
+        "words": 6,
+        "lines": 10,
+        "status_code": 404,
+        "content_length": 139,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.531221617+01:00",
+        "port": "3003",
+        "url": "http://localhost:3003",
+        "input": "http://localhost:3003",
+        "title": "HTTP Status 404 \u2013 Not Found",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "1.667732ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "words": 61,
+        "lines": 1,
+        "status_code": 404,
+        "content_length": 683,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        },
+        "cpe": [
+          {
+            "product": "tomcat",
+            "vendor": "apache",
+            "cpe": "cpe:2.3:a:apache:tomcat:*:*:*:*:*:*:*:*"
+          }
+        ]
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.531566164+01:00",
+        "port": "35449",
+        "url": "http://localhost:35449",
+        "input": "http://localhost:35449",
+        "title": "Error",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "4.419372ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Express",
+          "Node.js"
+        ],
+        "words": 6,
+        "lines": 10,
+        "status_code": 404,
+        "content_length": 139,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.532485826+01:00",
+        "port": "9093",
+        "url": "http://localhost:9093",
+        "input": "http://localhost:9093",
+        "title": "HTTP Status 404 \u2013 Not Found",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "1.649114ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "words": 61,
+        "lines": 1,
+        "status_code": 404,
+        "content_length": 683,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        },
+        "cpe": [
+          {
+            "product": "tomcat",
+            "vendor": "apache",
+            "cpe": "cpe:2.3:a:apache:tomcat:*:*:*:*:*:*:*:*"
+          }
+        ]
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.547690531+01:00",
+        "port": "3001",
+        "url": "http://localhost:3001",
+        "input": "http://localhost:3001",
+        "title": "Login :: Damn Vulnerable Web Application (DVWA) v1.10 *Development*",
+        "scheme": "http",
+        "webserver": "Apache/2.4.25 (Debian)",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "final_url": "http://localhost:3001/login.php",
+        "time": "84.624327ms",
+        "chain_status_codes": [
+          302,
+          200
+        ],
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Apache HTTP Server:2.4.25",
+          "Debian",
+          "PHP"
+        ],
+        "words": 89,
+        "lines": 76,
+        "status_code": 200,
+        "content_length": 1523,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "login",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.609378254+01:00",
+        "port": "3000",
+        "url": "http://localhost:3000",
+        "input": "http://localhost:3000",
+        "title": "Real-Time App",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "97.711229ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Next.js",
+          "Node.js",
+          "React",
+          "Webpack"
+        ],
+        "words": 744,
+        "lines": 1,
+        "status_code": 200,
+        "content_length": 14565,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "nonerror",
+          "pHash": 0
+        },
+        "cpe": [
+          {
+            "product": "next.js",
+            "vendor": "zeit",
+            "cpe": "cpe:2.3:a:zeit:next.js:*:*:*:*:*:*:*:*"
+          },
+          {
+            "product": "next.js",
+            "vendor": "vercel",
+            "cpe": "cpe:2.3:a:vercel:next.js:*:*:*:*:*:*:*:*"
+          },
+          {
+            "product": "webp_server_go",
+            "vendor": "webp",
+            "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*"
+          }
+        ]
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.628585814+01:00",
+        "port": "9090",
+        "url": "http://localhost:9090",
+        "input": "http://localhost:9090",
+        "title": "Prometheus Time Series Collection and Processing Server",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "final_url": "http://localhost:9090/classic/graph",
+        "time": "87.740656ms",
+        "chain_status_codes": [
+          302,
+          200
+        ],
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Bootstrap:4",
+          "D3",
+          "Glyphicons",
+          "Moment.js",
+          "Mustache",
+          "Popper",
+          "Rickshaw",
+          "jQuery"
+        ],
+        "words": 1158,
+        "lines": 100,
+        "status_code": 200,
+        "content_length": 5450,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "nonerror",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:39.650948898+01:00",
+        "port": "3002",
+        "url": "http://localhost:3002",
+        "input": "http://localhost:3002",
+        "title": "OWASP Juice Shop",
+        "scheme": "http",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "time": "12.97121ms",
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Cloudflare",
+          "Onsen UI",
+          "Osano:3.1.0",
+          "cdnjs",
+          "jQuery:2.2.4"
+        ],
+        "words": 3681,
+        "lines": 33,
+        "status_code": 200,
+        "content_length": 75055,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "other",
+          "pHash": 0
+        }
+      },
+      {
+        "timestamp": "2026-03-01T20:19:48.548954731+01:00",
+        "port": "5050",
+        "url": "http://localhost:5050",
+        "input": "http://localhost:5050",
+        "title": "pgAdmin 4",
+        "scheme": "http",
+        "webserver": "gunicorn",
+        "content_type": "text/html",
+        "method": "GET",
+        "host": "localhost",
+        "host_ip": "127.0.0.1",
+        "path": "/",
+        "final_url": "http://localhost:5050/browser/",
+        "time": "35.799329ms",
+        "chain_status_codes": [
+          302,
+          200
+        ],
+        "a": [
+          "127.0.0.1"
+        ],
+        "tech": [
+          "Python",
+          "RequireJS",
+          "gunicorn"
+        ],
+        "words": 1542,
+        "lines": 205,
+        "status_code": 200,
+        "content_length": 7464,
+        "failed": false,
+        "knowledgebase": {
+          "PageType": "error",
+          "pHash": 0
+        },
+        "cpe": [
+          {
+            "product": "webp_server_go",
+            "vendor": "webp",
+            "cpe": "cpe:2.3:a:webp:webp_server_go:*:*:*:*:*:*:*:*"
+          }
+        ]
+      }
+    ],
+    "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cd3uzjnl/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects"
+  }
+}

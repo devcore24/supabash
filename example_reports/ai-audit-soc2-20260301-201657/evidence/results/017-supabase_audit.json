@@ -11,14 +11,21 @@
     "success": true,
     "scanned": [
       "http://localhost:19090",
-      "http://localhost:44427",
-      "http://localhost:5670",
+      "http://localhost:35967",
+      "http://localhost:42613",
+      "http://localhost:9796",
       "http://localhost:4001",
-      "http://localhost:44717",
-      "http://localhost:9417",
       "http://localhost:8080",
+      "http://localhost:4341",
+      "http://localhost:4000",
+      "http://localhost:3003",
+      "http://localhost:35449",
+      "http://localhost:9093",
       "http://localhost:3001",
-      "http://localhost:9090"
+      "http://localhost:3000",
+      "http://localhost:9090",
+      "http://localhost:3002",
+      "http://localhost:5050"
     ],
     "page_hits": [
       {
@@ -26,11 +33,15 @@
         "status": 404
       },
       {
-        "url": "http://localhost:44427",
+        "url": "http://localhost:35967",
+        "status": 403
+      },
+      {
+        "url": "http://localhost:42613",
         "status": 401
       },
       {
-        "url": "http://localhost:5670",
+        "url": "http://localhost:9796",
         "status": 404
       },
       {
@@ -38,23 +49,47 @@
         "status": 200
       },
       {
-        "url": "http://localhost:44717",
-        "status": 404
-      },
-      {
-        "url": "http://localhost:9417",
-        "status": 404
-      },
-      {
         "url": "http://localhost:8080",
         "status": 200
+      },
+      {
+        "url": "http://localhost:4341",
+        "status": 404
+      },
+      {
+        "url": "http://localhost:4000",
+        "status": 404
+      },
+      {
+        "url": "http://localhost:3003",
+        "status": 404
+      },
+      {
+        "url": "http://localhost:35449",
+        "status": 404
+      },
+      {
+        "url": "http://localhost:9093",
+        "status": 404
       },
       {
         "url": "http://localhost:3001",
         "status": 200
       },
       {
+        "url": "http://localhost:3000",
+        "status": 200
+      },
+      {
         "url": "http://localhost:9090",
+        "status": 200
+      },
+      {
+        "url": "http://localhost:3002",
+        "status": 200
+      },
+      {
+        "url": "http://localhost:5050",
         "status": 200
       }
     ],

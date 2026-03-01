@@ -1,0 +1,841 @@
+{
+  "version": 1,
+  "generated_at": 1772393028.8814158,
+  "generated_at_utc": "2026-03-01 19:23:48 UTC",
+  "report_file": "ai-audit-soc2-20260301-201657.json",
+  "report_kind": "ai_audit",
+  "target": "localhost",
+  "scan_host": "localhost",
+  "compliance_profile": "compliance_soc2",
+  "compliance_framework": "SOC 2 Type II",
+  "planner_type": "tool_calling",
+  "planner_mode": "iterative",
+  "max_actions": 10,
+  "actions": [
+    {
+      "tool": "browser_use",
+      "target": "http://localhost:4001",
+      "profile": "compliance_soc2",
+      "priority": 1,
+      "reasoning": "SOC2 (CC7.1/CC7.2) requires evidence-driven validation of high-risk exposure. The highest-severity open cluster is secret_exposure at Supabase (service role key) which can enable full database/admin access; validating presence, scope, and exploitability (unauthenticated REST responses) closes the top uncovered risk cluster with concrete, screenshot/source evidence suitable for audit reporting.",
+      "hypothesis": "Supabase Studio/gateway on :4001 is misconfigured and publicly serving a service_role JWT and allowing unauthenticated REST API access, potentially bypassing RLS and exposing/modifying data.",
+      "expected_evidence": "Page source or JS config containing a JWT-like key labeled service_role or anon/service keys; successful unauthenticated HTTP 200 responses from /rest/v1/ endpoints with JSON payloads; headers indicating Supabase; inability/ability to access table endpoints without Authorization; screenshots/har captures showing exact locations of exposed secrets and responses.",
+      "phase": "agentic",
+      "success": true,
+      "skipped": false,
+      "error": null,
+      "reason": null,
+      "started_at": 1772392820.5656753,
+      "finished_at": 1772392877.8073251
+    },
+    {
+      "tool": "browser_use",
+      "target": "http://localhost:8080",
+      "profile": "compliance_soc2",
+      "priority": 5,
+      "reasoning": "High-risk cluster indicates unauthenticated data-plane exposure (anonymous S3 bucket listing). For SOC 2 Security/Availability, confirm whether unauthenticated access allows enumeration and potential data access; this provides audit-grade evidence for exposure management and secure configuration control failures.",
+      "hypothesis": "The service at :8080 is an S3-compatible endpoint (e.g., MinIO) that permits unauthenticated ListBuckets and possibly ListObjects/GetObject, enabling data discovery/exfiltration without auth.",
+      "expected_evidence": "HTTP 200 responses containing S3 XML markers (e.g., <ListAllMyBucketsResult>, <ListBucketResult>), bucket names, object keys, or successful unauthenticated GETs for known objects; or conversely 403/401 demonstrating access is actually restricted (to falsify).",
+      "phase": "agentic",
+      "success": true,
+      "skipped": false,
+      "error": null,
+      "reason": null,
+      "started_at": 1772392887.0557256,
+      "finished_at": 1772392942.5322635
+    },
+    {
+      "tool": "browser_use",
+      "target": "http://localhost:9090/api/v1/status/config",
+      "profile": "compliance_soc2",
+      "priority": 1,
+      "reasoning": "Open HIGH cluster requires closure: validate unauthenticated access to Prometheus /api/v1/status/config as evidence for exposure management (SOC 2 CC7.1/CC7.2) and confirm whether configuration data (targets, credentials, remote_write endpoints) is disclosed.",
+      "hypothesis": "The Prometheus instance on :9090 exposes /api/v1/status/config to unauthenticated users, leaking operational configuration and possibly secrets (basic_auth, bearer tokens).",
+      "expected_evidence": "HTTP 200 without auth and JSON containing a 'yaml' field with full Prometheus configuration; presence/absence of credential material in scrape_configs/remote_write sections; headers indicating no auth challenge.",
+      "phase": "agentic",
+      "success": true,
+      "skipped": false,
+      "error": null,
+      "reason": null,
+      "started_at": 1772392951.607661,
+      "finished_at": 1772393005.8866067
+    }
+  ],
+  "decision_trace": [
+    {
+      "iteration": 1,
+      "remaining_actions_before": 10,
+      "started_at": 1772392810.2551818,
+      "open_high_risk_cluster_count_before": 8,
+      "planner": {
+        "stop": false,
+        "notes": "Focus on closing the CRITICAL secret_exposure cluster first; avoid state-changing requests. Use compliance_soc2 profile consistently.",
+        "candidate_count": 1,
+        "candidates": [
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:4001",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 1,
+            "reasoning": "SOC2 (CC7.1/CC7.2) requires evidence-driven validation of high-risk exposure. The highest-severity open cluster is secret_exposure at Supabase (service role key) which can enable full database/admin access; validating presence, scope, and exploitability (unauthenticated REST responses) closes the top uncovered risk cluster with concrete, screenshot/source evidence suitable for audit reporting.",
+            "hypothesis": "Supabase Studio/gateway on :4001 is misconfigured and publicly serving a service_role JWT and allowing unauthenticated REST API access, potentially bypassing RLS and exposing/modifying data.",
+            "expected_evidence": "Page source or JS config containing a JWT-like key labeled service_role or anon/service keys; successful unauthenticated HTTP 200 responses from /rest/v1/ endpoints with JSON payloads; headers indicating Supabase; inability/ability to access table endpoints without Authorization; screenshots/har captures showing exact locations of exposed secrets and responses."
+          }
+        ]
+      },
+      "coverage_debt_filter": {
+        "active": true,
+        "open_high_risk_cluster_count": 8,
+        "linked_candidates_count": 1,
+        "unresolved_clusters_preview": [
+          {
+            "cluster_id": "planner_cluster|CRITICAL|secret_exposure|127.0.0.1:4001|/",
+            "severity": "CRITICAL",
+            "risk_class": "secret_exposure",
+            "title": "Supabase service role key exposed"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|data_plane_exposure|127.0.0.1:4001|/rest/v1",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Supabase REST API accessible without authentication"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:8080|/",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Anonymous S3-compatible bucket listing accessible"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:8080|/?list-type=2",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Anonymous S3-compatible bucket listing accessible"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:8080|/?prefix=",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Anonymous S3-compatible bucket listing accessible"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:8080|/?delimiter=/",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Anonymous S3-compatible bucket listing accessible"
+          }
+        ]
+      },
+      "candidate_novelty": {
+        "best": 3,
+        "best_gain_score": 3,
+        "top": [
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:4001",
+            "priority": 1,
+            "novelty": 3,
+            "gain_score": 3
+          }
+        ]
+      },
+      "selected_action": {
+        "tool": "browser_use",
+        "target": "http://localhost:4001",
+        "port": null,
+        "profile": "compliance_soc2",
+        "priority": 1,
+        "reasoning": "SOC2 (CC7.1/CC7.2) requires evidence-driven validation of high-risk exposure. The highest-severity open cluster is secret_exposure at Supabase (service role key) which can enable full database/admin access; validating presence, scope, and exploitability (unauthenticated REST responses) closes the top uncovered risk cluster with concrete, screenshot/source evidence suitable for audit reporting.",
+        "hypothesis": "Supabase Studio/gateway on :4001 is misconfigured and publicly serving a service_role JWT and allowing unauthenticated REST API access, potentially bypassing RLS and exposing/modifying data.",
+        "expected_evidence": "Page source or JS config containing a JWT-like key labeled service_role or anon/service keys; successful unauthenticated HTTP 200 responses from /rest/v1/ endpoints with JSON payloads; headers indicating Supabase; inability/ability to access table endpoints without Authorization; screenshots/har captures showing exact locations of exposed secrets and responses."
+      },
+      "outcome": {
+        "status": "success",
+        "tool_result_reason": null,
+        "tool_result_error": null,
+        "extra_results_added": 0,
+        "findings_count_before": 91,
+        "findings_count_after": 98,
+        "findings_count_delta": 7,
+        "unique_findings_count_before": 91,
+        "unique_findings_count_after": 98,
+        "unique_findings_count_delta": 7,
+        "agentic_findings_count_before": 0,
+        "agentic_findings_count_after": 7,
+        "agentic_findings_count_delta": 7,
+        "agentic_unique_findings_count_before": 0,
+        "agentic_unique_findings_count_after": 7,
+        "agentic_unique_findings_count_delta": 7,
+        "agentic_net_new_unique_delta": 7,
+        "agentic_reconfirmed_unique_delta": 0,
+        "risk_class_count_before": 7,
+        "risk_class_count_after": 8,
+        "risk_class_delta": 1,
+        "new_risk_classes": [
+          "vulnerability_signal"
+        ],
+        "open_high_risk_cluster_count_before": 8,
+        "open_high_risk_cluster_count_after": 5,
+        "open_high_risk_cluster_delta": 3,
+        "web_target_count_before": 32,
+        "web_target_count_after": 32,
+        "web_target_count_delta": 0,
+        "gain_score": 37,
+        "low_signal_streak_after": 0,
+        "nonpositive_after_broad_streak_after": 0,
+        "tool_usage_count": 1,
+        "target_usage_count": 1,
+        "tool_target_usage_count": 1,
+        "tool_low_signal_count": 0,
+        "browser_fallback_mode": "",
+        "browser_focus_hits": 0,
+        "browser_focused_endpoint_artifacts": 0,
+        "browser_fallback_confidence": "",
+        "browser_discovery_unique_delta": 4,
+        "browser_validated_discovery_unique_delta": 4,
+        "browser_unvalidated_discovery_unique_delta": 0,
+        "browser_observation_unique_delta": 3,
+        "browser_security_unique_delta": 3,
+        "browser_discovery_validation_attempted": true,
+        "browser_discovery_validation_success": true
+      },
+      "critique": {
+        "signal": "high",
+        "summary": "Action produced net-new risk/coverage signal."
+      },
+      "decision": {
+        "result": "executed"
+      },
+      "finished_at": 1772392879.801628
+    },
+    {
+      "iteration": 2,
+      "remaining_actions_before": 9,
+      "started_at": 1772392879.80803,
+      "open_high_risk_cluster_count_before": 5,
+      "planner": {
+        "stop": false,
+        "notes": "Selected to close an open HIGH unauthenticated_exposure cluster (localhost:8080) with concrete validation evidence. Avoids excluded actions and uses requested compliance_soc2 profile.",
+        "candidate_count": 1,
+        "candidates": [
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:8080",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 5,
+            "reasoning": "High-risk cluster indicates unauthenticated data-plane exposure (anonymous S3 bucket listing). For SOC 2 Security/Availability, confirm whether unauthenticated access allows enumeration and potential data access; this provides audit-grade evidence for exposure management and secure configuration control failures.",
+            "hypothesis": "The service at :8080 is an S3-compatible endpoint (e.g., MinIO) that permits unauthenticated ListBuckets and possibly ListObjects/GetObject, enabling data discovery/exfiltration without auth.",
+            "expected_evidence": "HTTP 200 responses containing S3 XML markers (e.g., <ListAllMyBucketsResult>, <ListBucketResult>), bucket names, object keys, or successful unauthenticated GETs for known objects; or conversely 403/401 demonstrating access is actually restricted (to falsify)."
+          }
+        ]
+      },
+      "coverage_debt_filter": {
+        "active": true,
+        "open_high_risk_cluster_count": 5,
+        "linked_candidates_count": 1,
+        "unresolved_clusters_preview": [
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:8080|/",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Anonymous S3-compatible bucket listing accessible"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:8080|/?list-type=2",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Anonymous S3-compatible bucket listing accessible"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:8080|/?prefix=",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Anonymous S3-compatible bucket listing accessible"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:8080|/?delimiter=/",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Anonymous S3-compatible bucket listing accessible"
+          },
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:9090|/api/v1/status/config",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Prometheus config endpoint accessible without authentication"
+          }
+        ]
+      },
+      "candidate_novelty": {
+        "best": 3,
+        "best_gain_score": 5,
+        "top": [
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:8080",
+            "priority": 5,
+            "novelty": 3,
+            "gain_score": 5
+          }
+        ]
+      },
+      "selected_action": {
+        "tool": "browser_use",
+        "target": "http://localhost:8080",
+        "port": null,
+        "profile": "compliance_soc2",
+        "priority": 5,
+        "reasoning": "High-risk cluster indicates unauthenticated data-plane exposure (anonymous S3 bucket listing). For SOC 2 Security/Availability, confirm whether unauthenticated access allows enumeration and potential data access; this provides audit-grade evidence for exposure management and secure configuration control failures.",
+        "hypothesis": "The service at :8080 is an S3-compatible endpoint (e.g., MinIO) that permits unauthenticated ListBuckets and possibly ListObjects/GetObject, enabling data discovery/exfiltration without auth.",
+        "expected_evidence": "HTTP 200 responses containing S3 XML markers (e.g., <ListAllMyBucketsResult>, <ListBucketResult>), bucket names, object keys, or successful unauthenticated GETs for known objects; or conversely 403/401 demonstrating access is actually restricted (to falsify)."
+      },
+      "outcome": {
+        "status": "success",
+        "tool_result_reason": null,
+        "tool_result_error": null,
+        "extra_results_added": 0,
+        "findings_count_before": 98,
+        "findings_count_after": 106,
+        "findings_count_delta": 8,
+        "unique_findings_count_before": 98,
+        "unique_findings_count_after": 106,
+        "unique_findings_count_delta": 8,
+        "agentic_findings_count_before": 7,
+        "agentic_findings_count_after": 15,
+        "agentic_findings_count_delta": 8,
+        "agentic_unique_findings_count_before": 7,
+        "agentic_unique_findings_count_after": 15,
+        "agentic_unique_findings_count_delta": 8,
+        "agentic_net_new_unique_delta": 8,
+        "agentic_reconfirmed_unique_delta": 0,
+        "risk_class_count_before": 8,
+        "risk_class_count_after": 8,
+        "risk_class_delta": 0,
+        "new_risk_classes": [],
+        "open_high_risk_cluster_count_before": 5,
+        "open_high_risk_cluster_count_after": 1,
+        "open_high_risk_cluster_delta": 4,
+        "web_target_count_before": 32,
+        "web_target_count_after": 32,
+        "web_target_count_delta": 0,
+        "gain_score": 40,
+        "low_signal_streak_after": 0,
+        "nonpositive_after_broad_streak_after": 0,
+        "tool_usage_count": 2,
+        "target_usage_count": 1,
+        "tool_target_usage_count": 1,
+        "tool_low_signal_count": 0,
+        "browser_fallback_mode": "",
+        "browser_focus_hits": 0,
+        "browser_focused_endpoint_artifacts": 0,
+        "browser_fallback_confidence": "",
+        "browser_discovery_unique_delta": 4,
+        "browser_validated_discovery_unique_delta": 4,
+        "browser_unvalidated_discovery_unique_delta": 0,
+        "browser_observation_unique_delta": 4,
+        "browser_security_unique_delta": 4,
+        "browser_discovery_validation_attempted": true,
+        "browser_discovery_validation_success": true
+      },
+      "critique": {
+        "signal": "high",
+        "summary": "Action produced net-new risk/coverage signal."
+      },
+      "decision": {
+        "result": "executed"
+      },
+      "finished_at": 1772392944.4763877
+    },
+    {
+      "iteration": 3,
+      "remaining_actions_before": 8,
+      "started_at": 1772392944.4834566,
+      "open_high_risk_cluster_count_before": 1,
+      "planner": {
+        "stop": false,
+        "notes": "Focus on the single open HIGH-risk cluster (Prometheus config exposure) before expanding coverage to other localhost:3002 services.",
+        "candidate_count": 1,
+        "candidates": [
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:9090/api/v1/status/config",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 1,
+            "reasoning": "Open HIGH cluster requires closure: validate unauthenticated access to Prometheus /api/v1/status/config as evidence for exposure management (SOC 2 CC7.1/CC7.2) and confirm whether configuration data (targets, credentials, remote_write endpoints) is disclosed.",
+            "hypothesis": "The Prometheus instance on :9090 exposes /api/v1/status/config to unauthenticated users, leaking operational configuration and possibly secrets (basic_auth, bearer tokens).",
+            "expected_evidence": "HTTP 200 without auth and JSON containing a 'yaml' field with full Prometheus configuration; presence/absence of credential material in scrape_configs/remote_write sections; headers indicating no auth challenge."
+          }
+        ]
+      },
+      "coverage_debt_filter": {
+        "active": true,
+        "open_high_risk_cluster_count": 1,
+        "linked_candidates_count": 1,
+        "unresolved_clusters_preview": [
+          {
+            "cluster_id": "planner_cluster|HIGH|unauthenticated_exposure|127.0.0.1:9090|/api/v1/status/config",
+            "severity": "HIGH",
+            "risk_class": "unauthenticated_exposure",
+            "title": "Prometheus config endpoint accessible without authentication"
+          }
+        ]
+      },
+      "candidate_novelty": {
+        "best": 3,
+        "best_gain_score": 5,
+        "top": [
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:9090/api/v1/status/config",
+            "priority": 1,
+            "novelty": 3,
+            "gain_score": 5
+          }
+        ]
+      },
+      "selected_action": {
+        "tool": "browser_use",
+        "target": "http://localhost:9090/api/v1/status/config",
+        "port": null,
+        "profile": "compliance_soc2",
+        "priority": 1,
+        "reasoning": "Open HIGH cluster requires closure: validate unauthenticated access to Prometheus /api/v1/status/config as evidence for exposure management (SOC 2 CC7.1/CC7.2) and confirm whether configuration data (targets, credentials, remote_write endpoints) is disclosed.",
+        "hypothesis": "The Prometheus instance on :9090 exposes /api/v1/status/config to unauthenticated users, leaking operational configuration and possibly secrets (basic_auth, bearer tokens).",
+        "expected_evidence": "HTTP 200 without auth and JSON containing a 'yaml' field with full Prometheus configuration; presence/absence of credential material in scrape_configs/remote_write sections; headers indicating no auth challenge."
+      },
+      "outcome": {
+        "status": "success",
+        "tool_result_reason": null,
+        "tool_result_error": null,
+        "extra_results_added": 0,
+        "findings_count_before": 106,
+        "findings_count_after": 113,
+        "findings_count_delta": 7,
+        "unique_findings_count_before": 106,
+        "unique_findings_count_after": 113,
+        "unique_findings_count_delta": 7,
+        "agentic_findings_count_before": 15,
+        "agentic_findings_count_after": 22,
+        "agentic_findings_count_delta": 7,
+        "agentic_unique_findings_count_before": 15,
+        "agentic_unique_findings_count_after": 22,
+        "agentic_unique_findings_count_delta": 7,
+        "agentic_net_new_unique_delta": 7,
+        "agentic_reconfirmed_unique_delta": 0,
+        "risk_class_count_before": 8,
+        "risk_class_count_after": 8,
+        "risk_class_delta": 0,
+        "new_risk_classes": [],
+        "open_high_risk_cluster_count_before": 1,
+        "open_high_risk_cluster_count_after": 0,
+        "open_high_risk_cluster_delta": 1,
+        "web_target_count_before": 32,
+        "web_target_count_after": 32,
+        "web_target_count_delta": 0,
+        "gain_score": 25,
+        "low_signal_streak_after": 0,
+        "nonpositive_after_broad_streak_after": 0,
+        "tool_usage_count": 3,
+        "target_usage_count": 1,
+        "tool_target_usage_count": 1,
+        "tool_low_signal_count": 0,
+        "browser_fallback_mode": "",
+        "browser_focus_hits": 0,
+        "browser_focused_endpoint_artifacts": 0,
+        "browser_fallback_confidence": "",
+        "browser_discovery_unique_delta": 4,
+        "browser_validated_discovery_unique_delta": 4,
+        "browser_unvalidated_discovery_unique_delta": 0,
+        "browser_observation_unique_delta": 3,
+        "browser_security_unique_delta": 3,
+        "browser_discovery_validation_attempted": true,
+        "browser_discovery_validation_success": true
+      },
+      "critique": {
+        "signal": "high",
+        "summary": "Action produced net-new risk/coverage signal."
+      },
+      "decision": {
+        "result": "executed"
+      },
+      "finished_at": 1772393007.821599
+    },
+    {
+      "iteration": 4,
+      "remaining_actions_before": 7,
+      "started_at": 1772393007.8294759,
+      "open_high_risk_cluster_count_before": 0,
+      "planner": {
+        "stop": false,
+        "notes": "Prefer highest-value single next step: confirm live surface on the user-specified target before deeper enumeration, avoiding reruns of excluded tool/target pairs.",
+        "candidate_count": 1,
+        "candidates": [
+          {
+            "tool": "httpx",
+            "target": "http://localhost:3002",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 10,
+            "reasoning": "SOC 2 (CC7.1/CC7.2) requires evidence of continuous exposure discovery and secure configuration. Re-validating the specific target with an HTTP probe captures current status codes, titles, redirects, and header signals (e.g., auth, cache, server banner) to confirm whether known unauthenticated exposures (e.g., debug endpoints) remain reachable and to trigger follow-on targeted testing only where confirmed.",
+            "hypothesis": "The service on :3002 still exposes unauthenticated sensitive/debug endpoints or misconfigured headers despite prior baseline findings; current response metadata will indicate accessible paths and security header posture.",
+            "expected_evidence": "httpx output showing 200/30x responses, reachable base URL, detected technologies, and header gaps (missing HSTS/CSP, permissive CORS), plus any indication of /debug or similar paths in redirects/locations for targeted follow-up."
+          }
+        ]
+      },
+      "replan": {
+        "attempted": true,
+        "reason": "all_candidates_already_covered",
+        "excluded_count": 24,
+        "excluded": [
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:4001",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:8080",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "browser_use",
+            "target": "http://localhost:9090/api/v1/status/config",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "gobuster",
+            "target": "http://localhost:3000",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:19090",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:3000",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:3001",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:3002",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:3003",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:35449",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:35967",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:4000",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:4001",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:42613",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:4341",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:5050",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:8080",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:9090",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:9093",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "httpx",
+            "target": "http://localhost:9796",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "katana",
+            "target": "http://localhost:3000",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "whatweb",
+            "target": "http://localhost:3000",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "whatweb",
+            "target": "http://localhost:3001",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          },
+          {
+            "tool": "whatweb",
+            "target": "http://localhost:3002",
+            "port": null,
+            "profile": "compliance_soc2",
+            "priority": 50,
+            "reasoning": "",
+            "hypothesis": "",
+            "expected_evidence": ""
+          }
+        ]
+      },
+      "planner_replans": [
+        {
+          "stop": false,
+          "notes": "Next step chosen to maximize signal with minimal intrusiveness and to anchor subsequent targeted crawling/fuzzing decisions on :3002.",
+          "candidate_count": 1,
+          "candidates": [
+            {
+              "tool": "httpx",
+              "target": "http://localhost:3002",
+              "port": null,
+              "profile": "compliance_soc2",
+              "priority": 5,
+              "reasoning": "SOC 2 (CC7.1/CC7.2) evidence: verify current exposure state and security headers/redirect behavior on the primary target before deeper content discovery. Confirms availability and reduces false positives by establishing authoritative response metadata (status, title, server, tech, headers).",
+              "hypothesis": "The service on :3002 exposes additional unauthenticated endpoints or weak security headers that correlate with existing low-risk debug exposure findings and may elevate to higher risk clusters.",
+              "expected_evidence": "HTTP 200/30x responses with header set (e.g., missing HSTS/CSP), server banner/tech fingerprints, and any unexpected paths surfaced via httpx probes (e.g., /metrics, /actuator, /admin) if enabled."
+            }
+          ]
+        }
+      ],
+      "decision": {
+        "result": "stop",
+        "reason": "all_candidates_already_covered"
+      },
+      "finished_at": 1772393019.5390842
+    }
+  ],
+  "commands": [
+    {
+      "tool": "nmap",
+      "command": "nmap localhost -oX - -p 3000,3001,3002,3003,4000,4001,4341,5050,5432,6379,8080,9090,9093,9100,9796,19090,35449,35967,42613 -sV --script ssl-enum-ciphers",
+      "target": null,
+      "phase": "baseline"
+    },
+    {
+      "tool": "rustscan",
+      "command": "rustscan -a localhost -r 1-65535 -b 2000 --ulimit 5000 -- --open -oG -",
+      "target": null,
+      "phase": "baseline"
+    },
+    {
+      "tool": "httpx",
+      "command": "/usr/local/bin/httpx -silent -json -l /tmp/supabash-httpx-cd3uzjnl/targets.txt -threads 50 -timeout 5 -retries 1 -status-code -title -web-server -tech-detect -follow-redirects",
+      "target": null,
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "command": "whatweb http://localhost:3000 --log-json -",
+      "target": "http://localhost:3000",
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "command": "whatweb http://localhost:3001 --log-json -",
+      "target": "http://localhost:3001",
+      "phase": "baseline"
+    },
+    {
+      "tool": "whatweb",
+      "command": "whatweb http://localhost:3002 --log-json -",
+      "target": "http://localhost:3002",
+      "phase": "baseline"
+    },
+    {
+      "tool": "gobuster",
+      "command": "gobuster dir -u http://localhost:3000 -w /home/devcore24/projects/supabash/src/supabash/data/wordlists/common.txt -t 10 -q -z --no-error",
+      "target": "http://localhost:3000",
+      "phase": "baseline"
+    },
+    {
+      "tool": "katana",
+      "command": "katana -u http://localhost:3000 -depth 3 -concurrency 10 -silent -jsonl",
+      "target": "http://localhost:3000",
+      "phase": "baseline"
+    },
+    {
+      "tool": "supabase_audit",
+      "command": "supabase_audit",
+      "target": null,
+      "phase": "baseline"
+    },
+    {
+      "tool": "browser_use",
+      "command": "/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392820 run 'Perform a focused browser-driven security validation.\nTarget URL: http://localhost:4001\nPlanner objective: Verify and capture evidence of exposed Supabase service role key and unauthenticated REST access: (1) load http://localhost:4001 and view page source / network responses for any embedded service_role key; (2) request http://localhost:4001/rest/v1/ and attempt a simple unauthenticated GET (e.g., list schemas or a known table if discoverable) to confirm whether RLS is disabled or data is accessible; record HTTP status codes, response bodies/headers, and any key material locations. Limit exploration to read-only requests.\nRationale: SOC2 (CC7.1/CC7.2) requires evidence-driven validation of high-risk exposure. The highest-severity open cluster is secret_exposure at Supabase (service role key) which can enable full database/admin access; validating presence, scope, and exploitability (unauthenticated REST responses) closes the top uncovered risk cluster with concrete, screenshot/source evidence suitable for audit reporting.\nHypothesis: Supabase Studio/gateway on :4001 is misconfigured and publicly serving a service_role JWT and allowing unauthenticated REST API access, potentially bypassing RLS and exposing/modifying data.\nExpected evidence: Page source or JS config containing a JWT-like key labeled service_role or anon/service keys; successful unauthenticated HTTP 200 responses from /rest/v1/ endpoints with JSON payloads; headers indicating Supabase; inability/ability to access table endpoints without Authorization; screenshots/har captures showing exact locations of exposed secrets and responses.\nPrior findings to validate:\n- [LOW] Supabase anon key exposed in client content: key=eyJhbG\u2026.sig, source=http://localhost:4001\n- [CRITICAL] Supabase service role key exposed: key=eyJhbG\u2026.sig, source=http://localhost:4001\n- [HIGH] Supabase REST API accessible without authentication: http://localhost:4001/rest/v1/ (HTTP 200)\n- [MEDIUM] Supabase RPC endpoint exposed without authentication: http://localhost:4001/rest/v1/rpc/ (HTTP 200)\n- [HIGH] Supabase RLS may be disabled: http://localhost:4001/rest/v1/ (HTTP 200)\n- [HIGH] Supabase RPC '\"'\"'list_users'\"'\"' callable without authentication: http://localhost:4001/rest/v1/rpc/list_users (HTTP 200)\nExecution guidance:\n- Start at the target URL and map reachable same-origin paths/forms.\n- Stay on the target origin (same host:port) unless the selected target itself redirects there.\n- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.\n- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.\n- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.\n- Do not brute-force credentials or run destructive actions.\n- Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.\nRun unauthenticated workflow validation only.\nOutput requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 8",
+      "target": "http://localhost:4001",
+      "phase": "agentic"
+    },
+    {
+      "tool": "browser_use",
+      "command": "/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392887 run 'Perform a focused browser-driven security validation.\nTarget URL: http://localhost:8080\nPlanner objective: Validate anonymous S3-compatible service exposure by requesting root and common listing paths, confirm bucket enumeration and any object listing/download without credentials. Capture HTTP status, response markers (ListAllMyBucketsResult), and any bucket names/keys shown.\nRationale: High-risk cluster indicates unauthenticated data-plane exposure (anonymous S3 bucket listing). For SOC 2 Security/Availability, confirm whether unauthenticated access allows enumeration and potential data access; this provides audit-grade evidence for exposure management and secure configuration control failures.\nHypothesis: The service at :8080 is an S3-compatible endpoint (e.g., MinIO) that permits unauthenticated ListBuckets and possibly ListObjects/GetObject, enabling data discovery/exfiltration without auth.\nExpected evidence: HTTP 200 responses containing S3 XML markers (e.g., <ListAllMyBucketsResult>, <ListBucketResult>), bucket names, object keys, or successful unauthenticated GETs for known objects; or conversely 403/401 demonstrating access is actually restricted (to falsify).\nPrior findings to validate:\n- [HIGH] Anonymous S3-compatible bucket listing accessible: http://localhost:8080/?delimiter=/ (HTTP 200); marker=ListAllMyBucketsResult\n- [MEDIUM] Unauthenticated metrics endpoint accessible: http://localhost:8080/metrics (HTTP 200)\nExecution guidance:\n- Start at the target URL and map reachable same-origin paths/forms.\n- Stay on the target origin (same host:port) unless the selected target itself redirects there.\n- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.\n- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.\n- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.\n- Do not brute-force credentials or run destructive actions.\n- Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.\nRun unauthenticated workflow validation only.\nOutput requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 8",
+      "target": "http://localhost:8080",
+      "phase": "agentic"
+    },
+    {
+      "tool": "browser_use",
+      "command": "/home/devcore24/.local/bin/browser-use --json --session supabash-localhost-1772392951 run 'Perform a focused browser-driven security validation.\nTarget URL: http://localhost:9090/api/v1/status/config\nPlanner objective: Verify whether Prometheus config endpoint is accessible without auth; capture response status/body indicators (e.g., YAML config, scrape configs, external_labels) and any sensitive values. Attempt minimal navigation only; no state changes.\nRationale: Open HIGH cluster requires closure: validate unauthenticated access to Prometheus /api/v1/status/config as evidence for exposure management (SOC 2 CC7.1/CC7.2) and confirm whether configuration data (targets, credentials, remote_write endpoints) is disclosed.\nHypothesis: The Prometheus instance on :9090 exposes /api/v1/status/config to unauthenticated users, leaking operational configuration and possibly secrets (basic_auth, bearer tokens).\nExpected evidence: HTTP 200 without auth and JSON containing a '\"'\"'yaml'\"'\"' field with full Prometheus configuration; presence/absence of credential material in scrape_configs/remote_write sections; headers indicating no auth challenge.\nPrior findings to validate:\n- [LOW] Go pprof debug endpoint accessible without authentication: http://localhost:9090/debug/pprof/ (HTTP 200)\n- [MEDIUM] Unauthenticated metrics endpoint accessible: http://localhost:9090/metrics (HTTP 200)\n- [HIGH] Prometheus config endpoint accessible without authentication: http://localhost:9090/api/v1/status/config (HTTP 200)\nExecution guidance:\n- Treat this as a focused API/config validation target, not a generic login crawl.\n- Start at the exact target URL and stay on the same origin (same host:port) unless it explicitly redirects there.\n- Prioritize the focused endpoint, directly related same-origin API paths already evidenced, and any real redirects/links observed during the session.\n- Do not speculate generic /login, /signin, /admin, or manager-style paths unless they are actually linked or returned by the target.\n- Capture status/content-type/body markers, auth barriers, and any machine-readable configuration or API responses.\n- Do not brute-force credentials or run destructive actions.\nRun unauthenticated workflow validation only.\nOutput requirements: provide concise evidence lines suitable for audit reporting; include endpoints and observations, not generic prose.' --max-steps 6",
+      "target": "http://localhost:9090/api/v1/status/config",
+      "phase": "agentic"
+    },
+    {
+      "tool": "readiness_probe",
+      "command": "internal readiness probes",
+      "target": null,
+      "phase": "baseline"
+    }
+  ]
+}
