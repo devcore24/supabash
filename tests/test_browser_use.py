@@ -447,11 +447,24 @@ class BrowserUseScannerTests(unittest.TestCase):
         scanner = BrowserUseScanner()
         urls = scanner._derive_probe_urls(
             "http://localhost:9090/api/v1/status/config",
-            "",
+            "<html><body>Prometheus config shell</body></html>",
             max_paths=8,
             prioritized_urls=["http://localhost:9090/api/v1/status/config"],
         )
         self.assertIn("http://localhost:9090/api/v1/status/config", urls)
+        self.assertFalse(any(url.endswith("/login") for url in urls))
+        self.assertFalse(any(url.endswith("/signin") for url in urls))
+        self.assertFalse(any(url.endswith("/admin") for url in urls))
+
+    def test_deterministic_probe_does_not_seed_generic_login_paths_for_focused_rest_api_target(self):
+        scanner = BrowserUseScanner()
+        urls = scanner._derive_probe_urls(
+            "http://localhost:4001/rest/v1/",
+            "<html><body>PostgREST shell</body></html>",
+            max_paths=8,
+            prioritized_urls=["http://localhost:4001/rest/v1/"],
+        )
+        self.assertIn("http://localhost:4001/rest/v1/", urls)
         self.assertFalse(any(url.endswith("/login") for url in urls))
         self.assertFalse(any(url.endswith("/signin") for url in urls))
         self.assertFalse(any(url.endswith("/admin") for url in urls))

@@ -2589,6 +2589,151 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertFalse(any(str(a.get("target") or "").startswith("http://localhost:3000") for a in actions))
         self.assertFalse(any(str(a.get("target") or "").startswith("https://localhost:3000") for a in actions))
 
+    def test_coverage_debt_pivot_prefers_remaining_unresolved_surface_after_repeat_block(self):
+        class FakeNmapScannerPorts4001_9090:
+            def scan(self, target, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": "nmap test",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ports": [
+                                    {
+                                        "port": 4001,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "supabase",
+                                        "version": "1",
+                                    },
+                                    {
+                                        "port": 9090,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "prometheus",
+                                        "version": "1",
+                                    },
+                                ]
+                            }
+                        ]
+                    },
+                }
+
+        class FakeLLMRepeatBrowserUse4001:
+            def __init__(self):
+                self.plan_calls = 0
+
+            def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+                self.plan_calls += 1
+                if self.plan_calls in (1, 2):
+                    return (
+                        [
+                            {
+                                "name": "propose_actions",
+                                "arguments": {
+                                    "actions": [
+                                        {
+                                            "tool_name": "browser_use",
+                                            "arguments": {
+                                                "profile": "soc2",
+                                                "target": "http://localhost:4001",
+                                            },
+                                            "reasoning": "Re-check the Supabase origin first.",
+                                            "priority": 1,
+                                        }
+                                    ],
+                                    "stop": False,
+                                },
+                            }
+                        ],
+                        {"provider": "fake", "model": "fake-repeat-browser-use-4001", "usage": {"total_tokens": 8}},
+                    )
+                return (
+                    [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+                    {"provider": "fake", "model": "fake-repeat-browser-use-4001", "usage": {"total_tokens": 4}},
+                )
+
+            def chat_with_meta(self, messages, temperature=0.2):
+                return (
+                    json.dumps({"summary": "Synthetic summary.", "findings": []}),
+                    {"provider": "fake", "model": "fake-summary", "usage": {"total_tokens": 8}},
+                )
+
+        scanners = {
+            "nmap": FakeNmapScannerPorts4001_9090(),
+            "httpx": FakeHttpxScannerWithStatus(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseSupabaseScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMRepeatBrowserUse4001())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True
+            if str(tool or "").strip().lower() in {"browser_use", "httpx", "whatweb"}
+            else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "CRITICAL",
+                    "title": "Supabase service role key exposed",
+                    "evidence": "http://localhost:4001 (HTTP 200); marker=service_role",
+                    "type": "secret_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Supabase REST API accessible without authentication",
+                    "evidence": "http://localhost:4001/rest/v1/ (HTTP 200)",
+                    "type": "supabase_rest_exposure",
+                },
+                {
+                    "severity": "HIGH",
+                    "title": "Prometheus config endpoint accessible without authentication",
+                    "evidence": "http://localhost:9090/api/v1/status/config (HTTP 200)",
+                    "type": "prometheus_config_exposure",
+                },
+            ],
+        }
+        output = artifact_path("ai_audit_coverage_debt_prefers_remaining_surface.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        actions = [
+            a
+            for a in (report.get("ai_audit", {}).get("actions") or [])
+            if isinstance(a, dict) and a.get("phase") == "agentic"
+        ]
+        self.assertGreaterEqual(len(actions), 2)
+        if len(actions) >= 2:
+            self.assertEqual(actions[0].get("target"), "http://localhost:4001")
+            self.assertTrue(str(actions[1].get("target") or "").startswith("http://localhost:9090"))
+
+        trace = report.get("ai_audit", {}).get("decision_trace", [])
+        self.assertTrue(
+            any(
+                isinstance(step, dict)
+                and isinstance(step.get("coverage_debt_pivot"), dict)
+                and any(
+                    str((candidate or {}).get("target") or "").startswith("http://localhost:9090")
+                    for candidate in (step.get("coverage_debt_pivot", {}).get("injected") or [])
+                    if isinstance(candidate, dict)
+                )
+                for step in trace
+            )
+        )
+
     def test_endpoint_target_browser_observation_closes_matching_cluster_via_target_field(self):
         scanners = {
             "nmap": FakeNmapScannerSingleWebPort(),

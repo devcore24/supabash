@@ -878,6 +878,49 @@ class BrowserUseScanner:
                 return out[:max_urls]
         return out[:max_urls]
 
+    def _looks_html_document(self, value: str) -> bool:
+        text = str(value or "").strip().lower()
+        if not text:
+            return False
+        return any(token in text for token in ("<!doctype html", "<html", "<body", "<form", "<a ", "<div"))
+
+    def _target_is_deep_api_like(self, value: str) -> bool:
+        text = str(value or "").strip()
+        if not text:
+            return False
+        try:
+            parsed = urlparse(text)
+        except Exception:
+            return False
+        path = str(parsed.path or "").strip()
+        if not path or path == "/":
+            return False
+        segments = [seg.strip().lower() for seg in path.split("/") if seg.strip()]
+        if not segments:
+            return False
+        api_markers = {
+            "api",
+            "apis",
+            "rest",
+            "rpc",
+            "graphql",
+            "graphiql",
+            "actuator",
+            "metrics",
+            "swagger",
+            "swagger-ui",
+            "openapi",
+            "v1",
+            "v2",
+            "v3",
+        }
+        if any(seg in api_markers for seg in segments):
+            return True
+        if len(segments) >= 3:
+            return True
+        query = str(parsed.query or "").strip().lower()
+        return any(token in query for token in ("format=json", "format=xml", "schema=", "table="))
+
     def _derive_probe_urls(
         self,
         base_url: str,
@@ -906,7 +949,9 @@ class BrowserUseScanner:
             if len(out) >= max_paths:
                 return out[:max_paths]
 
-        allow_seed_paths = bool(root_html) or not base_path_prefix
+        html_like = self._looks_html_document(root_html)
+        deep_api_target = self._target_is_deep_api_like(base_url)
+        allow_seed_paths = (not deep_api_target) and (html_like or not base_path_prefix)
         if allow_seed_paths:
             seed_paths = [
                 "/login",

@@ -1398,6 +1398,107 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return f"{path_part}?{query_part}"
                     return text.rstrip("/") or "/"
 
+                def _target_is_deep_api_like(value: Any) -> bool:
+                    text = str(value or "").strip()
+                    if not text:
+                        return False
+                    parse_input = text if "://" in text else f"http://{text}"
+                    try:
+                        parsed = urlparse(parse_input)
+                    except Exception:
+                        return False
+                    path = str(parsed.path or "").strip()
+                    if not path or path == "/":
+                        return False
+                    segments = [seg.strip().lower() for seg in path.split("/") if seg.strip()]
+                    if not segments:
+                        return False
+                    api_markers = {
+                        "api",
+                        "apis",
+                        "rest",
+                        "rpc",
+                        "graphql",
+                        "graphiql",
+                        "actuator",
+                        "metrics",
+                        "swagger",
+                        "swagger-ui",
+                        "openapi",
+                        "v1",
+                        "v2",
+                        "v3",
+                    }
+                    if any(seg in api_markers for seg in segments):
+                        return True
+                    if len(segments) >= 3:
+                        return True
+                    query = str(parsed.query or "").strip().lower()
+                    return any(token in query for token in ("format=json", "format=xml", "schema=", "table="))
+
+                def _canonical_repeat_web_target(tool: str, target: str) -> str:
+                    text = str(target or "").strip()
+                    if not text:
+                        return ""
+                    resolved = _resolve_allowed_web_target(tool, text) or _preserve_allowed_web_target_path(text) or text
+                    parse_input = resolved if "://" in resolved else f"http://{resolved}"
+                    try:
+                        parsed = urlparse(parse_input)
+                    except Exception:
+                        return resolved
+                    scheme = str(parsed.scheme or "http").strip().lower() or "http"
+                    host = str(parsed.hostname or "").strip().lower()
+                    if host in {"localhost", "::1"}:
+                        host = "127.0.0.1"
+                    if not host:
+                        return resolved
+                    port = int(parsed.port or (443 if scheme == "https" else 80))
+                    default_port = 443 if scheme == "https" else 80
+                    netloc = host if port == default_port else f"{host}:{port}"
+                    path = str(parsed.path or "").strip() or "/"
+                    path = path if path == "/" else (path.rstrip("/") or "/")
+                    query = str(parsed.query or "").strip()
+                    return urlunparse((scheme, netloc, path, "", query, ""))
+
+                def _register_browser_use_fallback_block(target: str) -> None:
+                    text = str(target or "").strip()
+                    if not text:
+                        return
+                    variants: Set[str] = {text}
+                    canonical = _canonical_repeat_web_target("browser_use", text)
+                    if canonical:
+                        variants.add(canonical)
+                    preserved = _preserve_allowed_web_target_path(text)
+                    if preserved:
+                        variants.add(preserved)
+                        preserved_canonical = _canonical_repeat_web_target("browser_use", preserved)
+                        if preserved_canonical:
+                            variants.add(preserved_canonical)
+                    expanded: Set[str] = set()
+                    for item in variants:
+                        expanded.add(item)
+                        parse_input = item if "://" in item else f"http://{item}"
+                        try:
+                            parsed = urlparse(parse_input)
+                        except Exception:
+                            continue
+                        scheme = str(parsed.scheme or "http").strip().lower() or "http"
+                        host = str(parsed.hostname or "").strip().lower()
+                        if host in {"localhost", "::1"}:
+                            host = "127.0.0.1"
+                        if not host:
+                            continue
+                        port = int(parsed.port or (443 if scheme == "https" else 80))
+                        default_port = 443 if scheme == "https" else 80
+                        netloc = host if port == default_port else f"{host}:{port}"
+                        path = str(parsed.path or "").strip() or "/"
+                        if path != "/":
+                            base_path = path.rstrip("/") or "/"
+                            query = str(parsed.query or "").strip()
+                            expanded.add(urlunparse((scheme, netloc, base_path, "", query, "")))
+                            expanded.add(urlunparse((scheme, netloc, f"{base_path}/", "", query, "")))
+                    browser_use_fallback_block_targets.update({item for item in expanded if str(item).strip()})
+
                 def _browser_paths_related(target_path: str, candidate_path: str) -> bool:
                     a = _normalize_browser_scope_path(target_path)
                     b = _normalize_browser_scope_path(candidate_path)
@@ -1528,18 +1629,30 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             ev = str(item.get("evidence") or "").strip()
                             lines.append(f"- [{sev}] {title}: {ev}")
 
-                    lines.extend(
-                        [
-                            "Execution guidance:",
-                            "- Start at the target URL and map reachable same-origin paths/forms.",
-                            "- Stay on the target origin (same host:port) unless the selected target itself redirects there.",
-                            "- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.",
-                            "- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.",
-                            "- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.",
-                            "- Do not brute-force credentials or run destructive actions.",
-                            "- Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.",
-                        ]
-                    )
+                    lines.append("Execution guidance:")
+                    if _target_is_deep_api_like(target_url):
+                        lines.extend(
+                            [
+                                "- Treat this as a focused API/config validation target, not a generic login crawl.",
+                                "- Start at the exact target URL and stay on the same origin (same host:port) unless it explicitly redirects there.",
+                                "- Prioritize the focused endpoint, directly related same-origin API paths already evidenced, and any real redirects/links observed during the session.",
+                                "- Do not speculate generic /login, /signin, /admin, or manager-style paths unless they are actually linked or returned by the target.",
+                                "- Capture status/content-type/body markers, auth barriers, and any machine-readable configuration or API responses.",
+                                "- Do not brute-force credentials or run destructive actions.",
+                            ]
+                        )
+                    else:
+                        lines.extend(
+                            [
+                                "- Start at the target URL and map reachable same-origin paths/forms.",
+                                "- Stay on the target origin (same host:port) unless the selected target itself redirects there.",
+                                "- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.",
+                                "- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.",
+                                "- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.",
+                                "- Do not brute-force credentials or run destructive actions.",
+                                "- Collect concrete evidence: visited URLs, page titles, auth prompts/barriers, status/redirect clues, and any stack traces/errors.",
+                            ]
+                        )
 
                     if bool(auth_ctx.get("has_auth_context")):
                         lines.append("Authentication context is configured for this run.")
@@ -2807,6 +2920,69 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     open_clusters: List[Dict[str, Any]],
                     repeat_blocked_actions: List[Dict[str, Any]],
                 ) -> List[str]:
+                    def _cluster_host_port_pairs(cluster: Dict[str, Any]) -> Set[str]:
+                        pairs: Set[str] = set()
+                        if not isinstance(cluster, dict):
+                            return pairs
+                        labels = list(cluster.get("targets", []) or []) + list(cluster.get("evidence_samples", []) or [])
+                        for label in labels:
+                            text = str(label or "").strip()
+                            if not text:
+                                continue
+                            if "://" in text:
+                                hp = _target_host_port_key(text)
+                                if hp:
+                                    pairs.add(f"{str(hp[0]).strip().lower()}:{int(hp[1])}")
+                                continue
+                            host_part = text.split("/", 1)[0].strip().lower().strip("[]")
+                            if not host_part:
+                                continue
+                            if ":" in host_part:
+                                maybe_host, maybe_port = host_part.rsplit(":", 1)
+                                maybe_host = str(maybe_host or "").strip().lower()
+                                if maybe_host in {"localhost", "::1"}:
+                                    maybe_host = "127.0.0.1"
+                                try:
+                                    pairs.add(f"{maybe_host}:{int(maybe_port)}")
+                                except Exception:
+                                    continue
+                        return pairs
+
+                    def _cluster_surface_pressure(cluster: Dict[str, Any]) -> Tuple[int, int, int]:
+                        pairs = _cluster_host_port_pairs(cluster)
+                        if not pairs:
+                            return (0, 0, 999)
+                        recent_rows = [
+                            row
+                            for row in (planner_action_ledger[-6:] if isinstance(planner_action_ledger, list) else [])
+                            if isinstance(row, dict)
+                        ]
+                        total = 0
+                        no_gain = 0
+                        nearest = 999
+                        for distance, row in enumerate(reversed(recent_rows), start=1):
+                            target = str(row.get("target") or "").strip()
+                            hp = _target_host_port_key(target)
+                            if hp is None:
+                                continue
+                            pair = f"{str(hp[0]).strip().lower()}:{int(hp[1])}"
+                            if pair not in pairs:
+                                continue
+                            total += 1
+                            if int(row.get("open_high_risk_cluster_delta", 0)) <= 0:
+                                no_gain += 1
+                            nearest = min(nearest, distance)
+                        return (no_gain, total, nearest)
+
+                    sorted_open_clusters = sorted(
+                        [cluster for cluster in (open_clusters or []) if isinstance(cluster, dict)],
+                        key=lambda cluster: (
+                            _cluster_surface_pressure(cluster),
+                            -int(self._severity_rank(cluster.get("severity") or "INFO")),
+                            str(cluster.get("title") or ""),
+                        ),
+                    )
+
                     by_host: Dict[str, List[str]] = {}
                     by_host_port: Dict[Tuple[str, int], List[str]] = {}
                     for item in allowed_web_targets or []:
@@ -2835,7 +3011,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             _add(preserved)
 
                     # 1) Prefer concrete URLs from unresolved cluster evidence.
-                    for cluster in open_clusters[:10]:
+                    for cluster in sorted_open_clusters[:10]:
                         if not isinstance(cluster, dict):
                             continue
                         for sample in cluster.get("evidence_samples", []) or []:
@@ -2859,7 +3035,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 _add(mapped)
 
                     # 3) Cluster labels -> host/path candidates on in-scope host:port surfaces.
-                    for cluster in open_clusters[:10]:
+                    for cluster in sorted_open_clusters[:10]:
                         if not isinstance(cluster, dict):
                             continue
                         for target_label in cluster.get("targets", []) or []:
@@ -3629,7 +3805,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         return (tool, f"{scan_host}:{port_txt}")
 
                     if target_kind == "web":
-                        return (tool, target or "__missing_target__")
+                        return (tool, _canonical_repeat_web_target(tool, target) or "__missing_target__")
                     if target_kind in ("host", "host_port"):
                         return (tool, str(scan_host or "").strip() or "__host__")
                     if target_kind == "container":
@@ -3693,9 +3869,15 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
                     if tool == "browser_use":
                         resolved_target = _resolve_allowed_web_target("browser_use", target or "")
+                        canonical_target = _canonical_repeat_web_target("browser_use", target or "")
+                        canonical_resolved = _canonical_repeat_web_target("browser_use", resolved_target or "")
                         if target and (target in browser_use_fallback_block_targets):
                             return "browser_use_fallback_no_cluster_closure"
                         if resolved_target and resolved_target in browser_use_fallback_block_targets:
+                            return "browser_use_fallback_no_cluster_closure"
+                        if canonical_target and canonical_target in browser_use_fallback_block_targets:
+                            return "browser_use_fallback_no_cluster_closure"
+                        if canonical_resolved and canonical_resolved in browser_use_fallback_block_targets:
                             return "browser_use_fallback_no_cluster_closure"
 
                     if (
@@ -4824,6 +5006,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         browser_discovery_validated_urls = {
                             str(u).strip() for u in validated_urls_raw if isinstance(u, str) and str(u).strip()
                         }
+                    deep_api_browser_target = chosen_tool == "browser_use" and _target_is_deep_api_like(chosen_target)
                     browser_validated_discovery_unique_delta = 0
                     browser_unvalidated_discovery_unique_delta = 0
                     if chosen_tool == "browser_use" and new_agentic_items:
@@ -4858,7 +5041,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         ):
                             gain_score = min(gain_score, 0)
                             if chosen_target:
-                                browser_use_fallback_block_targets.add(chosen_target)
+                                _register_browser_use_fallback_block(chosen_target)
                         if browser_fallback_mode:
                             fallback_penalty = 0
                             if not completed:
@@ -4869,6 +5052,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 fallback_penalty += 2
                             if fallback_penalty > 0:
                                 gain_score -= int(fallback_penalty)
+                            if deep_api_browser_target and not completed:
+                                gain_score = min(gain_score, -3)
                             if not completed or browser_fallback_confidence == "low":
                                 # Down-rank incomplete/low-confidence fallback browser runs regardless
                                 # of focus hits so they don't dominate gain scoring.
@@ -4885,7 +5070,10 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             if (not completed or browser_fallback_confidence == "low") and open_high_risk_cluster_delta <= 0:
                                 gain_score = min(gain_score, 0)
                                 if chosen_target:
-                                    browser_use_fallback_block_targets.add(chosen_target)
+                                    _register_browser_use_fallback_block(chosen_target)
+                            if deep_api_browser_target and not completed and open_high_risk_cluster_delta <= 0:
+                                if chosen_target:
+                                    _register_browser_use_fallback_block(chosen_target)
                         if (
                             browser_unvalidated_discovery_unique_delta > 0
                             and browser_observation_unique_delta <= 0
@@ -4910,6 +5098,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             signal_note = (
                                 "Fallback browser evidence was incomplete/low-confidence; "
                                 "deprioritizing repeated actions on same target unless independently validated."
+                            )
+                        if deep_api_browser_target and not completed:
+                            signal = "low"
+                            signal_note = (
+                                "Fallback browser evidence on a focused API/config target did not complete; "
+                                "deprioritizing repeated browser loops on the same surface."
                             )
 
                     # Track per-tool/target execution pressure and recent signal trend.
