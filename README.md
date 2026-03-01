@@ -237,6 +237,23 @@ Roadmap and reasoning:
 - strategy and external references: [AI / LLM Security Roadmap](docs/ai-llm-security-roadmap.md)
 - planned implementation phases: [TODO.md](TODO.md)
 
+## 🧭 Agentic Audit, Chat, and QA Roadmap
+
+Supabash is also being planned to become smarter at the audit-decision, report-review, and operator-interaction layers without giving up deterministic evidence collection.
+
+Key direction:
+
+- keep raw evidence deterministic
+- add deterministic report lint
+- add structured LLM QA overlays
+- measure quality with benchmark suites
+- make chat/TUI the main operator-facing control plane
+
+Roadmap and reasoning:
+
+- implementation strategy: [Agentic Audit, Chat, QA, and Benchmark Roadmap](docs/agentic-audit-chat-roadmap.md)
+- planned implementation phases: [TODO.md](TODO.md)
+
 ## 💻 Usage
 
 Once installed, the `supabash` command is available globally.
