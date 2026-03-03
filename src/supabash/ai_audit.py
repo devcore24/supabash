@@ -815,6 +815,30 @@ class AIAuditOrchestrator(AuditOrchestrator):
             smb_ports = [p for p in open_ports if p in (139, 445)]
 
             allowed_web_targets = [u for u in web_targets if isinstance(u, str) and u.strip()]
+            raw_service_targets = agg.get("service_targets")
+            service_targets = raw_service_targets if isinstance(raw_service_targets, list) else []
+
+            def _planner_service_targets(limit: int = 12) -> List[Dict[str, Any]]:
+                rows: List[Dict[str, Any]] = []
+                for item in service_targets or []:
+                    if not isinstance(item, dict):
+                        continue
+                    row = {
+                        "kind": str(item.get("kind") or "").strip(),
+                        "category": str(item.get("category") or "").strip(),
+                        "host": str(item.get("host") or "").strip(),
+                        "port": item.get("port"),
+                        "target": str(item.get("target") or "").strip(),
+                        "service": str(item.get("service") or "").strip(),
+                        "product": str(item.get("product") or "").strip(),
+                        "title": str(item.get("title") or "").strip(),
+                        "interest_score": int(item.get("interest_score") or 0),
+                    }
+                    rows.append(row)
+                    if len(rows) >= limit:
+                        break
+                return rows
+
             sqlmap_cfg = self._tool_config("sqlmap")
             try:
                 sqlmap_max_targets = int(sqlmap_cfg.get("max_targets", 2))
@@ -1939,12 +1963,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "allowed_tools": allowed_tools,
                         "allowed_targets": {
                             "web": allowed_web_targets[:12],
+                            "services": _planner_service_targets(),
                             "sqlmap": sqlmap_targets[:6],
                             "scan_host": scan_host,
                         },
                         "open_ports": open_ports,
                         "observations": {
                             "web_targets": allowed_web_targets[:12],
+                            "service_targets": _planner_service_targets(),
                             "results_recent": results_summary[-20:],
                             "findings_recent": findings_recent,
                         },
@@ -2002,6 +2028,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                             "allowed_tools": list(allowed_tools),
                             "open_ports_count": len(open_ports or []),
                             "web_target_count": len(allowed_web_targets or []),
+                            "service_target_count": len(service_targets or []),
                             "findings_total": int(finding_clusters.get("total_findings", 0)),
                             "finding_cluster_count": int(finding_clusters.get("cluster_count", 0)),
                             "open_high_risk_cluster_count": len(finding_clusters.get("open_high_risk_clusters", []) or []),

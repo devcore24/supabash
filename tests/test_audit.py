@@ -561,6 +561,70 @@ class TestAuditOrchestrator(unittest.TestCase):
             ],
         )
 
+    def test_build_service_target_inventory_promotes_admin_console_surface(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        inventory = orch._build_service_target_inventory(
+            "localhost",
+            {
+                "hosts": [
+                    {
+                        "ip": "127.0.0.1",
+                        "ports": [
+                            {"port": 3000, "protocol": "tcp", "service": "http", "state": "open"},
+                            {"port": 5050, "protocol": "tcp", "service": "mmcc", "state": "open"},
+                            {"port": 5432, "protocol": "tcp", "service": "postgresql", "product": "PostgreSQL DB", "state": "open"},
+                        ],
+                    }
+                ]
+            },
+            {
+                "results": [
+                    {
+                        "url": "http://localhost:3000",
+                        "status_code": 200,
+                        "title": "Juice Shop",
+                        "content_type": "text/html",
+                    },
+                    {
+                        "url": "http://localhost:5050",
+                        "final_url": "http://localhost:5050/browser/",
+                        "status_code": 200,
+                        "title": "pgAdmin 4",
+                        "content_type": "text/html",
+                    },
+                ]
+            },
+        )
+        self.assertTrue(inventory)
+        top = inventory[0]
+        self.assertEqual(top.get("host"), "127.0.0.1")
+        self.assertEqual(top.get("port"), 5050)
+        self.assertEqual(top.get("category"), "admin_console")
+        self.assertEqual(str(top.get("kind") or "").lower(), "web")
+        self.assertGreater(int(top.get("interest_score") or 0), 100)
+        self.assertTrue(any(int(item.get("port") or 0) == 5432 for item in inventory))
+
+    def test_prioritize_web_targets_for_deep_scan_uses_service_inventory_scores(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        ranked = orch._prioritize_web_targets_for_deep_scan(
+            [
+                "http://localhost:3000",
+                "http://localhost:3001",
+                "http://localhost:3002",
+                "http://localhost:5050",
+            ],
+            max_targets=3,
+            service_targets=[
+                {"kind": "web", "host": "127.0.0.1", "port": 5050, "interest_score": 160, "category": "admin_console"},
+                {"kind": "web", "host": "127.0.0.1", "port": 3000, "interest_score": 45, "category": "web_surface"},
+                {"kind": "web", "host": "127.0.0.1", "port": 3001, "interest_score": 45, "category": "web_surface"},
+                {"kind": "web", "host": "127.0.0.1", "port": 3002, "interest_score": 45, "category": "web_surface"},
+            ],
+        )
+        self.assertEqual(ranked[0], "http://localhost:5050")
+        self.assertEqual(len(ranked), 3)
+        self.assertNotIn("http://localhost:3002", ranked)
+
     def test_collect_findings_includes_readiness_probe_results(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
         agg = {
@@ -663,6 +727,33 @@ class TestAuditOrchestrator(unittest.TestCase):
                 and str(f.get("severity") or "").upper() == "HIGH"
                 for f in findings
             )
+        )
+
+    def test_readiness_probe_detects_postgres_without_auth_when_query_succeeds(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd[:2] == ["ss", "-lnt"]:
+                return SimpleNamespace(returncode=0, stdout="State Recv-Q Send-Q Local Address:Port Peer Address:Port\n", stderr="")
+            if cmd and cmd[0] == "psql":
+                return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
+            raise FileNotFoundError(cmd[0] if cmd else "")
+
+        with patch("supabash.audit.subprocess.run", side_effect=fake_run):
+            out = orch._run_readiness_probe("localhost", [], [5432])
+
+        findings = out.get("findings") if isinstance(out, dict) else []
+        checks = out.get("checks") if isinstance(out, dict) else []
+        self.assertTrue(
+            any(
+                isinstance(f, dict)
+                and str(f.get("type") or "") == "postgres_auth_exposure"
+                and str(f.get("severity") or "").upper() == "HIGH"
+                for f in findings
+            )
+        )
+        self.assertTrue(
+            any(isinstance(c, dict) and str(c.get("name") or "") == "postgres_auth_probe" for c in checks)
         )
 
     def test_readiness_probe_escalates_object_store_high_on_verified_listing_marker(self):

@@ -3293,11 +3293,254 @@ class AuditOrchestrator:
         urls = sorted(set(urls), key=lambda u: (not u.startswith("https://"), u))
         return urls
 
+    def _build_service_target_inventory(
+        self,
+        scan_host: str,
+        nmap_data: Dict[str, Any],
+        httpx_data: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        def _normalize_host(value: Any) -> str:
+            host = str(value or "").strip().lower().strip("[]")
+            if host in {"localhost", "::1"}:
+                return "127.0.0.1"
+            return host
+
+        def _host_port_from_url(value: Any) -> Optional[Tuple[str, int]]:
+            text = str(value or "").strip()
+            if not text:
+                return None
+            parse_input = text if "://" in text else f"http://{text}"
+            try:
+                parsed = urlparse(parse_input)
+                scheme = str(parsed.scheme or "http").strip().lower() or "http"
+                host = _normalize_host(parsed.hostname or "")
+                if not host:
+                    return None
+                port = int(parsed.port or (443 if scheme == "https" else 80))
+                return (host, port)
+            except Exception:
+                return None
+
+        def _compact_tokens(*values: Any) -> str:
+            parts: List[str] = []
+            for value in values:
+                if isinstance(value, (list, tuple, set)):
+                    parts.extend(str(x or "").strip().lower() for x in value if str(x or "").strip())
+                else:
+                    text = str(value or "").strip().lower()
+                    if text:
+                        parts.append(text)
+            return " ".join(parts)
+
+        admin_tokens = {
+            "admin",
+            "console",
+            "dashboard",
+            "manager",
+            "browser",
+            "panel",
+            "studio",
+            "control",
+        }
+        monitoring_tokens = {
+            "metrics",
+            "prometheus",
+            "grafana",
+            "alertmanager",
+            "monitor",
+            "status/config",
+        }
+        data_plane_tokens = {
+            "api",
+            "rest",
+            "graphql",
+            "openapi",
+            "swagger",
+            "rpc",
+            "gateway",
+            "supabase",
+        }
+        storage_tokens = {
+            "s3",
+            "storage",
+            "bucket",
+            "object",
+            "minio",
+            "xml",
+        }
+        database_tokens = {
+            "postgres",
+            "postgresql",
+            "mysql",
+            "mariadb",
+            "mongodb",
+            "database",
+            "db",
+        }
+        cache_tokens = {
+            "redis",
+            "dragonfly",
+            "memcached",
+            "cache",
+        }
+
+        httpx_index: Dict[Tuple[str, int], Dict[str, Any]] = {}
+        httpx_results = httpx_data.get("results") if isinstance(httpx_data, dict) else None
+        for row in httpx_results or []:
+            if not isinstance(row, dict):
+                continue
+            hp = _host_port_from_url(row.get("url") or row.get("final_url"))
+            if hp is None:
+                continue
+            tokens = _compact_tokens(
+                row.get("title"),
+                row.get("webserver"),
+                row.get("content_type"),
+                row.get("tech"),
+                row.get("final_url"),
+            )
+            path = ""
+            final_url = str(row.get("final_url") or row.get("url") or "").strip()
+            if final_url:
+                try:
+                    path = str(urlparse(final_url).path or "").strip()
+                except Exception:
+                    path = ""
+            score = 0
+            category = "web_surface"
+            if any(tok in tokens for tok in admin_tokens) or path.startswith(("/admin", "/console", "/browser", "/dashboard")):
+                category = "admin_console"
+                score += 140
+            elif any(tok in tokens for tok in monitoring_tokens):
+                category = "monitoring_surface"
+                score += 110
+            elif any(tok in tokens for tok in data_plane_tokens):
+                category = "data_plane_surface"
+                score += 100
+            elif any(tok in tokens for tok in storage_tokens):
+                category = "storage_surface"
+                score += 95
+            else:
+                score += 40
+
+            status_code = row.get("status_code")
+            try:
+                if 200 <= int(status_code) < 400:
+                    score += 15
+            except Exception:
+                pass
+            if path and path not in {"/", ""}:
+                score += 10
+
+            candidate = {
+                "kind": "web",
+                "host": hp[0],
+                "port": int(hp[1]),
+                "target": final_url or str(row.get("url") or "").strip(),
+                "category": category,
+                "service": "http",
+                "product": str(row.get("webserver") or "").strip() or None,
+                "title": str(row.get("title") or "").strip() or None,
+                "final_url": final_url or None,
+                "status_code": row.get("status_code"),
+                "content_type": str(row.get("content_type") or "").strip() or None,
+                "tech": list(row.get("tech") or []) if isinstance(row.get("tech"), list) else [],
+                "interest_score": int(score),
+            }
+            existing = httpx_index.get(hp)
+            if not existing or int(candidate["interest_score"]) > int(existing.get("interest_score", 0)):
+                httpx_index[hp] = candidate
+
+        inventory: List[Dict[str, Any]] = []
+        seen_pairs: Set[Tuple[str, int]] = set()
+        fallback_host = _normalize_host(scan_host)
+        for host in (nmap_data or {}).get("hosts", []) or []:
+            host_id = _normalize_host(host.get("ip") or fallback_host)
+            if not host_id:
+                host_id = fallback_host
+            for port_row in host.get("ports", []) or []:
+                try:
+                    if str(port_row.get("state", "")).lower() != "open":
+                        continue
+                    if str(port_row.get("protocol", "tcp")).lower() != "tcp":
+                        continue
+                    port = int(port_row.get("port"))
+                except Exception:
+                    continue
+                hp = (host_id, port)
+                if hp in seen_pairs:
+                    continue
+                seen_pairs.add(hp)
+
+                service = str(port_row.get("service") or "").strip().lower()
+                product = str(port_row.get("product") or "").strip()
+                version = str(port_row.get("version") or "").strip()
+                tokens = _compact_tokens(service, product, version)
+
+                http_row = httpx_index.get(hp)
+                if http_row is not None:
+                    row = dict(http_row)
+                    row["service"] = service or str(row.get("service") or "").strip().lower() or "http"
+                    if product and not row.get("product"):
+                        row["product"] = product
+                    if version:
+                        row["version"] = version
+                    inventory.append(row)
+                    continue
+
+                category = "service_surface"
+                score = 0
+                if any(tok in tokens for tok in database_tokens):
+                    category = "database_surface"
+                    score = 90
+                elif any(tok in tokens for tok in cache_tokens):
+                    category = "cache_surface"
+                    score = 80
+                elif any(tok in tokens for tok in monitoring_tokens):
+                    category = "monitoring_surface"
+                    score = 85
+                elif any(tok in tokens for tok in storage_tokens):
+                    category = "storage_surface"
+                    score = 85
+                elif any(tok in tokens for tok in admin_tokens):
+                    category = "admin_console"
+                    score = 100
+                elif service or product:
+                    category = "service_surface"
+                    score = 35
+                if score <= 0:
+                    continue
+                inventory.append(
+                    {
+                        "kind": "service",
+                        "host": host_id,
+                        "port": int(port),
+                        "target": f"{host_id}:{int(port)}",
+                        "category": category,
+                        "service": service or None,
+                        "product": product or None,
+                        "version": version or None,
+                        "interest_score": int(score),
+                    }
+                )
+
+        inventory.sort(
+            key=lambda row: (
+                -int(row.get("interest_score", 0)),
+                0 if str(row.get("kind") or "").strip().lower() == "web" else 1,
+                str(row.get("host") or ""),
+                int(row.get("port") or 0),
+                str(row.get("target") or ""),
+            )
+        )
+        return inventory
+
     def _prioritize_web_targets_for_deep_scan(
         self,
         web_targets: Sequence[str],
         *,
         max_targets: int = 3,
+        service_targets: Optional[Sequence[Dict[str, Any]]] = None,
     ) -> List[str]:
         ordered: List[str] = []
         seen = set()
@@ -3343,16 +3586,40 @@ class AuditOrchestrator:
             6443,
         }
 
+        interest_by_host_port: Dict[Tuple[str, int], int] = {}
+        for item in service_targets or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("kind") or "").strip().lower() != "web":
+                continue
+            host = str(item.get("host") or "").strip().lower()
+            if host in {"localhost", "::1"}:
+                host = "127.0.0.1"
+            try:
+                port = int(item.get("port"))
+            except Exception:
+                continue
+            score = int(item.get("interest_score") or 0)
+            current = interest_by_host_port.get((host, port), 0)
+            if score > current:
+                interest_by_host_port[(host, port)] = score
+
         def sort_key(target: str) -> Tuple[int, int, int, int, str]:
             try:
                 parsed = urlparse(target)
                 scheme = (parsed.scheme or "").lower()
+                host = str(parsed.hostname or "").strip().lower()
+                if host in {"localhost", "::1"}:
+                    host = "127.0.0.1"
                 port = int(parsed.port or (443 if scheme == "https" else 80))
             except Exception:
                 scheme = "http"
+                host = ""
                 port = 80
+            interest = int(interest_by_host_port.get((host, port), 0))
 
             return (
+                -interest,
                 0 if port in risk_ports else 1,
                 0 if scheme == "https" else 1,
                 0 if port in (80, 443) else 1,
@@ -3740,6 +4007,70 @@ class AuditOrchestrator:
                     }
                 )
 
+        # 4) PostgreSQL unauthenticated access posture check (best-effort).
+        if any(int(p) == 5432 for p in (open_ports or [])):
+            pg_env = os.environ.copy()
+            pg_env.setdefault("PGCONNECT_TIMEOUT", "3")
+            pg_env.setdefault("PGPASSWORD", "")
+            pg_cmd = [
+                "psql",
+                "-h",
+                scan_host,
+                "-p",
+                "5432",
+                "-U",
+                "postgres",
+                "-d",
+                "postgres",
+                "-w",
+                "-tA",
+                "-c",
+                "select 1;",
+            ]
+            commands.append(" ".join(pg_cmd))
+            try:
+                pg_out = subprocess.run(
+                    pg_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=6,
+                    check=False,
+                    env=pg_env,
+                )
+                output = f"{pg_out.stdout or ''}\n{pg_out.stderr or ''}".strip().lower()
+                checks.append(
+                    {
+                        "name": "postgres_auth_probe",
+                        "success": bool(pg_out.returncode == 0),
+                        "output": output[:300],
+                    }
+                )
+                if pg_out.returncode == 0 and any(line.strip() == "1" for line in (pg_out.stdout or "").splitlines()):
+                    findings.append(
+                        {
+                            "severity": "HIGH",
+                            "title": "PostgreSQL reachable without authentication",
+                            "evidence": f"psql passwordless probe returned SELECT 1 successfully for {scan_host}:5432",
+                            "type": "postgres_auth_exposure",
+                        }
+                    )
+            except FileNotFoundError:
+                checks.append(
+                    {
+                        "name": "postgres_auth_probe",
+                        "success": False,
+                        "error": "psql not installed",
+                    }
+                )
+            except Exception as e:
+                checks.append(
+                    {
+                        "name": "postgres_auth_probe",
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
+
         return {
             "success": True,
             "command": "internal readiness probes",
@@ -3971,6 +4302,22 @@ class AuditOrchestrator:
                 seen_ports.add(port)
                 ports.append(port)
             return sorted(ports)
+
+        def refresh_service_targets() -> List[Dict[str, Any]]:
+            nmap_scan_data: Dict[str, Any] = {}
+            httpx_data: Dict[str, Any] = {}
+            for entry in agg.get("results", []) or []:
+                if not isinstance(entry, dict) or not entry.get("success"):
+                    continue
+                tool_name = str(entry.get("tool") or "").strip().lower()
+                data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+                if tool_name == "nmap" and isinstance(data.get("scan_data"), dict):
+                    nmap_scan_data = data.get("scan_data") or {}
+                elif tool_name == "httpx" and isinstance(data, dict):
+                    httpx_data = data
+            service_targets = self._build_service_target_inventory(scan_host, nmap_scan_data, httpx_data)
+            agg["service_targets"] = service_targets
+            return service_targets
 
         def run_fast_port_discovery() -> Tuple[List[int], List[Dict[str, Any]], Optional[str]]:
             """
@@ -4875,7 +5222,12 @@ class AuditOrchestrator:
                 return []
             if lock_web_targets:
                 return [str(x).strip() for x in web_targets if str(x).strip()]
-            return self._prioritize_web_targets_for_deep_scan(web_targets, max_targets=3)
+            service_targets = agg.get("service_targets") if isinstance(agg.get("service_targets"), list) else []
+            return self._prioritize_web_targets_for_deep_scan(
+                web_targets,
+                max_targets=3,
+                service_targets=service_targets,
+            )
 
         fast_ports_for_nmap: List[int] = []
         fast_discovery_used: Optional[str] = None
@@ -4910,9 +5262,11 @@ class AuditOrchestrator:
                     note("tool_end", "nmap", "Finished nmap fallback run")
                 agg["results"].append(nmap_entry)
                 note("tool_end", "nmap", "Finished nmap")
+                refresh_service_targets()
 
                 for entry in web_future.result():
                     agg["results"].append(entry)
+                refresh_service_targets()
 
             # Continue with additional prioritized web targets (if any).
             for extra_target in [t for t in deep_web_targets_for_run() if t != web_target]:
@@ -5094,6 +5448,7 @@ class AuditOrchestrator:
                 note("tool_end", "nmap", "Finished nmap fallback run")
             agg["results"].append(nmap_entry)
             note("tool_end", "nmap", "Finished nmap")
+            refresh_service_targets()
 
             if canceled() or (isinstance(nmap_entry.get("data"), dict) and nmap_entry["data"].get("canceled")):
                 agg["canceled"] = True
@@ -5154,6 +5509,7 @@ class AuditOrchestrator:
                         # deep-scan selection will de-duplicate by host:port to avoid double work.
                         web_targets = [str(x).strip() for x in alive if isinstance(x, str) and str(x).strip()]
                         apply_web_scope()
+                refresh_service_targets()
 
             # Post-recon conditional modules
             if nmap_entry.get("success"):

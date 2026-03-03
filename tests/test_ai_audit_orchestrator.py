@@ -1762,6 +1762,87 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         decision_msgs = [m for e, _, m in events if e == "llm_decision"]
         self.assertTrue(any("selected=whatweb" in m for m in decision_msgs))
 
+    def test_planner_context_includes_service_target_inventory(self):
+        class FakeNmapScannerServiceInventory:
+            def scan(self, target, arguments=None, **kwargs):
+                return {
+                    "success": True,
+                    "command": f"nmap {target} -oX - -sV --script ssl-enum-ciphers -p-",
+                    "scan_data": {
+                        "hosts": [
+                            {
+                                "ip": "127.0.0.1",
+                                "ports": [
+                                    {
+                                        "port": 4001,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "http",
+                                        "product": "nginx",
+                                        "version": "1.0",
+                                    },
+                                    {
+                                        "port": 5050,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "mmcc",
+                                        "product": "",
+                                        "version": "",
+                                    },
+                                    {
+                                        "port": 5432,
+                                        "protocol": "tcp",
+                                        "state": "open",
+                                        "service": "postgresql",
+                                        "product": "PostgreSQL DB",
+                                        "version": "9.6.0 or later",
+                                    },
+                                ],
+                            }
+                        ]
+                    },
+                }
+
+        class FakeHttpxScannerServiceInventory:
+            def scan(self, targets, **kwargs):
+                alive = [str(x) for x in (targets or []) if str(x).startswith("http://")]
+                return {
+                    "success": True,
+                    "command": "httpx -silent ...",
+                    "alive": alive,
+                    "results": [
+                        {
+                            "url": "http://localhost:4001",
+                            "status_code": 200,
+                            "title": "Supabase Mock",
+                            "content_type": "text/html",
+                        },
+                        {
+                            "url": "http://localhost:5050",
+                            "final_url": "http://localhost:5050/browser/",
+                            "status_code": 200,
+                            "title": "pgAdmin 4",
+                            "content_type": "text/html",
+                        },
+                    ],
+                }
+
+        scanners = {
+            "nmap": FakeNmapScannerServiceInventory(),
+            "httpx": FakeHttpxScannerServiceInventory(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMStopWithAction())
+        orchestrator._run_readiness_probe = lambda **kwargs: {"success": True, "findings": []}
+        output = artifact_path("ai_audit_service_target_inventory.json")
+        report = orchestrator.run("localhost", output, llm_plan=True, max_actions=1, use_llm=True)
+
+        history = report.get("ai_audit", {}).get("planner_context_history", [])
+        self.assertTrue(history)
+        self.assertGreater(int(history[0].get("service_target_count") or 0), 0)
+
     def test_stop_true_with_candidates_executes_one_action_then_stops(self):
         llm = FakeLLMStopWithAction()
         orchestrator = AIAuditOrchestrator(scanners=_build_scanners(), llm_client=llm)
