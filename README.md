@@ -139,6 +139,7 @@ Notes:
 - The installer can update **Nuclei templates** for your (non-root) user after installing `nuclei` (recommended). Disable with `SUPABASH_UPDATE_NUCLEI_TEMPLATES=0 sudo ./install.sh`.
 - If Nuclei ever fails due to missing templates, run `nuclei -update-templates`.
 - The installer now attempts to install **browser-use** (`browser-use` CLI) and runs `browser-use install` (best effort) so agentic authenticated browser checks can run by default.
+- The installer also installs a PostgreSQL client (`psql` / `pg_isready`) so Supabash can perform safe Postgres readiness/auth-posture checks during audits.
 - If browser-use is missing after install, run: `pipx install browser-use && pipx ensurepath && browser-use install`
 - `browser-use` may not support `--version` on all releases; validate with `browser-use --help` (or `pipx list | grep browser-use`).
 - If runtime setup fails with `uvx` errors, install `uv` first: `pipx install --force uv` and rerun `browser-use install`.

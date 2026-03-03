@@ -133,6 +133,18 @@ run_as_invoking_user() {
     fi
 }
 
+run_as_invoking_user_shell() {
+    local user home cmd
+    user="$(invoking_user)"
+    home="$(invoking_home)"
+    cmd="$1"
+    if [ "$user" = "$(id -un)" ]; then
+        HOME="$home" bash -lc "export PATH=\"\$PATH:$home/.local/bin:/root/.local/bin\"; $cmd"
+    else
+        sudo -u "$user" -H bash -lc "export PATH=\"\$PATH:$home/.local/bin:/root/.local/bin\"; $cmd"
+    fi
+}
+
 # 1. OS Detection
 detect_os() {
     if [ -f /etc/os-release ]; then
@@ -326,6 +338,7 @@ install_apt_deps() {
         jq
         nmap
         masscan
+        postgresql-client
         rustscan
         nikto
         sqlmap
@@ -764,17 +777,17 @@ HARVESTER_EOF
     $SUDO apt-get install -y python3-pip python3-venv python3-dev pipx || true
 
     # Ensure pipx is available and configured
-    if ! run_as_invoking_user bash -lc "command -v pipx >/dev/null 2>&1"; then
+    if ! run_as_invoking_user_shell "command -v pipx >/dev/null 2>&1"; then
         info "Installing pipx..."
         $SUDO apt-get install -y pipx || run_as_invoking_user python3 -m pip install --user pipx || true
     fi
-    if run_as_invoking_user bash -lc "command -v pipx >/dev/null 2>&1"; then
-        run_as_invoking_user pipx ensurepath 2>/dev/null || true
+    if run_as_invoking_user_shell "command -v pipx >/dev/null 2>&1"; then
+        run_as_invoking_user_shell "pipx ensurepath >/dev/null 2>&1 || true" || true
         export PATH="$PATH:${browser_home}/.local/bin:/root/.local/bin"
     fi
 
-    if run_as_invoking_user bash -lc "command -v pipx >/dev/null 2>&1"; then
-        if run_as_invoking_user pipx install --force browser-use; then
+    if run_as_invoking_user_shell "command -v pipx >/dev/null 2>&1"; then
+        if run_as_invoking_user_shell "pipx install --force browser-use"; then
             success "browser-use installed/updated via pipx."
         else
             warn "pipx install --force browser-use failed. Trying pip3 fallback..."
@@ -786,10 +799,10 @@ HARVESTER_EOF
     fi
 
     # browser-use runtime bootstrap expects uv/uvx.
-    if ! run_as_invoking_user bash -lc "command -v uvx >/dev/null 2>&1"; then
+    if ! run_as_invoking_user_shell "command -v uvx >/dev/null 2>&1"; then
         info "Installing uv/uvx (required by browser-use install)..."
-        if run_as_invoking_user bash -lc "command -v pipx >/dev/null 2>&1"; then
-            if run_as_invoking_user pipx install --force uv; then
+        if run_as_invoking_user_shell "command -v pipx >/dev/null 2>&1"; then
+            if run_as_invoking_user_shell "pipx install --force uv"; then
                 success "uv/uvx installed via pipx."
             else
                 warn "pipx install --force uv failed. Trying pip3 fallback..."
@@ -801,21 +814,21 @@ HARVESTER_EOF
     fi
 
     # Install browser runtime assets for browser-use (best-effort; can be heavy).
-    if run_as_invoking_user bash -lc "command -v browser-use >/dev/null 2>&1"; then
+    if run_as_invoking_user_shell "command -v browser-use >/dev/null 2>&1"; then
         info "Installing browser-use runtime assets (this may take a while)..."
-        if ! run_as_invoking_user browser-use install >/tmp/supabash-browser-use-install.log 2>&1; then
+        if ! run_as_invoking_user_shell "browser-use install" >/tmp/supabash-browser-use-install.log 2>&1; then
             warn "browser-use runtime install failed. See /tmp/supabash-browser-use-install.log"
             warn "Run manually: browser-use install"
         fi
-    elif run_as_invoking_user bash -lc "command -v browser_use >/dev/null 2>&1"; then
+    elif run_as_invoking_user_shell "command -v browser_use >/dev/null 2>&1"; then
         info "Installing browser_use runtime assets (this may take a while)..."
-        if ! run_as_invoking_user browser_use install >/tmp/supabash-browser-use-install.log 2>&1; then
+        if ! run_as_invoking_user_shell "browser_use install" >/tmp/supabash-browser-use-install.log 2>&1; then
             warn "browser_use runtime install failed. See /tmp/supabash-browser-use-install.log"
             warn "Run manually: browser_use install"
         fi
     fi
 
-    if run_as_invoking_user bash -lc "command -v browser-use >/dev/null 2>&1 || command -v browser_use >/dev/null 2>&1"; then
+    if run_as_invoking_user_shell "command -v browser-use >/dev/null 2>&1 || command -v browser_use >/dev/null 2>&1"; then
         success "browser-use CLI available."
     else
         warn "browser-use install attempted, but command was not found on PATH."

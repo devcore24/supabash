@@ -756,6 +756,44 @@ class TestAuditOrchestrator(unittest.TestCase):
             any(isinstance(c, dict) and str(c.get("name") or "") == "postgres_auth_probe" for c in checks)
         )
 
+    def test_readiness_probe_uses_pg_isready_fallback_when_psql_missing(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd[:2] == ["ss", "-lnt"]:
+                return SimpleNamespace(returncode=0, stdout="State Recv-Q Send-Q Local Address:Port Peer Address:Port\n", stderr="")
+            if cmd and cmd[0] == "psql":
+                raise FileNotFoundError("psql")
+            if cmd and cmd[0] == "pg_isready":
+                return SimpleNamespace(returncode=0, stdout="localhost:5432 - accepting connections\n", stderr="")
+            raise FileNotFoundError(cmd[0] if cmd else "")
+
+        with patch("supabash.audit.subprocess.run", side_effect=fake_run):
+            out = orch._run_readiness_probe("localhost", [], [5432])
+
+        findings = out.get("findings") if isinstance(out, dict) else []
+        checks = out.get("checks") if isinstance(out, dict) else []
+        self.assertFalse(
+            any(isinstance(f, dict) and str(f.get("type") or "") == "postgres_auth_exposure" for f in findings)
+        )
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and str(c.get("name") or "") == "postgres_auth_probe"
+                and str(c.get("error") or "") == "psql not installed"
+                for c in checks
+            )
+        )
+        self.assertTrue(
+            any(
+                isinstance(c, dict)
+                and str(c.get("name") or "") == "postgres_ready_probe"
+                and bool(c.get("success")) is True
+                and str(c.get("state") or "") == "accepting_connections"
+                for c in checks
+            )
+        )
+
     def test_readiness_probe_escalates_object_store_high_on_verified_listing_marker(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
 

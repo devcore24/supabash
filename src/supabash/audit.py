@@ -4062,6 +4062,58 @@ class AuditOrchestrator:
                         "error": "psql not installed",
                     }
                 )
+                pg_ready_cmd = [
+                    "pg_isready",
+                    "-h",
+                    scan_host,
+                    "-p",
+                    "5432",
+                    "-t",
+                    "3",
+                ]
+                commands.append(" ".join(pg_ready_cmd))
+                try:
+                    pg_ready_out = subprocess.run(
+                        pg_ready_cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=6,
+                        check=False,
+                        env=pg_env,
+                    )
+                    ready_output = f"{pg_ready_out.stdout or ''}\n{pg_ready_out.stderr or ''}".strip().lower()
+                    ready_state = {
+                        0: "accepting_connections",
+                        1: "rejecting_connections",
+                        2: "no_response",
+                    }.get(pg_ready_out.returncode, "invalid_attempt")
+                    checks.append(
+                        {
+                            "name": "postgres_ready_probe",
+                            "success": bool(pg_ready_out.returncode == 0),
+                            "state": ready_state,
+                            "output": ready_output[:300],
+                            "note": "PostgreSQL service responsiveness verified without auth posture validation because psql is unavailable.",
+                        }
+                    )
+                except FileNotFoundError:
+                    checks.append(
+                        {
+                            "name": "postgres_ready_probe",
+                            "success": False,
+                            "error": "pg_isready not installed",
+                            "note": "PostgreSQL service was detected, but no local PostgreSQL client utilities are available for deeper posture checks.",
+                        }
+                    )
+                except Exception as e:
+                    checks.append(
+                        {
+                            "name": "postgres_ready_probe",
+                            "success": False,
+                            "error": str(e),
+                            "note": "PostgreSQL service was detected, but readiness fallback did not complete.",
+                        }
+                    )
             except Exception as e:
                 checks.append(
                     {

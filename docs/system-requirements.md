@@ -11,6 +11,7 @@ sudo apt-get install -y \\
   python3 python3-pip python3-venv \\
   git curl wget jq unzip \\
   nmap masscan nikto sqlmap hydra gobuster ffuf whatweb \\
+  postgresql-client \\
   sslscan dnsenum
 ```
 
@@ -95,6 +96,7 @@ Prefer environment variables over storing a live Browser-Use key in a repo-track
 - `tools.nuclei.normal_mode_broad_rate_limit` is optional and affects only the broad multi-target baseline pass in `normal` mode.
 - Set `tools.nuclei.normal_mode_broad_rate_limit: 0` to fully honor `tools.nuclei.rate_limit`.
 - SQLMap target harvesting is conservative: Supabash strips evidence suffixes from harvested URLs and blocks object-store listing-style query params such as `list-type`, `prefix`, and `delimiter` from becoming automatic SQLMap targets.
+- `postgresql-client` provides `psql` and `pg_isready`, which Supabash uses for safe PostgreSQL readiness/auth-posture checks. If `psql` is missing, Supabash falls back to `pg_isready` and records a degraded posture signal instead of claiming auth was verified.
 
 ## Python dependencies
 ```bash
