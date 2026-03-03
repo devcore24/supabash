@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import shlex
 import shutil
@@ -12,6 +13,101 @@ from supabash.runner import CommandResult, CommandRunner
 from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
+
+
+_BROWSER_USE_LIBRARY_RUNNER = r"""
+import asyncio
+import json
+import logging
+import sys
+
+task = sys.argv[1]
+max_steps = int(sys.argv[2])
+headless = sys.argv[3] == "1"
+model = sys.argv[4] or None
+profile = sys.argv[5] or None
+
+for name in ("browser_use", "Agent", "BrowserSession", "service", "tools"):
+    logging.getLogger(name).setLevel(logging.ERROR)
+logging.getLogger().setLevel(logging.ERROR)
+
+
+async def main():
+    browser = None
+    try:
+        from browser_use import Agent, Browser, ChatBrowserUse
+
+        browser_kwargs = {"headless": headless}
+        if profile:
+            browser_kwargs["profile_directory"] = profile
+        browser = Browser(**browser_kwargs)
+        llm = ChatBrowserUse(model=model) if model else ChatBrowserUse()
+        agent = Agent(task=task, llm=llm, browser=browser)
+        result = await agent.run(max_steps=max_steps)
+
+        urls = []
+        if hasattr(result, "urls"):
+            try:
+                maybe_urls = result.urls()
+                if isinstance(maybe_urls, (list, tuple)):
+                    urls = [str(x) for x in maybe_urls if str(x or "").strip()]
+            except Exception:
+                urls = []
+
+        final_result = None
+        if hasattr(result, "final_result"):
+            try:
+                final_result = result.final_result()
+            except Exception:
+                final_result = None
+
+        done = None
+        if hasattr(result, "is_done"):
+            try:
+                done = bool(result.is_done())
+            except Exception:
+                done = None
+
+        steps = None
+        try:
+            steps = len(result)
+        except Exception:
+            steps = None
+
+        current_url = urls[-1] if urls else None
+        print(
+            json.dumps(
+                {
+                    "success": True,
+                    "data": {
+                        "success": True,
+                        "task": task,
+                        "steps": steps,
+                        "done": done,
+                        "result": str(final_result) if final_result is not None else None,
+                        "urls": urls[:200],
+                        "current_url": current_url,
+                        "url": current_url,
+                    },
+                }
+            )
+        )
+    except Exception as exc:
+        print(json.dumps({"success": True, "data": {"success": False, "error": str(exc), "task": task}}))
+    finally:
+        if browser is not None:
+            stop = getattr(browser, "stop", None)
+            if stop is not None:
+                try:
+                    maybe = stop()
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                except Exception:
+                    pass
+
+
+asyncio.run(main())
+"""
 
 
 class BrowserUseScanner:
@@ -31,6 +127,17 @@ class BrowserUseScanner:
         if isinstance(command_override, str) and command_override.strip():
             return True
         return bool(self._resolve_cli_binary())
+
+    def prefers_library_run(
+        self,
+        *,
+        command_override: Optional[str] = None,
+        explicit_session: Optional[str] = None,
+    ) -> bool:
+        return self._should_use_library_run(
+            session=explicit_session,
+            command_override=command_override,
+        )
 
     def scan(
         self,
@@ -65,7 +172,17 @@ class BrowserUseScanner:
                 "authentication weaknesses, and sensitive data leakage."
             )
 
-        command_list = self._build_command(
+        use_library_run = self._should_use_library_run(
+            session=session,
+            command_override=command,
+        )
+        command_list = self._build_library_command(
+            task=task_text,
+            max_steps=steps,
+            headless=bool(headless),
+            model=model,
+            profile=profile,
+        ) if use_library_run else self._build_command(
             target=target_url,
             task=task_text,
             max_steps=steps,
@@ -78,7 +195,10 @@ class BrowserUseScanner:
         if not command_list:
             return {
                 "success": False,
-                "error": "browser-use CLI not found (install browser-use or configure tools.browser_use.command).",
+                "error": (
+                    "browser-use runtime not found "
+                    "(install browser-use or configure tools.browser_use.command)."
+                ),
                 "command": "",
             }
         if isinstance(arguments, str) and arguments.strip():
@@ -89,14 +209,19 @@ class BrowserUseScanner:
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
 
+        def _merged_output(cmd_result: CommandResult) -> str:
+            return "\n".join(
+                x for x in [cmd_result.stdout, cmd_result.stderr] if isinstance(x, str) and x.strip()
+            )
+
         logger.info(f"Starting browser_use scan on {target_url}")
         result: CommandResult = self.runner.run(command_list, **kwargs)
-        combined_output = "\n".join(x for x in [result.stdout, result.stderr] if isinstance(x, str) and x.strip())
+        combined_output = _merged_output(result)
         payload = self._parse_json_payload(combined_output)
+        session_retry_attempted = False
 
         if not result.success:
             err = result.stderr or result.stdout or f"Command failed (RC={result.return_code}): {result.command}"
-            session_retry_attempted = False
             if (
                 isinstance(session, str)
                 and session.strip()
@@ -120,9 +245,7 @@ class BrowserUseScanner:
                     session_retry_attempted = True
                     if retry_result.success:
                         result = retry_result
-                        combined_output = "\n".join(
-                            x for x in [retry_result.stdout, retry_result.stderr] if isinstance(x, str) and x.strip()
-                        )
+                        combined_output = _merged_output(retry_result)
                         payload = self._parse_json_payload(combined_output)
                     else:
                         retry_err = (
@@ -131,9 +254,7 @@ class BrowserUseScanner:
                             or f"Command failed (RC={retry_result.return_code}): {retry_result.command}"
                         )
                         err = f"{err}\nRetry without session failed: {retry_err}"
-                        combined_output = "\n".join(
-                            x for x in [retry_result.stdout, retry_result.stderr] if isinstance(x, str) and x.strip()
-                        )
+                        combined_output = _merged_output(retry_result)
                         result = retry_result
 
             if not result.success:
@@ -193,13 +314,109 @@ class BrowserUseScanner:
 
         status = self._extract_cli_status(combined_output, payload=payload)
         if isinstance(status, dict) and status.get("ok") is False:
-            return {
-                "success": False,
-                "error": str(status.get("error") or "browser-use reported unsuccessful run"),
-                "canceled": False,
-                "raw_output": combined_output,
-                "command": result.command,
-            }
+            status_error = str(status.get("error") or "browser-use reported unsuccessful run").strip()
+            can_retry_without_session = (
+                isinstance(session, str)
+                and session.strip()
+                and not session_retry_attempted
+                and not (isinstance(command, str) and command.strip())
+                and self._is_session_runtime_compatibility_error(status_error)
+            )
+            if can_retry_without_session:
+                retry_cmd = self._build_command(
+                    target=target_url,
+                    task=task_text,
+                    max_steps=steps,
+                    headless=bool(headless),
+                    model=model,
+                    session=None,
+                    profile=profile,
+                    command_override=command,
+                )
+                if retry_cmd:
+                    if isinstance(arguments, str) and arguments.strip():
+                        retry_cmd.extend(shlex.split(arguments))
+                    retry_result = self.runner.run(retry_cmd, **kwargs)
+                    session_retry_attempted = True
+                    if retry_result.success:
+                        result = retry_result
+                        combined_output = _merged_output(retry_result)
+                        payload = self._parse_json_payload(combined_output)
+                        status = self._extract_cli_status(combined_output, payload=payload)
+                        if not (isinstance(status, dict) and status.get("ok") is False):
+                            # Recovery succeeded; continue with normal parsing below.
+                            status_error = ""
+                    else:
+                        retry_err = (
+                            retry_result.stderr
+                            or retry_result.stdout
+                            or f"Command failed (RC={retry_result.return_code}): {retry_result.command}"
+                        )
+                        status_error = f"{status_error}\nRetry without session failed: {retry_err}"
+                        combined_output = _merged_output(retry_result)
+                        payload = self._parse_json_payload(combined_output)
+                        result = retry_result
+
+            status = self._extract_cli_status(combined_output, payload=payload)
+            if isinstance(status, dict) and status.get("ok") is False:
+                status_error = str(status.get("error") or status_error or "browser-use reported unsuccessful run").strip()
+                fallback: Optional[Dict[str, Any]] = None
+                if (
+                    bool(allow_deterministic_fallback)
+                    and not (isinstance(command, str) and command.strip())
+                    and self._is_session_runtime_compatibility_error(status_error)
+                ):
+                    fallback_session = None if session_retry_attempted else session
+                    fallback = self._run_deterministic_probe(
+                        target_url=target_url,
+                        objective_text=task_text,
+                        session=fallback_session,
+                        profile=profile,
+                        headless=bool(headless),
+                        max_paths=int(max(1, min(int(deterministic_max_paths or 8), 24))),
+                        cancel_event=cancel_event,
+                        timeout=timeout,
+                    )
+                if isinstance(fallback, dict) and bool(fallback.get("success")):
+                    fallback_urls = fallback.get("urls") if isinstance(fallback.get("urls"), list) else []
+                    fallback_findings = fallback.get("findings") if isinstance(fallback.get("findings"), list) else []
+                    fallback_observation = (
+                        fallback.get("observation") if isinstance(fallback.get("observation"), dict) else {}
+                    )
+                    observation = {
+                        "done": False,
+                        "steps": 0,
+                        "data_success": False,
+                        "result": "",
+                        "urls_count": len(fallback_urls),
+                        "findings_count": len(fallback_findings),
+                        "evidence_score": int(fallback_observation.get("evidence_score") or 0),
+                        "fallback_mode": "deterministic_probe_on_run_failure",
+                        "fallback_steps": int(fallback_observation.get("steps") or 0),
+                        "fallback_urls_count": len(fallback_urls),
+                        "fallback_findings_count": len(fallback_findings),
+                        "focus_urls_count": int(fallback_observation.get("focus_urls_count") or 0),
+                        "focus_hits": int(fallback_observation.get("focus_hits") or 0),
+                        "fallback_confidence": str(fallback_observation.get("confidence") or "low"),
+                    }
+                    return {
+                        "success": True,
+                        "target": target_url,
+                        "task": task_text,
+                        "urls": fallback_urls,
+                        "findings": fallback_findings,
+                        "observation": observation,
+                        "completed": False,
+                        "raw_output": combined_output,
+                        "command": result.command,
+                    }
+                return {
+                    "success": False,
+                    "error": status_error,
+                    "canceled": False,
+                    "raw_output": combined_output,
+                    "command": result.command,
+                }
 
         parsed = self._parse_output(combined_output, target_url, payload=payload)
         completion = self._extract_completion(payload, parsed)
@@ -301,12 +518,90 @@ class BrowserUseScanner:
         timeout_tokens = ("timed out", "timeouterror", "socket", "recv")
         return any(token in text for token in timeout_tokens)
 
+    def _is_session_runtime_compatibility_error(self, error_text: Any) -> bool:
+        text = str(error_text or "").strip().lower()
+        if not text:
+            return False
+        if "chatbrowseruse" in text and "await" in text:
+            return True
+        compatibility_tokens = (
+            "can't be used in 'await' expression",
+            'can\'t be used in "await" expression',
+            "await expression",
+            "object chatbrowseruse",
+        )
+        return any(token in text for token in compatibility_tokens)
+
+    def _should_use_library_run(
+        self,
+        *,
+        session: Optional[str],
+        command_override: Optional[str],
+    ) -> bool:
+        if isinstance(command_override, str) and command_override.strip():
+            return False
+        if isinstance(session, str) and session.strip():
+            return False
+        return bool(self._resolve_python_binary())
+
     def _resolve_cli_binary(self) -> Optional[str]:
         for candidate in ("browser-use", "browser_use"):
             found = shutil.which(candidate)
             if found:
                 return found
         return None
+
+    def _resolve_python_binary(self) -> Optional[str]:
+        binary = self._resolve_cli_binary()
+        if not binary:
+            return None
+        try:
+            real_binary = os.path.realpath(binary)
+        except Exception:
+            real_binary = binary
+        if not os.path.isfile(real_binary):
+            return None
+
+        try:
+            with open(real_binary, "r", encoding="utf-8", errors="ignore") as handle:
+                first_line = str(handle.readline() or "").strip()
+        except Exception:
+            first_line = ""
+
+        if first_line.startswith("#!"):
+            shebang = first_line[2:].strip().split()[0].strip()
+            if shebang and os.path.isfile(shebang) and os.access(shebang, os.X_OK):
+                return shebang
+
+        bin_dir = os.path.dirname(real_binary)
+        for candidate in ("python", "python3"):
+            interpreter = os.path.join(bin_dir, candidate)
+            if os.path.isfile(interpreter) and os.access(interpreter, os.X_OK):
+                return interpreter
+        return None
+
+    def _build_library_command(
+        self,
+        *,
+        task: str,
+        max_steps: int,
+        headless: bool,
+        model: Optional[str],
+        profile: Optional[str],
+    ) -> Optional[List[str]]:
+        python_binary = self._resolve_python_binary()
+        if not python_binary:
+            return None
+        return [
+            python_binary,
+            "-c",
+            _BROWSER_USE_LIBRARY_RUNNER,
+            str(task or "").strip(),
+            str(int(max_steps)),
+            "1" if headless else "0",
+            str(model or "").strip(),
+            str(profile or "").strip(),
+        ]
 
     def _build_command(
         self,
@@ -431,6 +726,19 @@ class BrowserUseScanner:
         if isinstance(payload, dict) and len(out) < 200:
             data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
             if isinstance(data, dict):
+                url_list = data.get("urls")
+                if isinstance(url_list, list):
+                    for raw in url_list:
+                        candidate = self._sanitize_extracted_url(
+                            str(raw or "").strip(),
+                            parsed_base=parsed_target,
+                        )
+                        if not candidate or candidate in seen:
+                            continue
+                        seen.add(candidate)
+                        out.append(candidate)
+                        if len(out) >= 200:
+                            break
                 current_url = self._sanitize_extracted_url(
                     str(data.get("url") or data.get("current_url") or "").strip(),
                     parsed_base=parsed_target,

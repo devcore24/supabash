@@ -369,6 +369,9 @@ class FakeBrowserUseScanner:
     def is_available(self, command_override=None):
         return True
 
+    def prefers_library_run(self, command_override=None, explicit_session=None):
+        return not str(command_override or "").strip() and not str(explicit_session or "").strip()
+
     def scan(self, target, **kwargs):
         self.calls.append({"target": str(target), "kwargs": dict(kwargs)})
         return {
@@ -384,6 +387,11 @@ class FakeBrowserUseScanner:
                 }
             ],
         }
+
+
+class FakeBrowserUseCliOnlyScanner(FakeBrowserUseScanner):
+    def prefers_library_run(self, command_override=None, explicit_session=None):
+        return False
 
 
 class FakeBrowserUseEnvCaptureScanner(FakeBrowserUseScanner):
@@ -3530,7 +3538,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         ]
         self.assertTrue(actions)
 
-    def test_agentic_browser_use_auto_session_when_not_configured(self):
+    def test_agentic_browser_use_skips_auto_session_when_library_path_available(self):
         scanners = _build_scanners()
         browser = FakeBrowserUseScanner()
         scanners["browser_use"] = browser
@@ -3540,6 +3548,31 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
         )
         output = artifact_path("ai_audit_browser_use_auto_session.json")
+        orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=2,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        self.assertTrue(browser.calls)
+        call = browser.calls[0]
+        kwargs = call.get("kwargs", {})
+        self.assertIsNone(kwargs.get("session"))
+
+    def test_agentic_browser_use_auto_session_when_library_path_unavailable(self):
+        scanners = _build_scanners()
+        browser = FakeBrowserUseCliOnlyScanner()
+        scanners["browser_use"] = browser
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=FakeLLMSelectBrowserUse())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        output = artifact_path("ai_audit_browser_use_auto_session_cli_only.json")
         orchestrator.run(
             "localhost",
             output,

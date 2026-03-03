@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import unittest
 from typing import List
 
@@ -96,6 +97,60 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertIn("audit-session", cmd)
         self.assertIn("--profile", cmd)
         self.assertIn("team-profile", cmd)
+
+    def test_scan_prefers_library_runner_when_python_api_is_available(self):
+        library_json = (
+            '{"success":true,"data":{"success":true,"task":"Inspect target",'
+            '"steps":2,"done":true,"result":"Visited http://example.test/admin",'
+            '"urls":["http://example.test/","http://example.test/admin"]}}'
+        )
+        result = CommandResult(
+            command="/opt/browser-use/python -c <script>",
+            return_code=0,
+            stdout=library_json,
+            stderr="",
+            success=True,
+        )
+        runner = _FakeRunner(result)
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
+
+        out = scanner.scan("http://example.test", task="Inspect target", max_steps=2)
+
+        self.assertTrue(out.get("success"))
+        self.assertEqual(runner.last_command[0], "/opt/browser-use/python")
+        self.assertIn("http://example.test/admin", out.get("urls") or [])
+        obs = out.get("observation") if isinstance(out, dict) else {}
+        self.assertEqual(obs.get("done"), True)
+        self.assertEqual(obs.get("steps"), 2)
+
+    def test_scan_uses_cli_runner_when_session_requested_even_if_python_api_is_available(self):
+        cli_json = (
+            '{"id":"x-lib-1","success":true,"data":{"success":true,'
+            '"task":"Inspect target","steps":2,"done":true,'
+            '"result":"Visited http://example.test/admin"}}'
+        )
+        result = CommandResult(
+            command="browser-use --json --session audit-session run task --max-steps 2",
+            return_code=0,
+            stdout=cli_json,
+            stderr="",
+            success=True,
+        )
+        runner = _FakeRunner(result)
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+
+        out = scanner.scan(
+            "http://example.test",
+            task="Inspect target",
+            max_steps=2,
+            session="audit-session",
+        )
+
+        self.assertTrue(out.get("success"))
+        self.assertEqual(runner.last_command[:4], ["/usr/bin/browser-use", "--json", "--session", "audit-session"])
 
     def test_scan_marks_cli_level_failure_when_return_code_is_zero(self):
         cli_json = (
@@ -443,6 +498,134 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertIn("audit-session", first_call)
         self.assertNotIn("--session", second_call)
 
+    def test_scan_retries_without_session_after_recoverable_cli_payload_failure(self):
+        run_failed = CommandResult(
+            command="browser-use --json --session audit-session run task --max-steps 2",
+            return_code=0,
+            stdout=(
+                '{"id":"x7","success":true,"data":{"success":false,'
+                '"error":"object ChatBrowserUse can\'t be used in \'await\' expression"}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        retry_ok = CommandResult(
+            command="browser-use --json run task --max-steps 2",
+            return_code=0,
+            stdout=(
+                '{"id":"x8","success":true,"data":{"success":true,'
+                '"task":"Inspect target","steps":2,"done":true,'
+                '"result":"Visited http://example.test/admin"}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        runner = _SequenceRunner([run_failed, retry_ok])
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+
+        out = scanner.scan(
+            "http://example.test",
+            task="Inspect target",
+            max_steps=2,
+            session="audit-session",
+        )
+
+        self.assertTrue(out.get("success"))
+        self.assertEqual(len(runner.calls), 2)
+        first_call = runner.calls[0] if runner.calls else []
+        second_call = runner.calls[1] if len(runner.calls) > 1 else []
+        self.assertIn("--session", first_call)
+        self.assertIn("audit-session", first_call)
+        self.assertNotIn("--session", second_call)
+
+    def test_scan_uses_deterministic_fallback_after_recoverable_cli_payload_failure(self):
+        run_failed = CommandResult(
+            command="browser-use --json --session audit-session run task --max-steps 2",
+            return_code=0,
+            stdout=(
+                '{"id":"x9","success":true,"data":{"success":false,'
+                '"error":"object ChatBrowserUse can\'t be used in \'await\' expression"}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        retry_failed = CommandResult(
+            command="browser-use --json run task --max-steps 2",
+            return_code=0,
+            stdout=(
+                '{"id":"x10","success":true,"data":{"success":false,'
+                '"error":"object ChatBrowserUse can\'t be used in \'await\' expression"}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        open_ok = CommandResult(
+            command="browser-use --json open http://example.test",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        state_ok = CommandResult(
+            command="browser-use --json state",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        title_root = CommandResult(
+            command="browser-use --json get title",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"title":"WebGoat"}}',
+            stderr="",
+            success=True,
+        )
+        html_root = CommandResult(
+            command="browser-use --json get html",
+            return_code=0,
+            stdout=(
+                '{"success":true,"data":{"success":true,'
+                '"html":"<html><body><form action=\\"/login\\"></form>'
+                'javax.servlet.ServletException</body></html>"}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        open_login = CommandResult(
+            command="browser-use --json open http://example.test/login",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true}}',
+            stderr="",
+            success=True,
+        )
+        title_login = CommandResult(
+            command="browser-use --json get title",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"title":"Login"}}',
+            stderr="",
+            success=True,
+        )
+        runner = _SequenceRunner(
+            [run_failed, retry_failed, open_ok, state_ok, title_root, html_root, open_login, title_login]
+        )
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+
+        out = scanner.scan(
+            "http://example.test",
+            task="Inspect target",
+            max_steps=2,
+            session="audit-session",
+            deterministic_max_paths=1,
+        )
+
+        self.assertTrue(out.get("success"))
+        self.assertEqual(out.get("completed"), False)
+        obs = out.get("observation") if isinstance(out, dict) else {}
+        self.assertEqual(obs.get("fallback_mode"), "deterministic_probe_on_run_failure")
+        self.assertGreaterEqual(int(obs.get("fallback_findings_count") or 0), 1)
+
     def test_deterministic_probe_does_not_seed_generic_login_paths_for_focused_api_target(self):
         scanner = BrowserUseScanner()
         urls = scanner._derive_probe_urls(
@@ -581,6 +764,20 @@ class BrowserUseScannerLiveIntegrationTests(unittest.TestCase):
             allow_deterministic_fallback=False,
         )
 
+    def _run_live_cli(self):
+        task = (
+            f"Open {self.target}. Capture the page title and note whether it is reachable. "
+            "Do not log in. Stop after the first useful observation."
+        )
+        env = os.environ.copy()
+        return subprocess.run(
+            ["browser-use", "--json", "run", task, "--max-steps", "1"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+
     def test_live_browser_use_smoke_without_session(self):
         out = self._run_live_scan(session=None)
         self.assertTrue(
@@ -591,6 +788,30 @@ class BrowserUseScannerLiveIntegrationTests(unittest.TestCase):
             ),
         )
         self.assertIn("observation", out)
+
+    def test_live_browser_use_cli_api_key_smoke(self):
+        result = self._run_live_cli()
+        merged = "\n".join(
+            chunk for chunk in [result.stdout, result.stderr] if isinstance(chunk, str) and chunk.strip()
+        )
+        payload = self.scanner._parse_json_payload(merged)
+        data = payload.get("data") if isinstance(payload, dict) and isinstance(payload.get("data"), dict) else {}
+        error_text = str(data.get("error") or payload.get("error") or merged or "").strip()
+        self.assertNotIn("API key required", error_text)
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"browser-use CLI returned non-zero RC={result.returncode}. merged={merged[:1600]!r}",
+        )
+        self.assertIsInstance(payload, dict, f"browser-use CLI did not emit JSON. merged={merged[:1600]!r}")
+        self.assertTrue(
+            bool(payload.get("success")),
+            f"browser-use CLI top-level failure. merged={merged[:1600]!r}",
+        )
+        self.assertTrue(
+            bool(data.get("success")),
+            f"browser-use CLI data.success=false. error={error_text!r} merged={merged[:1600]!r}",
+        )
 
     def test_live_browser_use_smoke_with_session(self):
         out = self._run_live_scan(session=self.session_name)

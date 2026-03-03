@@ -2137,7 +2137,26 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                     str(args.get("browser_session") or browser_cfg_local.get("session") or "").strip() or None
                                 )
                                 browser_auto_session = _as_bool(browser_cfg_local.get("auto_session"), True)
-                                if tool == "browser_use" and not browser_session and browser_auto_session:
+                                browser_prefers_library_run = False
+                                if tool == "browser_use":
+                                    browser_scanner = self.scanners.get("browser_use")
+                                    prefers_library = getattr(browser_scanner, "prefers_library_run", None)
+                                    if callable(prefers_library):
+                                        try:
+                                            browser_prefers_library_run = bool(
+                                                prefers_library(
+                                                    command_override=browser_command,
+                                                    explicit_session=browser_session,
+                                                )
+                                            )
+                                        except Exception:
+                                            browser_prefers_library_run = False
+                                if (
+                                    tool == "browser_use"
+                                    and not browser_session
+                                    and browser_auto_session
+                                    and not browser_prefers_library_run
+                                ):
                                     browser_session = _auto_browser_session_name(target)
                                 browser_profile = (
                                     str(args.get("browser_profile") or browser_cfg_local.get("profile") or "").strip() or None
