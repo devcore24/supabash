@@ -14,6 +14,14 @@ from supabash.tool_settings import resolve_timeout_seconds
 
 logger = setup_logger(__name__)
 
+_BROWSER_USE_FINDING_SEVERITY_RANK = {
+    "CRITICAL": 5,
+    "HIGH": 4,
+    "MEDIUM": 3,
+    "LOW": 2,
+    "INFO": 1,
+}
+
 
 _BROWSER_USE_LIBRARY_RUNNER = r"""
 import asyncio
@@ -203,6 +211,17 @@ class BrowserUseScanner:
             }
         if isinstance(arguments, str) and arguments.strip():
             command_list.extend(shlex.split(arguments))
+        display_command = self._describe_command(
+            command_list,
+            target=target_url,
+            task=task_text,
+            max_steps=steps,
+            headless=bool(headless),
+            model=model,
+            session=session,
+            profile=profile,
+            used_library=use_library_run,
+        )
 
         timeout = resolve_timeout_seconds(timeout_seconds, default=900)
         kwargs = {"timeout": timeout}
@@ -303,6 +322,7 @@ class BrowserUseScanner:
                         "completed": False,
                         "raw_output": combined_output,
                         "command": result.command,
+                        "display_command": display_command,
                     }
                 return {
                     "success": False,
@@ -310,6 +330,7 @@ class BrowserUseScanner:
                     "canceled": bool(getattr(result, "canceled", False)),
                     "raw_output": combined_output,
                     "command": result.command,
+                    "display_command": display_command,
                 }
 
         status = self._extract_cli_status(combined_output, payload=payload)
@@ -409,6 +430,7 @@ class BrowserUseScanner:
                         "completed": False,
                         "raw_output": combined_output,
                         "command": result.command,
+                        "display_command": display_command,
                     }
                 return {
                     "success": False,
@@ -416,6 +438,7 @@ class BrowserUseScanner:
                     "canceled": False,
                     "raw_output": combined_output,
                     "command": result.command,
+                    "display_command": display_command,
                 }
 
         parsed = self._parse_output(combined_output, target_url, payload=payload)
@@ -487,6 +510,7 @@ class BrowserUseScanner:
                     "completed": False,
                     "raw_output": combined_output,
                     "command": result.command,
+                    "display_command": display_command,
                 }
             return {
                 "success": False,
@@ -497,6 +521,7 @@ class BrowserUseScanner:
                 "observation": completion,
                 "raw_output": combined_output,
                 "command": result.command,
+                "display_command": display_command,
             }
 
         return {
@@ -509,6 +534,7 @@ class BrowserUseScanner:
             "completed": bool(completion.get("done")) if completion.get("done") is not None else True,
             "raw_output": combined_output,
             "command": result.command,
+            "display_command": display_command,
         }
 
     def _is_socket_timeout_error(self, error_text: Any) -> bool:
@@ -650,6 +676,58 @@ class BrowserUseScanner:
         command.extend(["run", task, "--max-steps", str(int(max_steps))])
         return command
 
+    def _describe_command(
+        self,
+        command_list: List[str],
+        *,
+        target: str,
+        task: str,
+        max_steps: int,
+        headless: bool,
+        model: Optional[str],
+        session: Optional[str],
+        profile: Optional[str],
+        used_library: bool,
+    ) -> str:
+        parts: List[str] = []
+        if target:
+            parts.append(f"target={target}")
+        parts.append(f"max_steps={int(max_steps)}")
+        parts.append(f"headless={'true' if headless else 'false'}")
+        if model:
+            parts.append(f"model={str(model).strip()}")
+        if profile:
+            parts.append(f"profile={str(profile).strip()}")
+        if session:
+            parts.append(f"session={str(session).strip()}")
+        task_line = re.sub(r"\s+", " ", str(task or "").strip().splitlines()[0]).strip() if str(task or "").strip() else ""
+        if task_line:
+            if len(task_line) > 88:
+                task_line = f"{task_line[:85].rstrip()}..."
+            parts.append(f'task="{task_line}"')
+        if used_library:
+            return f"browser_use.run({', '.join(parts)})"
+
+        tokens = [str(x or "").strip() for x in (command_list or [])]
+        lowered = [x.lower() for x in tokens]
+        if "open" in lowered:
+            try:
+                url = tokens[lowered.index("open") + 1]
+            except Exception:
+                url = target
+            return f"browser_use.open(url={url or target})"
+        if "get" in lowered:
+            try:
+                kind = tokens[lowered.index("get") + 1]
+            except Exception:
+                kind = "unknown"
+            return f"browser_use.get(kind={kind})"
+        if "state" in lowered:
+            return "browser_use.state()"
+        if "close" in lowered:
+            return "browser_use.close(all=true)" if "--all" in lowered else "browser_use.close()"
+        return f"browser_use.run({', '.join(parts)})"
+
     def _parse_output(self, output: str, target: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         text = str(output or "")
         payload_result = self._payload_result_text(payload)
@@ -763,6 +841,10 @@ class BrowserUseScanner:
         return out
 
     def _extract_findings(self, text: str, *, target: str) -> List[Dict[str, Any]]:
+        structured = self._extract_structured_findings(text, target=target)
+        if structured:
+            return structured[:120]
+
         findings: List[Dict[str, Any]] = []
         seen = set()
         try:
@@ -831,6 +913,239 @@ class BrowserUseScanner:
             if len(findings) >= 120:
                 break
         return findings
+
+    def _extract_structured_findings(self, text: str, *, target: str) -> List[Dict[str, Any]]:
+        body = str(text or "").strip()
+        if not body:
+            return []
+
+        findings: List[Dict[str, Any]] = []
+        seen: Set[str] = set()
+        try:
+            parsed_target = urlparse(str(target or "").strip())
+        except Exception:
+            parsed_target = None
+
+        def append_structured(*, severity: str, title: str, evidence: str, confidence: str = "high") -> None:
+            self._append_browser_finding(
+                findings,
+                seen,
+                severity=severity,
+                title=title,
+                evidence=self._sanitize_urls_in_text(str(evidence or "").strip(), parsed_base=parsed_target),
+                confidence=confidence,
+            )
+
+        lines = [str(line or "") for line in body.splitlines()]
+        i = 0
+        while i < len(lines):
+            line = lines[i].rstrip()
+            endpoint_match = re.match(r"^\s*-\s*\*\*Endpoint:\*\*\s*`?([^`]+)`?\s*$", line)
+            if endpoint_match:
+                endpoint = self._sanitize_extracted_url(
+                    endpoint_match.group(1).strip(),
+                    parsed_base=parsed_target,
+                ) or endpoint_match.group(1).strip()
+                status_code: Optional[int] = None
+                observation_parts: List[str] = []
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j].rstrip()
+                    if re.match(r"^\s*-\s*\*\*Endpoint:\*\*", next_line):
+                        break
+                    if re.match(r"^\s*\*\*Conclusion:\*\*", next_line):
+                        break
+                    status_match = re.match(r"^\s*-\s*\*\*Status:\*\*\s*HTTP\s+(\d+)", next_line, flags=re.IGNORECASE)
+                    if status_match:
+                        try:
+                            status_code = int(status_match.group(1))
+                        except Exception:
+                            status_code = None
+                        j += 1
+                        continue
+                    observation_match = re.match(
+                        r"^\s*-\s*\*\*Observations:\*\*\s*(.+)$",
+                        next_line,
+                        flags=re.IGNORECASE,
+                    )
+                    if observation_match:
+                        observation_parts.append(observation_match.group(1).strip())
+                        j += 1
+                        while j < len(lines):
+                            continuation = lines[j].rstrip()
+                            if not continuation.strip():
+                                j += 1
+                                continue
+                            if re.match(r"^\s*-\s*\*\*", continuation) or re.match(r"^\s*\*\*Conclusion:\*\*", continuation):
+                                break
+                            observation_parts.append(continuation.strip())
+                            j += 1
+                        continue
+                    j += 1
+
+                title, severity = self._classify_structured_endpoint_observation(endpoint, observation_parts)
+                status_fragment = f"(HTTP {status_code}) " if status_code is not None else ""
+                evidence = f"{endpoint} {status_fragment}{' '.join(part for part in observation_parts if part).strip()}".strip()
+                append_structured(severity=severity, title=title, evidence=evidence or endpoint)
+                i = j
+                continue
+
+            bullet_match = re.match(r"^\s*-\s*\[([A-Z/]+)\]\s*(.+)$", line)
+            if bullet_match:
+                severity = self._pick_highest_severity(bullet_match.group(1))
+                body_text = bullet_match.group(2).strip()
+                evidence_parts = [line.strip()]
+                j = i + 1
+                while j < len(lines):
+                    continuation = lines[j].rstrip()
+                    if not continuation.strip():
+                        break
+                    if re.match(r"^\s*-\s*\[([A-Z/]+)\]\s*", continuation):
+                        break
+                    if re.match(r"^\s*-\s*\*\*Endpoint:\*\*", continuation):
+                        break
+                    if re.match(r"^\s*\*\*Conclusion:\*\*", continuation):
+                        break
+                    if continuation.startswith("  ") or continuation.startswith("\t"):
+                        evidence_parts.append(continuation.strip())
+                        j += 1
+                        continue
+                    break
+                for finding in self._expand_structured_bullet_finding(body_text, severity, evidence_parts, parsed_target):
+                    append_structured(
+                        severity=str(finding.get("severity") or severity),
+                        title=str(finding.get("title") or body_text),
+                        evidence=str(finding.get("evidence") or " ".join(evidence_parts)),
+                        confidence=str(finding.get("confidence") or "high"),
+                    )
+                i = j
+                continue
+            i += 1
+        return findings
+
+    def _pick_highest_severity(self, label: str) -> str:
+        parts = [str(x or "").strip().upper() for x in str(label or "").split("/") if str(x or "").strip()]
+        if not parts:
+            return "INFO"
+        best = "INFO"
+        best_rank = _BROWSER_USE_FINDING_SEVERITY_RANK.get(best, 1)
+        for part in parts:
+            rank = _BROWSER_USE_FINDING_SEVERITY_RANK.get(part, 1)
+            if rank > best_rank:
+                best = part
+                best_rank = rank
+        return best
+
+    def _normalize_structured_bullet_title(self, title: str, evidence_low: str, severity: str) -> str:
+        raw = str(title or "").strip().rstrip(".")
+        low = raw.lower()
+        if "supabase keys exposed in home page source" in low and "service_role_key" in evidence_low:
+            return "Supabase service role key exposed"
+        if "unauthenticated access to supabase rest api" in low:
+            return "Supabase REST API accessible without authentication"
+        if "unauthenticated access to supabase rpc endpoint" in low:
+            return "Supabase RPC endpoint exposed without authentication"
+        if "unauthenticated execution of" in low and "list_users" in low:
+            return "Supabase RPC 'list_users' callable without authentication"
+        if "potential rls bypass confirmed" in low:
+            return "Supabase RLS may be disabled"
+        if "anonymous s3-compatible bucket listing" in low:
+            return "Anonymous S3-compatible bucket listing accessible"
+        if "unauthenticated metrics endpoint" in low:
+            return "Unauthenticated metrics endpoint accessible"
+        if "pprof debug endpoint" in low:
+            return "Go pprof debug endpoint accessible without authentication"
+        if "config endpoint" in low and "prometheus" in low:
+            return "Prometheus config endpoint accessible without authentication"
+        if "configuration exposure" in low and severity == "HIGH":
+            return "Unauthenticated configuration exposure verified in browser workflow"
+        return raw
+
+    def _expand_structured_bullet_finding(
+        self,
+        body_text: str,
+        severity: str,
+        evidence_parts: List[str],
+        parsed_target,
+    ) -> List[Dict[str, Any]]:
+        title_text, _, detail_text = str(body_text or "").partition(":")
+        title = str(title_text or "").strip().rstrip(".")
+        detail = str(detail_text or "").strip()
+        evidence = " ".join(str(x or "").strip() for x in evidence_parts if str(x or "").strip())
+        evidence = self._sanitize_urls_in_text(evidence, parsed_base=parsed_target)
+        evidence_low = evidence.lower()
+
+        findings: List[Dict[str, Any]] = []
+        if "supabase keys exposed in home page source" in title.lower():
+            if "service_role_key" in evidence_low:
+                findings.append(
+                    {
+                        "severity": "CRITICAL",
+                        "title": "Supabase service role key exposed",
+                        "evidence": evidence,
+                        "confidence": "high",
+                    }
+                )
+            if "anon_key" in evidence_low:
+                findings.append(
+                    {
+                        "severity": "LOW",
+                        "title": "Supabase anon key exposed in client content",
+                        "evidence": evidence,
+                        "confidence": "high",
+                    }
+                )
+            if findings:
+                return findings
+
+        normalized_title = self._normalize_structured_bullet_title(title or body_text, evidence_low, severity)
+        normalized_evidence = evidence
+        if detail:
+            normalized_evidence = self._sanitize_urls_in_text(
+                f"{normalized_title}: {detail}",
+                parsed_base=parsed_target,
+            )
+        return [
+            {
+                "severity": severity,
+                "title": normalized_title,
+                "evidence": normalized_evidence,
+                "confidence": "high" if severity in {"CRITICAL", "HIGH"} else "medium",
+            }
+        ]
+
+    def _classify_structured_endpoint_observation(
+        self,
+        endpoint: str,
+        observation_parts: List[str],
+    ) -> tuple[str, str]:
+        low = " ".join(str(x or "").lower() for x in observation_parts)
+        try:
+            parsed = urlparse(str(endpoint or "").strip())
+        except Exception:
+            parsed = None
+        path = str(parsed.path or "/").lower() if parsed is not None else ""
+        if "/api/v1/status/config" in path:
+            return "Prometheus config endpoint accessible without authentication", "HIGH"
+        if "/api/v1/status/flags" in path:
+            return "Prometheus flags endpoint accessible without authentication", "MEDIUM"
+        if "/api/v1/targets" in path:
+            return "Prometheus targets endpoint accessible without authentication", "MEDIUM"
+        if "/api/v1/status/runtimeinfo" in path:
+            return "Prometheus runtimeinfo endpoint accessible without authentication", "MEDIUM"
+        if path.endswith("/metrics"):
+            return "Unauthenticated metrics endpoint accessible", "MEDIUM"
+        if "/rest/v1/rpc/list_users" in path:
+            return "Supabase RPC 'list_users' callable without authentication", "HIGH"
+        if "/rest/v1/rpc/" in path:
+            return "Supabase RPC endpoint exposed without authentication", "MEDIUM"
+        if "/rest/v1" in path:
+            return "Supabase REST API accessible without authentication", "HIGH"
+        if "scrape_configs" in low or "configuration" in low:
+            return "Unauthenticated configuration exposure verified in browser workflow", "HIGH"
+        if "targets" in low or "runtime" in low or "flags" in low:
+            return f"Endpoint accessible without authentication: {path or '/'}", "MEDIUM"
+        return f"Endpoint accessible without authentication: {path or '/'}", "MEDIUM"
 
     def _payload_result_text(self, payload: Optional[Dict[str, Any]]) -> str:
         if not isinstance(payload, dict):

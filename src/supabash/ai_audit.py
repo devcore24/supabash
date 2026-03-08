@@ -5458,6 +5458,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
         agg["findings"] = findings
+        had_structured_summary = isinstance(agg.get("summary"), dict)
+        llm_calls = agg.get("llm", {}).get("calls") if isinstance(agg.get("llm"), dict) else []
+        llm_summary_error = any(
+            isinstance(call, dict) and str(call.get("error") or "").strip()
+            for call in (llm_calls if isinstance(llm_calls, list) else [])
+        )
         normalized_summary, summary_meta = normalize_report_summary(
             agg.get("summary"),
             findings if isinstance(findings, list) else [],
@@ -5465,6 +5471,11 @@ class AIAuditOrchestrator(AuditOrchestrator):
         )
         if isinstance(normalized_summary, dict):
             agg["summary"] = normalized_summary
+            if llm_summary_error and not had_structured_summary:
+                fallback_note = "Deterministic summary fallback used because the LLM summary was unavailable or invalid."
+                notes = agg.setdefault("summary_notes", [])
+                if isinstance(notes, list) and fallback_note not in notes:
+                    notes.append(fallback_note)
         if isinstance(summary_meta, dict) and summary_meta:
             agg["summary_normalization"] = summary_meta
         else:

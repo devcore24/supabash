@@ -460,6 +460,60 @@ class BrowserUseScannerTests(unittest.TestCase):
             )
         )
 
+    def test_extract_findings_promotes_structured_supabase_result_to_concrete_titles(self):
+        scanner = BrowserUseScanner()
+        text = (
+            "Security validation completed for http://localhost:4001.\n\n"
+            "Evidence findings:\n"
+            "- [LOW/CRITICAL] Supabase keys exposed in home page source:\n"
+            "  - anon_key: 'eyJ...anon'\n"
+            "  - service_role_key: 'eyJ...service'\n"
+            "- [HIGH] Unauthenticated access to Supabase REST API: http://localhost:4001/rest/v1/ (Status 200, Body: {\"status\":\"ok\"})\n"
+            "- [MEDIUM] Unauthenticated access to Supabase RPC endpoint: http://localhost:4001/rest/v1/rpc/ (Status 200, Body: {\"status\":\"ok\"})\n"
+            "- [HIGH] Unauthenticated execution of 'list_users' RPC: http://localhost:4001/rest/v1/rpc/list_users (Status 200, Body: {\"status\":\"ok\"})\n"
+            "- [HIGH] Potential RLS bypass confirmed via unauthenticated REST/RPC endpoint accessibility.\n"
+        )
+
+        findings = scanner._extract_findings(text, target="http://localhost:4001")
+        titles = [str(f.get("title") or "") for f in findings if isinstance(f, dict)]
+
+        self.assertIn("Supabase service role key exposed", titles)
+        self.assertIn("Supabase anon key exposed in client content", titles)
+        self.assertIn("Supabase REST API accessible without authentication", titles)
+        self.assertIn("Supabase RPC endpoint exposed without authentication", titles)
+        self.assertIn("Supabase RPC 'list_users' callable without authentication", titles)
+        self.assertIn("Supabase RLS may be disabled", titles)
+        self.assertFalse(any(title == "Browser-driven security signal" for title in titles))
+
+    def test_extract_findings_promotes_structured_prometheus_endpoint_report(self):
+        scanner = BrowserUseScanner()
+        text = (
+            "### Security Validation Report: Unauthenticated Prometheus Endpoint Exposure\n\n"
+            "**Target:** http://localhost:9090\n\n"
+            "**Evidence of Unauthenticated Access:**\n"
+            "- **Endpoint:** `http://localhost:9090/api/v1/status/config`\n"
+            "  - **Status:** HTTP 200 OK\n"
+            "  - **Observations:** Exposed full Prometheus configuration YAML including `scrape_configs` with internal targets.\n"
+            "- **Endpoint:** `http://localhost:9090/api/v1/status/flags`\n"
+            "  - **Status:** HTTP 200 OK\n"
+            "  - **Observations:** Exposed command-line flags and internal file paths.\n"
+            "- **Endpoint:** `http://localhost:9090/api/v1/targets`\n"
+            "  - **Status:** HTTP 200 OK\n"
+            "  - **Observations:** Disclosed active monitoring targets and labels.\n"
+            "- **Endpoint:** `http://localhost:9090/api/v1/status/runtimeinfo`\n"
+            "  - **Status:** HTTP 200 OK\n"
+            "  - **Observations:** Disclosed server runtime statistics.\n"
+        )
+
+        findings = scanner._extract_findings(text, target="http://localhost:9090/api/v1/status/config")
+        titles = [str(f.get("title") or "") for f in findings if isinstance(f, dict)]
+
+        self.assertIn("Prometheus config endpoint accessible without authentication", titles)
+        self.assertIn("Prometheus flags endpoint accessible without authentication", titles)
+        self.assertIn("Prometheus targets endpoint accessible without authentication", titles)
+        self.assertIn("Prometheus runtimeinfo endpoint accessible without authentication", titles)
+        self.assertFalse(any(title == "Browser-driven security signal" for title in titles))
+
     def test_scan_retries_without_session_after_socket_timeout(self):
         run_timeout = CommandResult(
             command="browser-use --json --session audit-session run task --max-steps 2",

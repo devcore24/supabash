@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 import re
+import shlex
 
 COMPLIANCE_COVERAGE_ROWS: Dict[str, List[Dict[str, Any]]] = {
     "compliance_pci": [
@@ -111,6 +112,224 @@ SUMMARY_TITLE_FAMILY_SUFFIXES = (
     "enabled",
     "accessible",
 )
+
+
+def _build_deterministic_summary_text(
+    findings: List[Dict[str, Any]],
+    *,
+    finding_clusters: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    raw_findings = [x for x in (findings or []) if isinstance(x, dict)]
+    if not raw_findings:
+        return "Deterministic summary generated because the LLM summary was unavailable."
+
+    highest_rank = 0
+    critical_count = 0
+    high_count = 0
+    for item in raw_findings:
+        sev = _norm_summary_severity(item.get("severity"))
+        highest_rank = max(highest_rank, SUMMARY_SEVERITY_RANK.get(sev, 0))
+        if sev == "CRITICAL":
+            critical_count += 1
+        elif sev == "HIGH":
+            high_count += 1
+
+    candidates: List[Tuple[int, int, str, str]] = []
+    cluster_weight_by_family: Dict[str, int] = {}
+    if isinstance(finding_clusters, list):
+        for cluster in finding_clusters:
+            if not isinstance(cluster, dict):
+                continue
+            family_key = _summary_family_key(cluster.get("title"), cluster.get("risk_class"))
+            if not family_key:
+                continue
+            try:
+                cluster_weight_by_family[family_key] = max(
+                    int(cluster_weight_by_family.get(family_key, 0)),
+                    int(cluster.get("count", 0) or 0),
+                )
+            except Exception:
+                continue
+
+    for item in raw_findings:
+        title = str(item.get("title") or "").strip()
+        if not title or _is_generic_summary_title(title):
+            continue
+        severity = _norm_summary_severity(item.get("severity"))
+        family_key = _summary_family_key(title, item.get("risk_class"))
+        support = int(cluster_weight_by_family.get(family_key, 0)) if family_key else 0
+        candidates.append(
+            (
+                SUMMARY_SEVERITY_RANK.get(severity, 0),
+                max(0, support),
+                title,
+                family_key,
+            )
+        )
+
+    seen_family: Set[str] = set()
+    top_titles: List[str] = []
+    for _sev_rank, _support, title, family_key in sorted(
+        candidates,
+        key=lambda item: (-int(item[0]), -int(item[1]), str(item[2] or "")),
+    ):
+        family = str(family_key or "").strip() or _summary_family_key(title)
+        if family and family in seen_family:
+            continue
+        if family:
+            seen_family.add(family)
+        top_titles.append(title)
+        if len(top_titles) >= 3:
+            break
+
+    highest = SUMMARY_INV_SEVERITY_RANK.get(highest_rank, "INFO")
+    parts = [
+        "Deterministic summary generated because the LLM summary was unavailable.",
+        f"Highest validated severity: {highest}.",
+    ]
+    if critical_count or high_count:
+        parts.append(f"Validated critical findings: {critical_count}; high findings: {high_count}.")
+    if top_titles:
+        if len(top_titles) == 1:
+            parts.append(f"Key validated issue: {top_titles[0]}.")
+        elif len(top_titles) == 2:
+            parts.append(f"Key validated issues: {top_titles[0]} and {top_titles[1]}.")
+        else:
+            parts.append(
+                f"Key validated issues: {top_titles[0]}, {top_titles[1]}, and {top_titles[2]}."
+            )
+    return " ".join(str(x).strip() for x in parts if str(x).strip())
+
+
+def _compact_browser_use_command(entry: Dict[str, Any], raw_command: str) -> str:
+    data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+    target = str(entry.get("target") or data.get("target") or "").strip()
+    task = str(data.get("task") or "").strip()
+    task_line = task.splitlines()[0].strip() if task else ""
+    task_line = re.sub(r"\s+", " ", task_line).strip()
+    if len(task_line) > 88:
+        task_line = f"{task_line[:85].rstrip()}..."
+
+    max_steps = ""
+    headless = ""
+    model = ""
+    profile = ""
+    session = ""
+    action = "run"
+
+    try:
+        parts = shlex.split(str(raw_command or "").strip())
+    except Exception:
+        parts = []
+
+    if len(parts) >= 6 and parts[1:3] == ["-c"] and "asyncio.run(main())" in str(parts[2] or ""):
+        action = "run"
+        task = task or str(parts[3] or "").strip()
+        if task:
+            first = task.splitlines()[0].strip()
+            first = re.sub(r"\s+", " ", first).strip()
+            if first:
+                task_line = first[:88] + ("..." if len(first) > 88 else "")
+        max_steps = str(parts[4] or "").strip()
+        headless = "true" if str(parts[5] or "").strip() == "1" else "false"
+        model = str(parts[6] or "").strip() if len(parts) > 6 else ""
+        profile = str(parts[7] or "").strip() if len(parts) > 7 else ""
+    elif parts:
+        lower_parts = [str(x or "").strip().lower() for x in parts]
+        if "open" in lower_parts:
+            action = "open"
+        elif "get" in lower_parts:
+            action = "get"
+        elif "state" in lower_parts:
+            action = "state"
+        elif "close" in lower_parts:
+            action = "close"
+        elif "run" in lower_parts:
+            action = "run"
+        if "--session" in parts:
+            try:
+                session = str(parts[parts.index("--session") + 1] or "").strip()
+            except Exception:
+                session = ""
+        if "--profile" in parts:
+            try:
+                profile = str(parts[parts.index("--profile") + 1] or "").strip()
+            except Exception:
+                profile = ""
+        if "--max-steps" in parts:
+            try:
+                max_steps = str(parts[parts.index("--max-steps") + 1] or "").strip()
+            except Exception:
+                max_steps = ""
+        if "--headed" in parts:
+            headless = "false"
+        elif action == "run":
+            headless = "true"
+
+    if action == "open":
+        url = target or ""
+        if not url and parts:
+            try:
+                url = str(parts[parts.index("open") + 1] or "").strip()
+            except Exception:
+                url = ""
+        return f"browser_use.open(url={url or 'unknown'})"
+    if action == "get":
+        kind = ""
+        if parts:
+            try:
+                kind = str(parts[parts.index("get") + 1] or "").strip()
+            except Exception:
+                kind = ""
+        return f"browser_use.get(kind={kind or 'unknown'})"
+    if action == "state":
+        return "browser_use.state()"
+    if action == "close":
+        suffix = ", all=true" if "--all" in parts else ""
+        return f"browser_use.close({suffix.lstrip(', ')})" if suffix else "browser_use.close()"
+
+    params: List[str] = []
+    if target:
+        params.append(f"target={target}")
+    if max_steps:
+        params.append(f"max_steps={max_steps}")
+    if headless in {"true", "false"}:
+        params.append(f"headless={headless}")
+    if model:
+        params.append(f"model={model}")
+    if profile:
+        params.append(f"profile={profile}")
+    if session:
+        params.append(f"session={session}")
+    if task_line:
+        params.append(f'task="{task_line}"')
+    return f"browser_use.run({', '.join(params)})" if params else "browser_use.run(...)"
+
+
+def _display_tool_command(entry: Dict[str, Any]) -> str:
+    if not isinstance(entry, dict):
+        return ""
+    display = str(entry.get("display_command") or "").strip()
+    if display:
+        return display
+    data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+    if not display and isinstance(data, dict):
+        display = str(data.get("display_command") or "").strip()
+        if display:
+            return display
+
+    cmd = entry.get("command")
+    if not isinstance(cmd, str) or not cmd.strip():
+        if isinstance(data, dict):
+            cmd = data.get("command")
+    raw = str(cmd or "").strip()
+    if not raw:
+        return ""
+
+    tool = str(entry.get("tool") or "").strip().lower()
+    if tool == "browser_use":
+        return _compact_browser_use_command(entry, raw)
+    return raw
 
 
 def _normalize_mapping_text(value: Any) -> str:
@@ -436,11 +655,24 @@ def normalize_report_summary(
     finding_clusters: Optional[List[Dict[str, Any]]] = None,
     max_summary_findings: int = 5,
 ) -> Tuple[Any, Dict[str, Any]]:
-    if not isinstance(summary, dict):
+    raw_findings = [x for x in (findings or []) if isinstance(x, dict)]
+    if isinstance(summary, dict):
+        summary_obj: Dict[str, Any] = dict(summary)
+    elif summary is None:
+        summary_obj = {
+            "summary": _build_deterministic_summary_text(raw_findings, finding_clusters=finding_clusters),
+            "findings": [],
+        }
+    else:
         return summary, {}
 
-    raw_findings = [x for x in (findings or []) if isinstance(x, dict)]
-    summary_items = [x for x in (summary.get("findings") or []) if isinstance(x, dict)]
+    if not str(summary_obj.get("summary") or "").strip():
+        summary_obj["summary"] = _build_deterministic_summary_text(
+            raw_findings,
+            finding_clusters=finding_clusters,
+        )
+
+    summary_items = [x for x in (summary_obj.get("findings") or []) if isinstance(x, dict)]
     max_items = max(1, int(max_summary_findings or 5))
     meta: Dict[str, Any] = {
         "source": "deterministic",
@@ -448,8 +680,6 @@ def normalize_report_summary(
         "added_findings": [],
         "suppressed_summary_items": [],
     }
-    if not summary_items:
-        return summary, {}
 
     normalized_entries: List[Dict[str, Any]] = []
     represented_raw_keys: Set[str] = set()
@@ -682,7 +912,7 @@ def normalize_report_summary(
             )
         normalized_entries = normalized_entries[:max_items]
 
-    normalized_summary = dict(summary)
+    normalized_summary = dict(summary_obj)
     normalized_summary["findings"] = normalized_entries
 
     if not any(meta.get(key) for key in ("severity_reconciliations", "added_findings", "suppressed_summary_items")):
@@ -2164,12 +2394,8 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         else:
             success = entry.get("success")
             status = "success" if success else "failed"
-        cmd = entry.get("command")
-        if not isinstance(cmd, str) or not cmd.strip():
-            data = entry.get("data")
-            if isinstance(data, dict):
-                cmd = data.get("command")
-        cmd_cell = f"`{cmd.strip()}`" if isinstance(cmd, str) and cmd.strip() else ""
+        display_cmd = _display_tool_command(entry)
+        cmd_cell = f"`{display_cmd}`" if display_cmd else ""
         lines.append(f"| {tool} | {status} | {cmd_cell} |")
         if skipped and entry.get("reason"):
             _add_tool_note(f"- **{tool}**: SKIPPED - {entry['reason']}")
@@ -2188,13 +2414,9 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         if not isinstance(entry, dict):
             continue
         tool = entry.get("tool", "unknown")
-        cmd = entry.get("command")
-        if not isinstance(cmd, str) or not cmd.strip():
-            data = entry.get("data")
-            if isinstance(data, dict):
-                cmd = data.get("command")
-        if isinstance(cmd, str) and cmd.strip():
-            commands.append((str(tool), cmd.strip()))
+        display_cmd = _display_tool_command(entry)
+        if display_cmd:
+            commands.append((str(tool), display_cmd))
     if commands:
         lines.append("\n## Commands Executed")
         for tool, cmd in commands:

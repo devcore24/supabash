@@ -48,6 +48,34 @@ class TestReport(unittest.TestCase):
         self.assertIn("Commands Executed", md)
         self.assertIn("nmap example.com", md)
 
+    def test_generate_markdown_compacts_browser_use_command_display(self):
+        report = {
+            "target": "localhost",
+            "results": [
+                {
+                    "tool": "browser_use",
+                    "success": True,
+                    "target": "http://localhost:4001",
+                    "command": (
+                        "/home/devcore24/.local/share/pipx/venvs/browser-use/bin/python -c "
+                        "'import asyncio\\nprint(1)\\nasyncio.run(main())' "
+                        "'Perform a focused browser-driven security validation.\\nTarget URL: http://localhost:4001' "
+                        "25 1 '' ''"
+                    ),
+                    "data": {
+                        "target": "http://localhost:4001",
+                        "task": "Perform a focused browser-driven security validation.\nTarget URL: http://localhost:4001",
+                    },
+                }
+            ],
+            "findings": [],
+        }
+        md = generate_markdown(report)
+        self.assertIn("browser_use.run(", md)
+        self.assertIn("target=http://localhost:4001", md)
+        self.assertNotIn("import asyncio", md)
+        self.assertNotIn("python -c", md)
+
     def test_generate_markdown_includes_finding_quality_metrics(self):
         report = {
             "target": "localhost",
@@ -466,6 +494,31 @@ class TestReport(unittest.TestCase):
         )
         self.assertEqual(meta.get("source"), "deterministic")
         self.assertTrue(meta.get("severity_reconciliations"))
+        self.assertTrue(meta.get("added_findings"))
+
+    def test_normalize_report_summary_generates_deterministic_summary_when_missing(self):
+        findings = [
+            {
+                "severity": "CRITICAL",
+                "title": "Supabase service role key exposed",
+                "tool": "supabase_audit",
+                "evidence": "key=eyJ... detected in source=http://localhost:4001",
+            },
+            {
+                "severity": "HIGH",
+                "title": "Anonymous S3-compatible bucket listing accessible",
+                "tool": "readiness_probe",
+                "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+            },
+        ]
+
+        normalized, meta = normalize_report_summary(None, findings)
+
+        self.assertIsInstance(normalized, dict)
+        self.assertIn("Deterministic summary generated", str(normalized.get("summary") or ""))
+        summary_findings = normalized.get("findings") or []
+        self.assertTrue(summary_findings)
+        self.assertEqual(str(summary_findings[0].get("severity") or "").upper(), "CRITICAL")
         self.assertTrue(meta.get("added_findings"))
 
     def test_normalize_report_summary_prefers_concrete_title_over_generic_browser_signal(self):

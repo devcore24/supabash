@@ -3400,6 +3400,90 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertTrue(normalization.get("severity_reconciliations"))
         self.assertTrue(normalization.get("added_findings"))
 
+    def test_ai_audit_generates_deterministic_summary_when_llm_summary_parse_fails(self):
+        class SummaryFailureLLM:
+            def __init__(self):
+                self.plan_calls = 0
+
+            def tool_call(self, messages, tools, tool_choice=None, temperature=0.2):
+                self.plan_calls += 1
+                if self.plan_calls == 1:
+                    return (
+                        [
+                            {
+                                "name": "propose_actions",
+                                "arguments": {
+                                    "actions": [
+                                        {
+                                            "tool_name": "browser_use",
+                                            "arguments": {
+                                                "profile": "soc2",
+                                                "target": "http://localhost:4001",
+                                                "max_steps": 8,
+                                            },
+                                            "reasoning": "Validate Supabase exposure.",
+                                            "priority": 1,
+                                        }
+                                    ],
+                                    "stop": False,
+                                },
+                            }
+                        ],
+                        {"provider": "fake", "model": "fake-summary-failure-planner", "usage": {"total_tokens": 8}},
+                    )
+                return (
+                    [{"name": "propose_actions", "arguments": {"actions": [], "stop": True}}],
+                    {"provider": "fake", "model": "fake-summary-failure-planner", "usage": {"total_tokens": 4}},
+                )
+
+            def chat_with_meta(self, messages, temperature=0.2):
+                return (
+                    "{invalid json",
+                    {"provider": "fake", "model": "fake-summary-failure", "usage": {"total_tokens": 8}},
+                )
+
+        scanners = {
+            "nmap": FakeNmapScannerSupabaseOnly(),
+            "httpx": FakeHttpxScanner(),
+            "whatweb": FakeWhatwebScanner(),
+            "nuclei": FakeNucleiScanner(),
+            "gobuster": FakeGobusterScanner(),
+            "browser_use": FakeBrowserUseSupabaseScanner(),
+        }
+        orchestrator = AIAuditOrchestrator(scanners=scanners, llm_client=SummaryFailureLLM())
+        original_tool_enabled = orchestrator._tool_enabled
+        orchestrator._tool_enabled = lambda tool, default=True: (
+            True if str(tool or "").strip().lower() == "browser_use" else original_tool_enabled(tool, default)
+        )
+        orchestrator._run_readiness_probe = lambda **kwargs: {
+            "success": True,
+            "findings": [
+                {
+                    "severity": "HIGH",
+                    "title": "Anonymous S3-compatible bucket listing accessible",
+                    "evidence": "http://localhost:8080/?list-type=2 (HTTP 200); marker=ListAllMyBucketsResult",
+                    "type": "s3_bucket_listing",
+                }
+            ],
+        }
+        output = artifact_path("ai_audit_summary_fallback_when_llm_parse_fails.json")
+        report = orchestrator.run(
+            "localhost",
+            output,
+            llm_plan=True,
+            max_actions=1,
+            use_llm=True,
+            compliance_profile="soc2",
+            run_browser_use=True,
+        )
+
+        summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+        self.assertIn("Deterministic summary generated", str(summary.get("summary") or ""))
+        summary_findings = summary.get("findings") if isinstance(summary.get("findings"), list) else []
+        self.assertTrue(summary_findings)
+        llm_calls = report.get("llm", {}).get("calls", [])
+        self.assertTrue(any(str(call.get("error") or "").strip() for call in llm_calls if isinstance(call, dict)))
+
     def test_post_closure_low_value_followups_are_stopped_before_execution(self):
         scanners = {
             "nmap": FakeNmapScannerPrometheusAndTls9433(),
