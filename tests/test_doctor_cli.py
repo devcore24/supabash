@@ -1,3 +1,5 @@
+import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +24,25 @@ class TestDoctorCLI(unittest.TestCase):
             result = runner.invoke(main_module.app, ["doctor"])
         self.assertEqual(result.exit_code, 0, result.stdout)
         self.assertIn("Doctor: OK", result.stdout)
+
+    def test_doctor_detects_direct_venv_python_without_environment_variable(self):
+        def fake_which(name: str):
+            return f"/usr/bin/{name}"
+
+        with patch.dict(os.environ, {}, clear=False), patch(
+            "supabash.__main__.shutil.which", side_effect=fake_which
+        ), patch("supabash.__main__.importlib.import_module", return_value=object()), patch.object(
+            main_module.sys, "prefix", "/tmp/project/venv"
+        ), patch.object(main_module.sys, "base_prefix", "/usr"):
+            os.environ.pop("VIRTUAL_ENV", None)
+            result = runner.invoke(main_module.app, ["doctor", "--json"])
+        self.assertEqual(result.exit_code, 0, result.stdout)
+        payload = json.loads(result.stdout)
+        venv = next(item for item in payload["checks"] if item["name"] == "venv")
+        self.assertTrue(venv["ok"])
+        self.assertEqual(venv["message"], "/tmp/project/venv")
+        self.assertEqual(venv["details"]["base_prefix"], "/usr")
+
 
     def test_doctor_fails_when_required_bin_missing(self):
         def fake_which(name: str):

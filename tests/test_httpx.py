@@ -35,7 +35,7 @@ class TestHttpxScanner(unittest.TestCase):
         self.scanner.scan("http://example.com", threads=10, follow_redirects=False)
         args, kwargs = self.mock_runner.run.call_args
         cmd = args[0]
-        self.assertEqual(cmd[0], "httpx")
+        self.assertEqual(os.path.basename(cmd[0]), "httpx")
         self.assertIn("-json", cmd)
         self.assertIn("-silent", cmd)
         self.assertIn("-l", cmd)

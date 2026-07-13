@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
+import html
+from html.parser import HTMLParser
+from urllib.parse import urlsplit
 import re
+from supabash.secure_io import atomic_write_text, restrict_file_permissions
+
 
 
 @dataclass
@@ -70,6 +75,84 @@ def _mark_compliance_matrix_table(html_fragment: str) -> str:
     return pattern.sub(r'\1<table class="compliance-matrix-table">', html_fragment, count=1)
 
 
+_ALLOWED_HTML_TAGS = {
+    "a", "blockquote", "br", "code", "em", "h1", "h2", "h3", "h4",
+    "hr", "li", "ol", "p", "pre", "strong", "table", "tbody", "td",
+    "th", "thead", "tr", "ul",
+}
+_ALLOWED_HTML_ATTRIBUTES = {
+    "a": {"href", "title"},
+    "h1": {"id"}, "h2": {"id"}, "h3": {"id"}, "h4": {"id"},
+    "table": {"class"},
+}
+_BLOCKED_CONTENT_TAGS = {"iframe", "math", "object", "script", "style", "svg"}
+
+
+class _ReportHTMLSanitizer(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.blocked_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        normalized = str(tag or "").lower()
+        if normalized in _BLOCKED_CONTENT_TAGS:
+            self.blocked_depth += 1
+            return
+        if self.blocked_depth or normalized not in _ALLOWED_HTML_TAGS:
+            return
+        allowed_attrs = _ALLOWED_HTML_ATTRIBUTES.get(normalized, set())
+        rendered = []
+        for key, value in attrs:
+            attr = str(key or "").lower()
+            if attr not in allowed_attrs or value is None:
+                continue
+            text = str(value)
+            if attr == "href":
+                scheme = urlsplit(text).scheme.lower()
+                if scheme not in {"", "http", "https", "mailto"}:
+                    continue
+            rendered.append(f" {attr}=\"{html.escape(text, quote=True)}\"")
+        self.parts.append(f"<{normalized}{''.join(rendered)}>")
+
+    def handle_endtag(self, tag):
+        normalized = str(tag or "").lower()
+        if normalized in _BLOCKED_CONTENT_TAGS:
+            if self.blocked_depth:
+                self.blocked_depth -= 1
+            return
+        if not self.blocked_depth and normalized in _ALLOWED_HTML_TAGS and normalized not in {"br", "hr"}:
+            self.parts.append(f"</{normalized}>")
+
+    def handle_startendtag(self, tag, attrs):
+        if str(tag or "").lower() in _BLOCKED_CONTENT_TAGS:
+            return
+        self.handle_starttag(tag, attrs)
+
+    def handle_data(self, data):
+        if not self.blocked_depth:
+            self.parts.append(html.escape(str(data), quote=False))
+
+    def handle_entityref(self, name):
+        if not self.blocked_depth:
+            self.parts.append(f"&{name};")
+
+    def handle_charref(self, name):
+        if not self.blocked_depth:
+            self.parts.append(f"&#{name};")
+
+
+def _sanitize_html_fragment(value: str) -> str:
+    sanitizer = _ReportHTMLSanitizer()
+    sanitizer.feed(str(value or ""))
+    sanitizer.close()
+    return "".join(sanitizer.parts)
+
+
+def _blocked_resource_fetcher(url: str):
+    raise RuntimeError(f"External resource loading is disabled for report exports: {url}")
+
+
 def markdown_to_html(markdown_text: str) -> str:
     md = _import_markdown()
     fn = getattr(md, "markdown", None)
@@ -79,6 +162,7 @@ def markdown_to_html(markdown_text: str) -> str:
     # - toc: generates stable id="" attributes for headings
     # - attr_list: allows explicit heading IDs like "## Summary {#summary}" if we ever want them
     body_html = fn(markdown_text, extensions=["tables", "fenced_code", "toc", "attr_list"], output_format="html5")
+    body_html = _sanitize_html_fragment(body_html)
     body_html = _mark_tools_run_table(body_html)
     body_html = _mark_compliance_matrix_table(body_html)
     # Render with explicit table/code styling so HTML/PDF exports remain readable
@@ -229,7 +313,7 @@ def export_from_markdown_file(
     if do_html:
         try:
             html_path = md_path.with_suffix(".html")
-            html_path.write_text(html_text or "", encoding="utf-8")
+            atomic_write_text(html_path, html_text or "")
             out.html_path = html_path
         except Exception as e:
             out.html_error = f"Failed to write HTML: {e}"
@@ -254,10 +338,11 @@ def export_from_markdown_file(
                         )
                     )
                 ]
-            HTML(string=html_text or "", base_url=str(md_path.parent)).write_pdf(
+            HTML(string=html_text or "", base_url=str(md_path.parent), url_fetcher=_blocked_resource_fetcher).write_pdf(
                 str(pdf_path),
                 stylesheets=pdf_styles,
             )
+            restrict_file_permissions(pdf_path)
             out.pdf_path = pdf_path
         except Exception as e:
             out.pdf_error = f"Failed to write PDF: {e}"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 
@@ -39,18 +40,36 @@ def artifact_path(name: str) -> Path:
 
 
 def cleanup_artifact(path: Path) -> None:
-    """
-    Default: keep artifacts so tests are inspectable.
-    Set SUPABASH_KEEP_TEST_REPORTS=0 to remove them after a run.
-    """
+    """Remove a generated report bundle when SUPABASH_KEEP_TEST_REPORTS=0."""
     keep_env = os.environ.get("SUPABASH_KEEP_TEST_REPORTS", "").strip().lower()
     if keep_env in {"", "1", "true", "yes"}:
         return
+
     try:
-        path.unlink(missing_ok=True)  # py3.11+
+        base = artifacts_dir().resolve()
+        candidate = Path(path).resolve()
+        candidate.relative_to(base)
     except Exception:
+        return
+
+    targets = [candidate]
+    targets.extend(item for item in candidate.parent.glob(f"{candidate.stem}-*") if item.is_file())
+    evidence_candidates = [
+        candidate.parent / "evidence" / candidate.stem,
+        candidate.parent / "evidence" if candidate.parent.name == candidate.stem else None,
+    ]
+    for target in targets:
         try:
-            if path.exists():
-                path.unlink()
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+    for directory in evidence_candidates:
+        if directory is None:
+            continue
+        try:
+            resolved = directory.resolve()
+            resolved.relative_to(base)
+            if resolved.is_dir():
+                shutil.rmtree(resolved)
         except Exception:
             pass

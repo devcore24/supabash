@@ -1,6 +1,8 @@
 import json
 from typing import Any, Dict, List, Tuple
 
+from supabash.redaction import redact_sensitive_data
+
 
 def _truncate_str(value: str, max_chars: int) -> str:
     if max_chars <= 0:
@@ -64,7 +66,8 @@ def prepare_json_payload(
     Return (json_string, truncated) where json_string is best-effort <= max_chars.
     This is a safety valve to keep tool output from overflowing LLM context.
     """
-    raw = json.dumps(obj, ensure_ascii=False)
+    safe_obj = redact_sensitive_data(obj)
+    raw = json.dumps(safe_obj, ensure_ascii=False)
     if len(raw) <= max_chars:
         return raw, False
 
@@ -75,7 +78,7 @@ def prepare_json_payload(
     min_string = 128
     min_list = 1
     while True:
-        shrunk = _shrink(obj, max_string=max_string, max_list=max_list, max_depth=max_depth)
+        shrunk = _shrink(safe_obj, max_string=max_string, max_list=max_list, max_depth=max_depth)
         s = json.dumps(shrunk, ensure_ascii=False)
         if len(s) <= max_chars:
             return s, True

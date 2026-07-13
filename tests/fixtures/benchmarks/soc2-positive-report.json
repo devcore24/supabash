@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "target": "localhost",
+  "results": [],
+  "compliance_profile": "compliance_soc2",
+  "started_at": 10.0,
+  "finished_at": 14.0,
+  "findings": [
+    {
+      "dedup_key": "soc2-prometheus-exposure",
+      "severity": "HIGH",
+      "title": "Prometheus configuration exposed",
+      "risk_class": "unauthenticated_exposure",
+      "tool": "nuclei",
+      "evidence": "http://localhost:9090/api/v1/status/config"
+    }
+  ],
+  "summary": {
+    "summary": "A high-risk exposure was validated.",
+    "findings": [{"severity": "HIGH", "title": "Prometheus configuration exposed"}]
+  },
+  "ai_audit": {"actions": [{"tool": "browser_use"}]},
+  "unresolved_high_risk_clusters": []
+}

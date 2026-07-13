@@ -70,6 +70,12 @@ This writes:
 
 in the same report folder.
 
+To apply a deterministic pass/fail expectations file to any completed report, run:
+
+```bash
+supabash benchmark-report path/to/report.json path/to/expectations.json --json --output benchmark-score.json
+```
+
 Use the comparator as a benchmark aid, not a strict pass/fail oracle. WebGoat is intentionally vulnerable and useful for measuring coverage gaps, but the generic localhost engine should still be validated on mixed targets (for example WebGoat + DVWA + Juice Shop + Supabase mock) so behavior does not overfit to one lab application.
 
 ## 2c) Stability notes for fragile lab apps

@@ -1,11 +1,11 @@
 import subprocess
-import shlex
 import os
 import signal
 import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from supabash.logger import setup_logger
+from supabash.redaction import redact_command
 
 logger = setup_logger(__name__)
 
@@ -65,7 +65,7 @@ class CommandRunner:
             CommandResult: Object containing output, error code, and status.
         """
         command = self._normalize_command(command)
-        cmd_str = shlex.join(command)
+        cmd_str = redact_command(command)
         logger.debug(f"Executing command: {cmd_str}")
 
         try:

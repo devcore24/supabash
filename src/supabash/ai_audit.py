@@ -15,12 +15,8 @@ from supabash import prompts
 from supabash.llm import ToolCallingNotSupported, ToolCallingError
 from supabash.llm_context import prepare_json_payload
 from supabash.report_order import stable_sort_results
-from supabash.report import (
-    build_compliance_coverage_matrix,
-    build_recommended_next_actions,
-    normalize_report_summary,
-)
-from supabash.report_schema import annotate_schema_validation
+from supabash.report_finalize import finalize_report_content
+from supabash.secure_io import atomic_write_text
 
 
 class AIAuditOrchestrator(AuditOrchestrator):
@@ -80,7 +76,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 "decision_trace": decision_trace,
                 "commands": commands,
             }
-            replay_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            atomic_write_text(replay_path, json.dumps(payload, indent=2))
 
             def _fmt_ts(ts: Any) -> str:
                 try:
@@ -205,7 +201,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     md_lines.append(line)
                     md_lines.append(f"  - command: `{command}`")
 
-            replay_md_path.write_text("\n".join(md_lines).rstrip() + "\n", encoding="utf-8")
+            atomic_write_text(replay_md_path, "\n".join(md_lines).rstrip() + "\n")
 
             rel = str(replay_path.relative_to(report_root))
             rel_md = str(replay_md_path.relative_to(report_root))
@@ -270,7 +266,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 "decision_trace": decision_trace,
                 "actions": actions,
             }
-            trace_json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            atomic_write_text(trace_json_path, json.dumps(payload, indent=2))
 
             def _fmt_ts(ts: Any) -> str:
                 try:
@@ -428,7 +424,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         parts.append(f"cost_usd={float(cost):.6f}")
                     md_lines.append(f"- {' | '.join(parts)}")
 
-            trace_md_path.write_text("\n".join(md_lines).rstrip() + "\n", encoding="utf-8")
+            atomic_write_text(trace_md_path, "\n".join(md_lines).rstrip() + "\n")
 
             return {
                 "version": 1,
@@ -441,6 +437,23 @@ class AIAuditOrchestrator(AuditOrchestrator):
         except Exception as e:
             agg["llm_reasoning_trace_error"] = str(e)
             return None
+
+    def _attach_report_artifacts(self, agg: Dict[str, Any], output: Path) -> None:
+        super()._attach_report_artifacts(agg, output)
+        replay_meta = self._write_replay_trace(agg, output)
+        if isinstance(replay_meta, dict):
+            agg["replay_trace"] = replay_meta
+            ai_meta = agg.get("ai_audit")
+            if isinstance(ai_meta, dict):
+                ai_meta["replay_trace_file"] = replay_meta.get("file")
+                ai_meta["replay_trace_version"] = replay_meta.get("version")
+        llm_trace_meta = self._write_llm_reasoning_trace(agg, output)
+        if isinstance(llm_trace_meta, dict):
+            agg["llm_reasoning_trace"] = llm_trace_meta
+            ai_meta = agg.get("ai_audit")
+            if isinstance(ai_meta, dict):
+                ai_meta["llm_reasoning_json_file"] = llm_trace_meta.get("json_file")
+                ai_meta["llm_reasoning_markdown_file"] = llm_trace_meta.get("markdown_file")
 
     def run(
         self,
@@ -620,34 +633,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
         )
         note("phase_end", "baseline", "Baseline audit finished", agg=baseline)
 
-        # If baseline was canceled, return early (best-effort).
+        # If baseline was canceled, persist the same deterministic partial-report contract.
         if canceled() or baseline.get("canceled"):
             baseline["report_kind"] = "ai_audit"
             baseline.setdefault("ai_audit", {})["canceled"] = True
             baseline.setdefault("ai_audit", {})["phase"] = "baseline"
-            baseline["finished_at"] = time.time()
-            try:
-                annotate_schema_validation(baseline, kind="audit")
-            except Exception:
-                pass
-            if output is not None:
-                self._write_evidence_pack(baseline, output)
-                replay_meta = self._write_replay_trace(baseline, output)
-                if isinstance(replay_meta, dict):
-                    baseline["replay_trace"] = replay_meta
-                llm_trace_meta = self._write_llm_reasoning_trace(baseline, output)
-                if isinstance(llm_trace_meta, dict):
-                    baseline["llm_reasoning_trace"] = llm_trace_meta
-                try:
-                    output.parent.mkdir(parents=True, exist_ok=True)
-                    output.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
-                    baseline["saved_to"] = str(output)
-                except Exception as e:
-                    baseline["saved_to"] = None
-                    baseline["write_error"] = str(e)
-            else:
-                baseline["saved_to"] = None
-            return baseline
+            return self._finalize_partial_report(baseline, output, normalized_compliance)
 
         # Start building the unified report (reuse baseline structure, recompute findings/summary later).
         agg: Dict[str, Any] = baseline
@@ -5307,6 +5298,19 @@ class AIAuditOrchestrator(AuditOrchestrator):
         # Recompute summary/findings on the combined results.
         agg["finished_at"] = time.time()
         agg["results"] = stable_sort_results(agg.get("results", []) or [])
+        if canceled():
+            agg["canceled"] = True
+            ai_obj["canceled"] = True
+            ai_obj["phase"] = "agentic"
+            agg.setdefault("summary_notes", []).append(
+                "AI audit canceled during the agentic phase; partial results were finalized."
+            )
+            note("phase_end", "agentic", "Agentic audit canceled", agg=agg)
+            return self._finalize_partial_report(
+                agg,
+                output,
+                normalized_compliance,
+            )
 
         ffuf_fallback_hits: List[Tuple[str, int]] = []
         ffuf_agentic_hits: List[Tuple[str, int]] = []
@@ -5357,7 +5361,29 @@ class AIAuditOrchestrator(AuditOrchestrator):
         findings_for_state = self._collect_findings(agg)
         if not isinstance(findings_for_state, list):
             findings_for_state = []
-        cluster_state = _cluster_findings_for_planner(findings_for_state)
+        cluster_builder = locals().get("_cluster_findings_for_planner")
+        if callable(cluster_builder):
+            cluster_state = cluster_builder(findings_for_state)
+        else:
+            existing_clusters = agg.get("finding_clusters")
+            clusters = (
+                [item for item in existing_clusters if isinstance(item, dict)]
+                if isinstance(existing_clusters, list)
+                else []
+            )
+            existing_open = agg.get("unresolved_high_risk_clusters")
+            open_clusters = (
+                [item for item in existing_open if isinstance(item, dict)]
+                if isinstance(existing_open, list)
+                else []
+            )
+            cluster_state = {
+                "total_findings": len(findings_for_state),
+                "cluster_count": len(clusters),
+                "clusters": clusters,
+                "open_high_risk_clusters": open_clusters,
+                "covered_cluster_ids": [],
+            }
         agg["finding_cluster_overview"] = {
             "total_findings": int(cluster_state.get("total_findings", 0)),
             "cluster_count": int(cluster_state.get("cluster_count", 0)),
@@ -5383,9 +5409,29 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     + "."
                 )
             )
-        agg["baseline_action_ledger"] = _baseline_action_ledger()
-        if planner_action_ledger:
-            agg["agentic_action_ledger"] = [dict(x) for x in planner_action_ledger]
+        ledger_builder = locals().get("_baseline_action_ledger")
+        if callable(ledger_builder):
+            agg["baseline_action_ledger"] = ledger_builder()
+        else:
+            agg["baseline_action_ledger"] = [
+                {
+                    "phase": str(entry.get("phase") or "baseline"),
+                    "tool": str(entry.get("tool") or ""),
+                    "target": str(entry.get("target") or ""),
+                    "status": (
+                        "skipped"
+                        if entry.get("skipped")
+                        else ("success" if entry.get("success") else "failed")
+                    ),
+                    "reason": str(entry.get("reason") or ""),
+                    "error": str(entry.get("error") or ""),
+                }
+                for entry in (agg.get("results") or [])
+                if isinstance(entry, dict)
+            ]
+        planner_ledger = locals().get("planner_action_ledger")
+        if isinstance(planner_ledger, list) and planner_ledger:
+            agg["agentic_action_ledger"] = [dict(x) for x in planner_ledger if isinstance(x, dict)]
 
         baseline_keys: Set[str] = set()
         agentic_keys: Set[str] = set()
@@ -5457,86 +5503,12 @@ class AIAuditOrchestrator(AuditOrchestrator):
             min_severity=min_remediation_severity,
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
-        agg["findings"] = findings
-        had_structured_summary = isinstance(agg.get("summary"), dict)
-        llm_calls = agg.get("llm", {}).get("calls") if isinstance(agg.get("llm"), dict) else []
-        llm_summary_error = any(
-            isinstance(call, dict) and str(call.get("error") or "").strip()
-            for call in (llm_calls if isinstance(llm_calls, list) else [])
-        )
-        normalized_summary, summary_meta = normalize_report_summary(
-            agg.get("summary"),
-            findings if isinstance(findings, list) else [],
-            finding_clusters=agg.get("finding_clusters") if isinstance(agg.get("finding_clusters"), list) else None,
-        )
-        if isinstance(normalized_summary, dict):
-            agg["summary"] = normalized_summary
-            if llm_summary_error and not had_structured_summary:
-                fallback_note = "Deterministic summary fallback used because the LLM summary was unavailable or invalid."
-                notes = agg.setdefault("summary_notes", [])
-                if isinstance(notes, list) and fallback_note not in notes:
-                    notes.append(fallback_note)
-        if isinstance(summary_meta, dict) and summary_meta:
-            agg["summary_normalization"] = summary_meta
-        else:
-            agg.pop("summary_normalization", None)
-        try:
-            agg["finding_metrics"] = self._build_finding_metrics(findings if isinstance(findings, list) else [])
-        except Exception:
-            pass
-        try:
-            summary_findings = []
-            summary = agg.get("summary")
-            if isinstance(summary, dict):
-                sf = summary.get("findings")
-                if isinstance(sf, list):
-                    summary_findings = sf
-            agg["recommended_next_actions"] = build_recommended_next_actions(
-                summary_findings,
-                findings if isinstance(findings, list) else [],
-                normalized_compliance,
-            )
-        except Exception:
-            pass
-        if isinstance(normalized_compliance, str) and normalized_compliance.strip():
-            try:
-                agg["compliance_coverage_matrix"] = build_compliance_coverage_matrix(agg)
-            except Exception:
-                pass
-
-        try:
-            annotate_schema_validation(agg, kind="audit")
-        except Exception:
-            pass
-
-        if output is not None:
-            self._write_evidence_pack(agg, output)
-            replay_meta = self._write_replay_trace(agg, output)
-            if isinstance(replay_meta, dict):
-                agg["replay_trace"] = replay_meta
-                ai_meta = agg.get("ai_audit")
-                if isinstance(ai_meta, dict):
-                    ai_meta["replay_trace_file"] = replay_meta.get("file")
-                    ai_meta["replay_trace_version"] = replay_meta.get("version")
-            llm_trace_meta = self._write_llm_reasoning_trace(agg, output)
-            if isinstance(llm_trace_meta, dict):
-                agg["llm_reasoning_trace"] = llm_trace_meta
-                ai_meta = agg.get("ai_audit")
-                if isinstance(ai_meta, dict):
-                    ai_meta["llm_reasoning_json_file"] = llm_trace_meta.get("json_file")
-                    ai_meta["llm_reasoning_markdown_file"] = llm_trace_meta.get("markdown_file")
-            try:
-                output.parent.mkdir(parents=True, exist_ok=True)
-                with open(output, "w") as f:
-                    json.dump(agg, f, indent=2)
-                agg["saved_to"] = str(output)
-            except Exception as e:
-                agg["saved_to"] = None
-                agg["write_error"] = str(e)
-        else:
-            agg["saved_to"] = None
-
         if run_error:
             agg["run_error"] = run_error
-
-        return agg
+        finalize_report_content(
+            agg,
+            findings,
+            normalized_compliance,
+            finding_metrics_builder=self._build_finding_metrics,
+        )
+        return self._persist_final_report(agg, output)

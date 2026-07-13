@@ -1,6 +1,5 @@
 typer
 rich
 litellm
-python-dotenv
 pyyaml
 requests

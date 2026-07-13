@@ -34,6 +34,17 @@ class TestLLMContext(unittest.TestCase):
         self.assertIn("target", content)
         self.assertNotIn("payload too large; truncated aggressively", content)
 
+    def test_prepare_json_payload_redacts_secrets_before_serializing(self):
+        content, truncated = prepare_json_payload(
+            {
+                "password": "llm-secret",
+                "raw_output": "Authorization: Bearer bearer-secret",
+            },
+            max_chars=1000,
+        )
+        self.assertFalse(truncated)
+        self.assertNotIn("llm-secret", content)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,8 @@
+{
+  "max_duration_seconds": 5,
+  "max_duplicate_rate": 0,
+  "max_agentic_actions": 1,
+  "max_high_risk_findings": 0,
+  "max_open_high_risk_clusters": 0,
+  "forbidden_risk_classes": ["secret_exposure", "unauthenticated_exposure"]
+}

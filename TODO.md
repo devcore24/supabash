@@ -53,7 +53,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Improve summary notes to include direct agentic `ffuf` activity (not fallback-only).
 - [ ] **Next hardening step (high ROI)**
     - [ ] Generalize summary notes for all agentic tools (`tool`, `target`, `delta`) so operator gets consistent per-action change summaries beyond `ffuf`.
-    - [ ] Add report consistency test that asserts Summary/Detailed severity tables cannot diverge on CRITICAL presence.
+    - [x] Add report consistency test that asserts Summary/Detailed severity tables cannot diverge on CRITICAL presence.
     - [ ] Add planner regression test for “second replan still covered” to ensure graceful stop without noisy repeat loops.
 
 ---
@@ -85,6 +85,7 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [x] Add post-closure early-stop + TLS-only `sslscan` gating to reduce low-value tail actions.
     - [x] Reduce duplicate report noise by suppressing repeated low-signal `INFO` nuclei findings while preserving raw evidence artifacts.
     - [x] Collapse closely related endpoint-level high-risk findings into coarser planner clusters so one exposed surface does not inflate coverage debt.
+    - [x] Add a reusable SOC2/PCI-aware quality-gate evaluator for lint errors, duplicate rate, action count, high-risk yield, expected risk classes/titles, and open-cluster budgets.
     - [ ] Add benchmark quality gates (time, actions, duplicate rate, CRITICAL/HIGH yield) across SOC2 + PCI regression runs.
     - [ ] Extend planner-cluster merge heuristics across adjacent surfaces when they share the same exposure family but differ by path/scheme/product fingerprint.
 
@@ -131,22 +132,23 @@ This document outlines the step-by-step tasks required to build **Supabash**, th
     - [ ] Suppress or down-rank speculative discovery noise such as validated `404` paths and synthetic same-origin dead endpoints.
     - [ ] Improve browser fallback normalization so observations and discoveries are clearly separated.
 - [ ] **Add deterministic report lint**
-    - [ ] Build a post-run lint layer that validates summary/detail consistency, malformed URLs, cluster closure correctness, broken evidence references, and likely-noise discoveries.
-    - [ ] Emit dedicated lint artifacts such as `report_lint.json` and `report_lint.md`.
-    - [ ] Fail benchmark scenarios when critical lint violations are present.
+    - [x] Build a post-run lint layer that validates summary/detail consistency, malformed URLs, cluster closure correctness, broken evidence references, and likely-noise discoveries.
+    - [x] Emit dedicated lint artifacts such as `report_lint.json` and `report_lint.md`.
+    - [x] Fail benchmark scenarios when critical lint violations are present.
 - [ ] **Add structured LLM report QA overlay**
     - [ ] Add an LLM review step that critiques summaries, prioritization, wording, and likely missed top findings.
     - [ ] Restrict the LLM to structured patch output only; do not allow it to rewrite raw evidence directly.
     - [ ] Build final reports from raw evidence + deterministic normalization + approved QA overlays.
 - [ ] **Build a SOC2 benchmark matrix first**
+    - [x] Add initial SOC2 positive and PCI protected report/expectations fixtures and execute them in CI.
     - [ ] Define positive vulnerable scenarios for secret exposure, unauthenticated data-plane access, monitoring/config exposure, metrics exposure, object-store exposure, and debug leakage.
     - [ ] Define negative protected scenarios for the same service families.
     - [ ] Define mixed multi-service scenarios to catch cross-service closure and target-selection bugs.
     - [ ] Add report-quality fixture scenarios containing known malformed/noisy artifacts.
 - [ ] **Define run quality thresholds**
     - [ ] Score high-risk cluster recall, false-positive high-risk rate, closure correctness, summary fidelity, malformed artifact rate, duplicate rate, action efficiency, and stability impact.
-    - [ ] Emit machine-readable benchmark score artifacts.
-    - [ ] Use benchmark thresholds to gate future changes for SOC2 first, then extend to PCI and other profiles.
+    - [x] Emit machine-readable benchmark score artifacts.
+    - [x] Use benchmark thresholds to gate future changes for SOC2 first, then extend to PCI and other profiles.
 - [ ] **Rework chat/TUI into the main operator control plane**
     - [ ] Add natural-language intent routing so users can request audits without knowing exact commands.
     - [ ] Make chat infer workflow, target, compliance profile, and mode where possible, then propose a concrete run for confirmation.

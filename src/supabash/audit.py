@@ -53,13 +53,22 @@ from supabash.llm import LLMClient
 from supabash import prompts
 from supabash.llm_context import prepare_json_payload
 from supabash.report_order import stable_sort_results
-from supabash.report import (
-    build_compliance_coverage_matrix,
-    build_recommended_next_actions,
-    normalize_report_summary,
-)
 from supabash.report_schema import SCHEMA_VERSION, annotate_schema_validation
+from supabash.report_lint import write_report_lint_artifacts
 from supabash.aggressive_caps import apply_aggressive_caps
+from supabash.redaction import redact_command_text, redact_sensitive_data
+from supabash.secure_io import atomic_write_text
+from supabash.finding_identity import (
+    classify_finding_risk_class,
+    extract_finding_host_path,
+    finding_dedup_key,
+    normalize_finding_text,
+)
+from supabash.report_finalize import (
+    atomic_write_report_json,
+    attach_evidence_artifact_references,
+    finalize_report_content,
+)
 
 logger = setup_logger(__name__)
 
@@ -840,7 +849,7 @@ class AuditOrchestrator:
                     "fallback_for": entry.get("fallback_for"),
                     "data": entry.get("data"),
                 }
-                artifact_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                atomic_write_text(artifact_path, json.dumps(payload, indent=2))
                 rel_path = str(artifact_path.relative_to(report_root))
                 artifacts.append(
                     {
@@ -873,7 +882,7 @@ class AuditOrchestrator:
                 "artifacts": artifacts,
             }
             manifest_path = evidence_dir / "manifest.json"
-            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            atomic_write_text(manifest_path, json.dumps(manifest, indent=2))
 
             agg["evidence_pack"] = {
                 "dir": str(evidence_dir.relative_to(report_root)),
@@ -1021,13 +1030,17 @@ class AuditOrchestrator:
     def _run_tool(self, name: str, func) -> Dict[str, Any]:
         try:
             result = func()
+            if isinstance(result, dict):
+                result = redact_sensitive_data(result)
             success = result.get("success", False)
             entry: Dict[str, Any] = {"tool": name, "success": success, "data": result}
             # Auditability: bubble up the executed command (if the tool wrapper provides it).
             if isinstance(result, dict):
                 cmd = result.get("command")
                 if isinstance(cmd, str) and cmd.strip():
-                    entry["command"] = cmd.strip()
+                    safe_command = redact_command_text(cmd)
+                    result["command"] = safe_command
+                    entry["command"] = safe_command
             if not success and isinstance(result, dict):
                 err = result.get("error")
                 if isinstance(err, str) and err.strip():
@@ -1379,118 +1392,16 @@ class AuditOrchestrator:
         return findings
 
     def _normalize_finding_text(self, value: Any) -> str:
-        text = str(value or "").strip().lower()
-        if not text:
-            return ""
-        # Normalize dynamic fragments to keep dedup keys stable across runs.
-        text = re.sub(r"\b[0-9a-f]{24,}\b", "<hex>", text)
-        text = re.sub(r"\b\d{8,}\b", "<num>", text)
-        text = re.sub(r"\s+", " ", text)
-        return text
+        return normalize_finding_text(value)
 
     def _extract_finding_host_path(self, finding: Dict[str, Any]) -> Tuple[str, str]:
-        text = " ".join(
-            [
-                str(finding.get("title") or "").strip(),
-                str(finding.get("evidence") or "").strip(),
-            ]
-        ).strip()
-
-        def _parse_candidate_url(candidate_text: Any) -> Tuple[str, str]:
-            candidate = str(candidate_text or "").strip().rstrip(".,;")
-            if not candidate:
-                return "", ""
-            try:
-                parsed = urlparse(candidate)
-                host = str(parsed.hostname or "").strip().lower()
-                path = str(parsed.path or "/").strip()
-                if parsed.query:
-                    path = f"{path}?{parsed.query}"
-                return host, path
-            except Exception:
-                return "", ""
-
-        if text:
-            url_match = re.search(r"https?://[^\s)>'\"`]+", text, flags=re.IGNORECASE)
-            if url_match:
-                host, path = _parse_candidate_url(url_match.group(0))
-                if host:
-                    return host, path
-
-        target_hint = str(finding.get("target") or "").strip()
-        if target_hint:
-            host, path = _parse_candidate_url(target_hint)
-            if host:
-                return host, path
-
-        if not text:
-            return "", ""
-
-        host_match = re.search(r"\bhost=([a-z0-9._:-]+)\b", text, flags=re.IGNORECASE)
-        host = str(host_match.group(1)).strip().lower() if host_match else ""
-        path_match = re.search(r"\bpath=(/[^\s,;)]*)", text, flags=re.IGNORECASE)
-        if path_match:
-            return host, str(path_match.group(1)).strip()
-
-        endpoint_match = re.search(r"\s(/[a-z0-9._~!$&'()*+,;=:@%/-]{2,})", text, flags=re.IGNORECASE)
-        if endpoint_match:
-            return host, str(endpoint_match.group(1)).strip()
-        return host, ""
+        return extract_finding_host_path(finding)
 
     def _classify_finding_risk_class(self, finding: Dict[str, Any]) -> str:
-        tool = str(finding.get("tool") or "").strip().lower()
-        title = self._normalize_finding_text(finding.get("title"))
-        evidence = self._normalize_finding_text(finding.get("evidence"))
-        kind = self._normalize_finding_text(finding.get("type"))
-        joined = " ".join(x for x in (title, evidence, kind) if x)
-
-        if any(k in joined for k in ("service role key", "secret", "token", "password", "credential", "api key")):
-            return "secret_exposure"
-        if any(k in joined for k in ("sql injection", "xss", "rce", "cve", "vulnerability", "auth bypass")):
-            return "known_vulnerability"
-        if any(k in joined for k in ("tls", "ssl", "cipher", "certificate", "cleartext", "https")):
-            return "transport_security"
-        if any(
-            k in joined
-            for k in ("without authentication", "unauthenticated", "anonymous", "publicly accessible", "exposed", "open port")
-        ):
-            return "unauthenticated_exposure"
-        if any(k in joined for k in ("redis", "postgres", "database", "rest api", "rpc", "rls")):
-            return "data_plane_exposure"
-        if any(k in joined for k in ("missing security headers", "misconfig", "configuration", "default")):
-            return "security_misconfiguration"
-
-        if tool in ("sqlmap", "nuclei", "trivy", "wpscan", "browser_use"):
-            return "vulnerability_signal"
-        if tool in ("hydra", "medusa", "crackmapexec"):
-            return "credential_access"
-        if tool in ("sslscan",):
-            return "transport_security"
-        if tool in ("nmap", "httpx", "whatweb", "subfinder", "katana", "gobuster", "ffuf"):
-            return "surface_discovery"
-        if tool in ("dnsenum", "theharvester", "netdiscover"):
-            return "asset_discovery"
-        return "general_security_signal"
+        return classify_finding_risk_class(finding)
 
     def _finding_dedup_key(self, finding: Dict[str, Any]) -> str:
-        tool = self._normalize_finding_text(finding.get("tool")) or "-"
-        severity = str(finding.get("severity") or "INFO").strip().upper() or "INFO"
-        template = self._normalize_finding_text(finding.get("type"))
-        if not template:
-            template = self._normalize_finding_text(finding.get("title"))
-        host, path = self._extract_finding_host_path(finding)
-        evidence_norm = self._normalize_finding_text(finding.get("evidence"))
-        evidence_hash = hashlib.sha256(evidence_norm.encode("utf-8")).hexdigest()[:16] if evidence_norm else "0" * 16
-        return "|".join(
-            [
-                tool,
-                template or "-",
-                host or "-",
-                path or "-",
-                severity,
-                evidence_hash,
-            ]
-        )
+        return finding_dedup_key(finding)
 
     def _annotate_finding_keys(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for finding in findings or []:
@@ -1579,6 +1490,8 @@ class AuditOrchestrator:
             s = s.strip()
             if not s:
                 return ""
+            if s == "<redacted>":
+                return s
             if len(s) <= 2:
                 return "***"
             if len(s) <= 6:
@@ -4131,6 +4044,84 @@ class AuditOrchestrator:
             "commands": commands,
         }
 
+    def _attach_report_artifacts(self, agg: Dict[str, Any], output: Path) -> None:
+        self._write_evidence_pack(agg, output)
+
+    @staticmethod
+    def _sanitize_report_data(agg: Dict[str, Any]) -> None:
+        sanitized = redact_sensitive_data(agg)
+        if isinstance(sanitized, dict):
+            agg.clear()
+            agg.update(sanitized)
+
+    def _persist_final_report(self, agg: Dict[str, Any], output: Optional[Path]) -> Dict[str, Any]:
+        self._sanitize_report_data(agg)
+        if output is not None:
+            try:
+                self._attach_report_artifacts(agg, output)
+            except Exception as e:
+                agg["artifact_write_error"] = str(e)
+            try:
+                attach_evidence_artifact_references(agg)
+            except Exception as e:
+                agg["evidence_reference_error"] = str(e)
+            self._sanitize_report_data(agg)
+            try:
+                write_report_lint_artifacts(
+                    agg,
+                    output,
+                    provenance_mode="pre_lint_report_object",
+                )
+            except Exception as e:
+                agg["report_lint_error"] = str(e)
+            try:
+                annotate_schema_validation(agg, kind="audit")
+            except Exception as e:
+                agg["schema_validation_error"] = str(e)
+            self._sanitize_report_data(agg)
+            agg["saved_to"] = str(output)
+            try:
+                atomic_write_report_json(agg, output)
+            except Exception as e:
+                logger.error(f"Failed to write audit report: {e}")
+                agg["saved_to"] = None
+                agg["write_error"] = str(e)
+        else:
+            try:
+                write_report_lint_artifacts(agg, None)
+            except Exception as e:
+                agg["report_lint_error"] = str(e)
+            try:
+                annotate_schema_validation(agg, kind="audit")
+            except Exception as e:
+                agg["schema_validation_error"] = str(e)
+            self._sanitize_report_data(agg)
+            agg["saved_to"] = None
+        self._sanitize_report_data(agg)
+        return agg
+
+    def _finalize_partial_report(
+        self,
+        agg: Dict[str, Any],
+        output: Optional[Path],
+        compliance_profile: Optional[str],
+    ) -> Dict[str, Any]:
+        try:
+            findings = self._collect_findings(agg)
+        except Exception:
+            findings = [item for item in (agg.get("findings") or []) if isinstance(item, dict)]
+        try:
+            findings = self._apply_compliance_tags(agg, findings, compliance_profile)
+        except Exception:
+            pass
+        finalize_report_content(
+            agg,
+            findings,
+            compliance_profile,
+            finding_metrics_builder=self._build_finding_metrics,
+        )
+        return self._persist_final_report(agg, output)
+
     def run(
         self,
         target: str,
@@ -5295,7 +5286,7 @@ class AuditOrchestrator:
         if canceled():
             agg["canceled"] = True
             agg["finished_at"] = time.time()
-            return agg
+            return self._finalize_partial_report(agg, output, normalized_compliance)
 
         if parallel_web and web_targets:
             # Overlap nmap with web tools when URL is provided
@@ -5387,7 +5378,7 @@ class AuditOrchestrator:
                     if canceled() or (isinstance(harvester_entry.get("data"), dict) and harvester_entry["data"].get("canceled")):
                         agg["canceled"] = True
                         agg["finished_at"] = time.time()
-                        return agg
+                        return self._finalize_partial_report(agg, output, normalized_compliance)
 
                 netdiscover_entry = run_netdiscover_if_requested()
                 if netdiscover_entry is not None:
@@ -5395,7 +5386,7 @@ class AuditOrchestrator:
                     if canceled() or (isinstance(netdiscover_entry.get("data"), dict) and netdiscover_entry["data"].get("canceled")):
                         agg["canceled"] = True
                         agg["finished_at"] = time.time()
-                        return agg
+                        return self._finalize_partial_report(agg, output, normalized_compliance)
 
                 aircrack_entry = run_aircrack_if_requested()
                 if aircrack_entry is not None:
@@ -5403,7 +5394,7 @@ class AuditOrchestrator:
                     if canceled() or (isinstance(aircrack_entry.get("data"), dict) and aircrack_entry["data"].get("canceled")):
                         agg["canceled"] = True
                         agg["finished_at"] = time.time()
-                        return agg
+                        return self._finalize_partial_report(agg, output, normalized_compliance)
 
                 scoutsuite_entry = run_scoutsuite_if_requested()
                 if scoutsuite_entry is not None:
@@ -5411,7 +5402,7 @@ class AuditOrchestrator:
                     if canceled() or (isinstance(scoutsuite_entry.get("data"), dict) and scoutsuite_entry["data"].get("canceled")):
                         agg["canceled"] = True
                         agg["finished_at"] = time.time()
-                        return agg
+                        return self._finalize_partial_report(agg, output, normalized_compliance)
 
                 prowler_entry = run_prowler_if_requested()
                 if prowler_entry is not None:
@@ -5419,7 +5410,7 @@ class AuditOrchestrator:
                     if canceled() or (isinstance(prowler_entry.get("data"), dict) and prowler_entry["data"].get("canceled")):
                         agg["canceled"] = True
                         agg["finished_at"] = time.time()
-                        return agg
+                        return self._finalize_partial_report(agg, output, normalized_compliance)
 
                 tls_ports = self._tls_candidate_ports_from_nmap(
                     nmap_entry.get("data", {}).get("scan_data", {}),
@@ -5505,7 +5496,7 @@ class AuditOrchestrator:
             if canceled() or (isinstance(nmap_entry.get("data"), dict) and nmap_entry["data"].get("canceled")):
                 agg["canceled"] = True
                 agg["finished_at"] = time.time()
-                return agg
+                return self._finalize_partial_report(agg, output, normalized_compliance)
 
             if not lock_web_targets and not web_targets and nmap_entry.get("success"):
                 web_targets = []
@@ -5648,7 +5639,7 @@ class AuditOrchestrator:
                 if canceled() or (isinstance(harvester_entry.get("data"), dict) and harvester_entry["data"].get("canceled")):
                     agg["canceled"] = True
                     agg["finished_at"] = time.time()
-                    return agg
+                    return self._finalize_partial_report(agg, output, normalized_compliance)
 
             netdiscover_entry = run_netdiscover_if_requested()
             if netdiscover_entry is not None:
@@ -5656,7 +5647,7 @@ class AuditOrchestrator:
                 if canceled() or (isinstance(netdiscover_entry.get("data"), dict) and netdiscover_entry["data"].get("canceled")):
                     agg["canceled"] = True
                     agg["finished_at"] = time.time()
-                    return agg
+                    return self._finalize_partial_report(agg, output, normalized_compliance)
 
             aircrack_entry = run_aircrack_if_requested()
             if aircrack_entry is not None:
@@ -5664,7 +5655,7 @@ class AuditOrchestrator:
                 if canceled() or (isinstance(aircrack_entry.get("data"), dict) and aircrack_entry["data"].get("canceled")):
                     agg["canceled"] = True
                     agg["finished_at"] = time.time()
-                    return agg
+                    return self._finalize_partial_report(agg, output, normalized_compliance)
 
             scoutsuite_entry = run_scoutsuite_if_requested()
             if scoutsuite_entry is not None:
@@ -5672,7 +5663,7 @@ class AuditOrchestrator:
                 if canceled() or (isinstance(scoutsuite_entry.get("data"), dict) and scoutsuite_entry["data"].get("canceled")):
                     agg["canceled"] = True
                     agg["finished_at"] = time.time()
-                    return agg
+                    return self._finalize_partial_report(agg, output, normalized_compliance)
 
             prowler_entry = run_prowler_if_requested()
             if prowler_entry is not None:
@@ -5680,7 +5671,7 @@ class AuditOrchestrator:
                 if canceled() or (isinstance(prowler_entry.get("data"), dict) and prowler_entry["data"].get("canceled")):
                     agg["canceled"] = True
                     agg["finished_at"] = time.time()
-                    return agg
+                    return self._finalize_partial_report(agg, output, normalized_compliance)
 
             if web_targets:
                 nuclei_covered_by_broad = False
@@ -5805,7 +5796,7 @@ class AuditOrchestrator:
                 if canceled():
                     agg["canceled"] = True
                     agg["finished_at"] = time.time()
-                    return agg
+                    return self._finalize_partial_report(agg, output, normalized_compliance)
                 note("tool_start", "sqlmap", f"Running sqlmap on {sql_target}")
                 preflight = self._sqlmap_preflight_viability(
                     sql_target,
@@ -5843,7 +5834,7 @@ class AuditOrchestrator:
                 ):
                     agg["canceled"] = True
                     agg["finished_at"] = time.time()
-                    return agg
+                    return self._finalize_partial_report(agg, output, normalized_compliance)
         else:
             agg["results"].append(
                 self._skip_tool("sqlmap", "No parameterized URL detected in input/discovered endpoints")
@@ -5854,7 +5845,7 @@ class AuditOrchestrator:
             if canceled():
                 agg["canceled"] = True
                 agg["finished_at"] = time.time()
-                return agg
+                return self._finalize_partial_report(agg, output, normalized_compliance)
             supabase_cfg = self._tool_config("supabase_audit")
             max_pages = supabase_cfg.get("max_pages", 5)
             try:
@@ -5890,7 +5881,7 @@ class AuditOrchestrator:
             if canceled():
                 agg["canceled"] = True
                 agg["finished_at"] = time.time()
-                return agg
+                return self._finalize_partial_report(agg, output, normalized_compliance)
             note("tool_start", "trivy", "Running trivy")
             trivy_entry = self._run_tool_if_enabled(
                 "trivy",
@@ -5905,7 +5896,7 @@ class AuditOrchestrator:
             if canceled() or (isinstance(trivy_entry.get("data"), dict) and trivy_entry["data"].get("canceled")):
                 agg["canceled"] = True
                 agg["finished_at"] = time.time()
-                return agg
+                return self._finalize_partial_report(agg, output, normalized_compliance)
 
         # Stable ordering: when parallel web tools are used, as_completed() appends results in
         # completion order which is non-deterministic; sort for predictable reporting.
@@ -5918,7 +5909,7 @@ class AuditOrchestrator:
         if canceled():
             agg["canceled"] = True
             agg["finished_at"] = time.time()
-            return agg
+            return self._finalize_partial_report(agg, output, normalized_compliance)
 
         ffuf_fallback_hits = []
         for entry in agg.get("results", []) or []:
@@ -5966,71 +5957,10 @@ class AuditOrchestrator:
             min_severity=min_remediation_severity,
         )
         findings = self._apply_compliance_tags(agg, findings, normalized_compliance)
-        agg["findings"] = findings
-        had_structured_summary = isinstance(agg.get("summary"), dict)
-        llm_calls = agg.get("llm", {}).get("calls") if isinstance(agg.get("llm"), dict) else []
-        llm_summary_error = any(
-            isinstance(call, dict) and str(call.get("error") or "").strip()
-            for call in (llm_calls if isinstance(llm_calls, list) else [])
+        finalize_report_content(
+            agg,
+            findings,
+            normalized_compliance,
+            finding_metrics_builder=self._build_finding_metrics,
         )
-        normalized_summary, summary_meta = normalize_report_summary(
-            agg.get("summary"),
-            findings if isinstance(findings, list) else [],
-            finding_clusters=agg.get("finding_clusters") if isinstance(agg.get("finding_clusters"), list) else None,
-        )
-        if isinstance(normalized_summary, dict):
-            agg["summary"] = normalized_summary
-            if llm_summary_error and not had_structured_summary:
-                fallback_note = "Deterministic summary fallback used because the LLM summary was unavailable or invalid."
-                notes = agg.setdefault("summary_notes", [])
-                if isinstance(notes, list) and fallback_note not in notes:
-                    notes.append(fallback_note)
-        if isinstance(summary_meta, dict) and summary_meta:
-            agg["summary_normalization"] = summary_meta
-        else:
-            agg.pop("summary_normalization", None)
-        try:
-            agg["finding_metrics"] = self._build_finding_metrics(findings if isinstance(findings, list) else [])
-        except Exception:
-            pass
-        try:
-            summary_findings = []
-            summary = agg.get("summary")
-            if isinstance(summary, dict):
-                sf = summary.get("findings")
-                if isinstance(sf, list):
-                    summary_findings = sf
-            agg["recommended_next_actions"] = build_recommended_next_actions(
-                summary_findings,
-                findings if isinstance(findings, list) else [],
-                normalized_compliance,
-            )
-        except Exception:
-            pass
-        if isinstance(normalized_compliance, str) and normalized_compliance.strip():
-            try:
-                agg["compliance_coverage_matrix"] = build_compliance_coverage_matrix(agg)
-            except Exception:
-                pass
-        agg["finished_at"] = time.time()
-        try:
-            annotate_schema_validation(agg, kind="audit")
-        except Exception:
-            pass
-
-        if output is not None:
-            # Persist tool artifacts + manifest for audit-prep reproducibility.
-            self._write_evidence_pack(agg, output)
-            try:
-                output.parent.mkdir(parents=True, exist_ok=True)
-                with open(output, "w") as f:
-                    json.dump(agg, f, indent=2)
-                agg["saved_to"] = str(output)
-            except Exception as e:
-                logger.error(f"Failed to write audit report: {e}")
-                agg["saved_to"] = None
-                agg["write_error"] = str(e)
-        else:
-            agg["saved_to"] = None
-
-        return agg
+        return self._persist_final_report(agg, output)

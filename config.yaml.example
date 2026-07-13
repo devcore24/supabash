@@ -2,13 +2,12 @@ core:
   log_level: INFO
   save_reports: true
   report_exports:
-    html: true
-    pdf: true
+    html: false
+    pdf: false
   allowed_hosts:
   - localhost
   - 127.0.0.1
-  - 10.0.0.0/24
-  consent_accepted: true
+  consent_accepted: false
   allow_public_ips: false
 llm:
   enabled: true
@@ -75,7 +74,8 @@ tools:
     enabled: true
     timeout_seconds: 300
   nuclei:
-    enabled: false
+    # Enabled by default because broad Nuclei coverage is part of the baseline audit pipeline.
+    enabled: true
     timeout_seconds: 1800
     rate_limit: 10
     # Optional safety cap for the multi-target broad baseline nuclei pass in normal mode.
@@ -87,7 +87,7 @@ tools:
     enabled: true
     timeout_seconds: 1800
   ffuf:
-    enabled: true
+    enabled: false
     timeout_seconds: 1800
   katana:
     enabled: true
@@ -123,6 +123,7 @@ tools:
       password_env: ""
       cookie_env: ""
       include_secrets_in_task: false
+      # Unsafe compatibility option: embedded secrets can be visible in local process arguments.
   sqlmap:
     enabled: true
     timeout_seconds: 1800

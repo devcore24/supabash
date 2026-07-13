@@ -1,4 +1,5 @@
 import unittest
+import copy
 import sys
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../s
 
 from supabash.report import (
     COMPLIANCE_COVERAGE_ROWS,
+    build_compliance_coverage_matrix,
     build_recommended_next_actions,
     generate_markdown,
     normalize_report_summary,
@@ -16,6 +18,19 @@ from tests.test_artifacts import artifact_path, cleanup_artifact
 
 
 class TestReport(unittest.TestCase):
+    def test_generate_markdown_does_not_mutate_report(self):
+        report = {
+            "target": "localhost",
+            "compliance_profile": "compliance_soc2",
+            "summary": {"summary": "Review complete.", "findings": []},
+            "findings": [],
+            "results": [],
+        }
+        before = copy.deepcopy(report)
+        generate_markdown(report)
+        self.assertEqual(report, before)
+
+
     def test_generate_markdown_basic(self):
         report = {
             "target": "example.com",
@@ -47,6 +62,23 @@ class TestReport(unittest.TestCase):
         self.assertIn("| Tool | Status | Command |", md)
         self.assertIn("Commands Executed", md)
         self.assertIn("nmap example.com", md)
+
+    def test_generate_markdown_redacts_legacy_credential_command(self):
+        report = {
+            "target": "localhost",
+            "results": [
+                {
+                    "tool": "hydra",
+                    "success": True,
+                    "command": "hydra -l admin -p super-secret ssh://localhost",
+                }
+            ],
+            "findings": [],
+        }
+        md = generate_markdown(report)
+        self.assertNotIn("super-secret", md)
+        self.assertIn("<redacted>", md)
+
 
     def test_generate_markdown_compacts_browser_use_command_display(self):
         report = {
@@ -687,7 +719,7 @@ class TestReport(unittest.TestCase):
         self.assertIn("| Vulnerability Discovery & Exposure Checks | Not Assessed | none |", md)
         self.assertIn("basis=inconclusive_signal", md)
         self.assertIn("successful runs produced no evidence payload/findings", md)
-        matrix = report.get("compliance_coverage_matrix")
+        matrix = build_compliance_coverage_matrix(report)
         self.assertIsInstance(matrix, list)
         if isinstance(matrix, list):
             row = next((r for r in matrix if isinstance(r, dict) and r.get("area") == "Vulnerability Discovery & Exposure Checks"), None)
@@ -720,7 +752,7 @@ class TestReport(unittest.TestCase):
         md = generate_markdown(report)
         self.assertIn("| Access Control Exposure Review | Partial | readiness_probe |", md)
         self.assertIn("basis=corroborated_findings", md)
-        matrix = report.get("compliance_coverage_matrix")
+        matrix = build_compliance_coverage_matrix(report)
         self.assertIsInstance(matrix, list)
         if isinstance(matrix, list):
             row = next((r for r in matrix if isinstance(r, dict) and r.get("area") == "Access Control Exposure Review"), None)
@@ -830,7 +862,7 @@ class TestReport(unittest.TestCase):
         md1 = generate_markdown(report)
         md2 = generate_markdown(report)
         self.assertEqual(md1, md2)
-        actions = report.get("recommended_next_actions")
+        actions = build_recommended_next_actions(report["summary"]["findings"], report["findings"], report["compliance_profile"])
         self.assertIsInstance(actions, list)
         if isinstance(actions, list):
             self.assertTrue(actions)

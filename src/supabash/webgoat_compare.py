@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set
 
+from supabash.secure_io import atomic_write_text
+
 
 DEFAULT_BASELINE_PATH = "tests/fixtures/webgoat/webgoat-main-exploits.json"
 
@@ -394,8 +396,7 @@ def _read_json(path: Path) -> Dict[str, Any]:
 
 
 def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    atomic_write_text(path, content)
 
 
 def _default_output_paths(report_path: Path) -> tuple[Path, Path]:

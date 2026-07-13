@@ -1,0 +1,9 @@
+{
+  "max_duration_seconds": 10,
+  "max_duplicate_rate": 0.2,
+  "max_agentic_actions": 4,
+  "min_high_risk_findings": 1,
+  "max_open_high_risk_clusters": 0,
+  "required_risk_classes": ["unauthenticated_exposure"],
+  "required_title_contains": ["prometheus"]
+}

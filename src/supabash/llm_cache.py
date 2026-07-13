@@ -1,10 +1,11 @@
 import hashlib
 import json
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+
+from supabash.secure_io import atomic_write_text
 
 
 @dataclass(frozen=True)
@@ -78,9 +79,7 @@ class LLMCache:
                 "content": content,
                 "meta": meta,
             }
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-            os.replace(tmp, path)
+            atomic_write_text(path, json.dumps(payload, ensure_ascii=False))
         except Exception:
             return
         self._enforce_max_entries()

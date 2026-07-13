@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "target": "localhost",
+  "results": [],
+  "compliance_profile": "compliance_pci",
+  "started_at": 20.0,
+  "finished_at": 22.0,
+  "findings": [],
+  "summary": {"summary": "No high-risk technical exposures were validated.", "findings": []},
+  "ai_audit": {"actions": []},
+  "unresolved_high_risk_clusters": []
+}

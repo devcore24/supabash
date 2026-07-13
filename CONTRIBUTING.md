@@ -10,7 +10,7 @@ git clone <your-fork-url>
 cd supabash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
 
 ### 2) Run tests
@@ -22,7 +22,7 @@ venv/bin/python -m pytest -q
 
 - Do not remove or weaken scope controls (`core.allowed_hosts`, public-IP guardrails, consent checks) without a clear alternative.
 - Any new scanner/tool wrapper must be opt-in and must respect cancellation (`/stop`) when feasible.
-- Do not log or print API keys. Keep secrets in `config.yaml` (gitignored) or environment variables.
+- Do not log or print API keys. Keep secrets in `config.yaml` (gitignored) or environment variables. Commands, scanner results, logs, and LLM-bound payloads containing credential material must pass through central redaction before transmission or persistence.
 
 ## Code style
 

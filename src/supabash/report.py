@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 import re
 import shlex
+from supabash.redaction import redact_command_text
+from supabash.secure_io import atomic_write_text
 
 COMPLIANCE_COVERAGE_ROWS: Dict[str, List[Dict[str, Any]]] = {
     "compliance_pci": [
@@ -329,7 +331,7 @@ def _display_tool_command(entry: Dict[str, Any]) -> str:
     tool = str(entry.get("tool") or "").strip().lower()
     if tool == "browser_use":
         return _compact_browser_use_command(entry, raw)
-    return raw
+    return redact_command_text(raw)
 
 
 def _normalize_mapping_text(value: Any) -> str:
@@ -1506,6 +1508,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("Compliance Coverage Matrix", "#compliance-coverage-matrix") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
         ("Not Assessable Automatically", "#not-assessable-automatically") if isinstance(compliance_profile, str) and compliance_profile.strip() else None,
         ("Evidence Pack", "#evidence-pack") if isinstance(report.get("evidence_pack"), dict) else None,
+        ("Report Lint", "#report-lint") if isinstance(report.get("report_lint"), dict) else None,
         ("Reproducibility Trace", "#reproducibility-trace") if isinstance(report.get("replay_trace"), dict) else None,
         ("LLM Reasoning Trace", "#llm-reasoning-trace") if isinstance(report.get("llm_reasoning_trace"), dict) else None,
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
@@ -1784,7 +1787,6 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         matrix_rows = report.get("compliance_coverage_matrix")
         if not isinstance(matrix_rows, list):
             matrix_rows = build_compliance_coverage_matrix(report)
-            report["compliance_coverage_matrix"] = matrix_rows
         lines.append("\n## Compliance Coverage Matrix")
         lines.append("| Control Area | Status | Evidence Source | Notes |")
         lines.append("|---|---|---|---|")
@@ -1853,6 +1855,32 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     version = str(tool_versions.get(tool_name) or "").strip()
                     if version:
                         lines.append(f"- `{tool_name}`: {version}")
+
+    report_lint = report.get("report_lint")
+    if isinstance(report_lint, dict):
+        lines.append("\n## Report Lint")
+        counts = report_lint.get("counts") if isinstance(report_lint.get("counts"), dict) else {}
+        lines.append(f"- valid: `{str(bool(report_lint.get('valid'))).lower()}`")
+        lines.append(f"- errors: {int(counts.get('ERROR', 0) or 0)}")
+        lines.append(f"- warnings: {int(counts.get('WARNING', 0) or 0)}")
+        lint_artifacts = report.get("report_lint_artifacts")
+        if isinstance(lint_artifacts, dict):
+            lint_json = str(lint_artifacts.get("json_file") or "").strip()
+            lint_md = str(lint_artifacts.get("markdown_file") or "").strip()
+            if lint_json:
+                lines.append(f"- json_file: `{lint_json}`")
+            if lint_md:
+                lines.append(f"- markdown_file: `{lint_md}`")
+        lint_issues = [x for x in (report_lint.get("issues") or []) if isinstance(x, dict)]
+        if lint_issues:
+            lines.append("\n### Lint Issues")
+            for item in lint_issues[:20]:
+                severity = str(item.get("severity") or "INFO").upper()
+                code = str(item.get("code") or "unknown")
+                message = str(item.get("message") or "")
+                path = str(item.get("path") or "").strip()
+                suffix = f" (`{path}`)" if path else ""
+                lines.append(f"- **{severity}** `{code}`: {message}{suffix}")
 
     replay_trace = report.get("replay_trace")
     if isinstance(replay_trace, dict):
@@ -2363,7 +2391,6 @@ def generate_markdown(report: Dict[str, Any]) -> str:
                     lines.append(f"  - Compliance Mapping: {'; '.join(mapped)}")
 
     recommended_actions = build_recommended_next_actions(summary_findings, agg_findings, compliance_profile)
-    report["recommended_next_actions"] = recommended_actions
     if recommended_actions:
         lines.append("\n## Recommended Next Actions")
         for idx, action in enumerate(recommended_actions, start=1):
@@ -2428,5 +2455,5 @@ def generate_markdown(report: Dict[str, Any]) -> str:
 def write_markdown(report: Dict[str, Any], path: Path) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     content = generate_markdown(report)
-    path.write_text(content)
+    atomic_write_text(path, content)
     return str(path)

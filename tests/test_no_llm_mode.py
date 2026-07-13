@@ -25,7 +25,7 @@ class FakeScanner:
 
 
 class TestNoLLMMode(unittest.TestCase):
-    def test_audit_no_llm_skips_summary_and_remediation(self):
+    def test_audit_no_llm_uses_deterministic_summary_and_skips_remediation(self):
         scanners = {
             "nmap": FakeScanner("nmap", {"success": True, "scan_data": {"hosts": []}, "command": "nmap t"}),
             "whatweb": FakeScanner("whatweb", {"success": True, "scan_data": [], "command": "whatweb t"}),
@@ -43,8 +43,16 @@ class TestNoLLMMode(unittest.TestCase):
         out = artifact_path("no_llm_audit.json")
         report = orch.run("t", out, remediate=True, use_llm=False)
         self.assertTrue(out.exists())
-        self.assertNotIn("summary", report)
+        self.assertIn("summary", report)
+        self.assertIn("Deterministic summary", report["summary"]["summary"])
         self.assertEqual(report.get("llm", {}).get("enabled"), False)
+        lint_json = out.parent / f"{out.stem}-lint.json"
+        lint_markdown = out.parent / f"{out.stem}-lint.md"
+        self.assertTrue(lint_json.exists())
+        self.assertTrue(lint_markdown.exists())
+        self.assertIn("report_lint", report)
+        cleanup_artifact(lint_json)
+        cleanup_artifact(lint_markdown)
         cleanup_artifact(out)
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import unittest
 import sys
 import os
 import logging
+import stat
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -13,7 +14,7 @@ import supabash.logger as logger_mod
 
 class TestLogger(unittest.TestCase):
     def test_logging_writes_to_file(self):
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory(dir="/tmp") as tmp:
             tmp_path = Path(tmp)
             log_file = tmp_path / "debug.log"
 
@@ -37,6 +38,11 @@ class TestLogger(unittest.TestCase):
 
                 logger = logger_mod.setup_logger("supabash.test", log_level="DEBUG")
                 logger.debug("test debug message")
+                logger.debug("Password: super-secret")
+                try:
+                    raise ValueError("password=traceback-secret")
+                except ValueError:
+                    logger.exception("test exception")
 
                 # Flush handlers
                 for h in logging.getLogger(logger_mod.APP_NAME).handlers:
@@ -48,6 +54,10 @@ class TestLogger(unittest.TestCase):
                 self.assertTrue(log_file.exists())
                 content = log_file.read_text()
                 self.assertIn("test debug message", content)
+                self.assertNotIn("super-secret", content)
+                self.assertIn("<redacted>", content)
+                self.assertNotIn("traceback-secret", content)
+                self.assertEqual(stat.S_IMODE(log_file.stat().st_mode), 0o600)
             finally:
                 logger_mod.LOG_DIR = old_log_dir
                 logger_mod.LOG_FILE = old_log_file

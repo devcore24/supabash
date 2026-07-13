@@ -1,10 +1,12 @@
 import json
+import stat
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from supabash.llm import LLMClient
+from supabash.llm_cache import CacheSettings, LLMCache
 
 
 class DummyConfig:
@@ -23,7 +25,7 @@ class DummyConfig:
 
 class TestLLMCache(unittest.TestCase):
     def test_llm_cache_avoids_duplicate_completion_calls(self):
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
             cache_dir = Path(td)
             client = LLMClient(config=DummyConfig(cache_dir))
             messages = [{"role": "user", "content": "hello"}]
@@ -50,6 +52,34 @@ class TestLLMCache(unittest.TestCase):
             data = json.loads(files[0].read_text(encoding="utf-8"))
             self.assertIn("content", data)
             self.assertEqual(data["content"], "hi")
+            self.assertEqual(stat.S_IMODE(files[0].stat().st_mode), 0o600)
+
+    def test_cache_overwrite_uses_private_permissions(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            cache_dir = Path(td)
+            cache = LLMCache(CacheSettings(enabled=True, dir=cache_dir, ttl_seconds=60, max_entries=10))
+            path = cache_dir / "entry.json"
+            path.write_text("{\"old\": true}", encoding="utf-8")
+            path.chmod(0o644)
+
+            cache.set("entry", "private response", {"provider": "test"})
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["content"], "private response")
+
+    def test_failed_atomic_replace_preserves_existing_cache_entry(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            cache_dir = Path(td)
+            cache = LLMCache(CacheSettings(enabled=True, dir=cache_dir, ttl_seconds=60, max_entries=10))
+            path = cache_dir / "entry.json"
+            original = "{\"content\": \"existing\"}"
+            path.write_text(original, encoding="utf-8")
+
+            with patch("supabash.secure_io.os.replace", side_effect=OSError("replace failed")):
+                cache.set("entry", "new response", {"provider": "test"})
+
+            self.assertEqual(path.read_text(encoding="utf-8"), original)
+            self.assertEqual(list(cache_dir.glob(f".{path.name}.*.tmp")), [])
 
 
 if __name__ == "__main__":

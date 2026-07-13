@@ -1,9 +1,11 @@
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from supabash.llm_context import prepare_json_payload
+from supabash.secure_io import atomic_write_text
 
 
 @dataclass(frozen=True)
@@ -12,8 +14,9 @@ class SessionStatePaths:
 
 
 def default_chat_state_path() -> Path:
-    repo_root = Path(__file__).resolve().parents[2]
-    return repo_root / ".supabash" / "chat_state.json"
+    override = str(os.getenv("SUPABASH_STATE_DIR") or "").strip()
+    state_dir = Path(override).expanduser() if override else Path.cwd() / ".supabash"
+    return state_dir.resolve() / "chat_state.json"
 
 
 def save_state(path: Path, state: Dict[str, Any], *, max_chars: int = 250_000) -> Tuple[bool, bool]:
@@ -22,9 +25,8 @@ def save_state(path: Path, state: Dict[str, Any], *, max_chars: int = 250_000) -
     Returns (success, truncated).
     """
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
         payload, truncated = prepare_json_payload(state, max_chars=max_chars, max_depth=12)
-        path.write_text(payload, encoding="utf-8")
+        atomic_write_text(path, payload)
         return True, truncated
     except Exception:
         return False, False

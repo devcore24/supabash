@@ -25,6 +25,10 @@ from supabash.session_state import default_chat_state_path, clear_state as clear
 from supabash.report_paths import build_report_paths
 from supabash.slash_parse import normalize_target_token
 from supabash.tool_settings import get_tool_timeout_seconds
+from supabash.report_lint import lint_report as run_report_lint, write_report_lint_artifacts
+from supabash.benchmark_quality import evaluate_report_quality, validate_expectations
+from supabash.secure_io import atomic_write_text
+from supabash.redaction import redact_sensitive_data
 
 app = typer.Typer(
     name="supabash",
@@ -70,6 +74,22 @@ BANNER = r"""
               | |                                
               |_|                                
 """
+
+def _virtual_environment_status() -> tuple[bool, str, dict]:
+    env_path = str(os.getenv("VIRTUAL_ENV") or "").strip()
+    base_prefix = str(getattr(sys, "base_prefix", sys.prefix) or "")
+    prefix = str(getattr(sys, "prefix", "") or "")
+    legacy_prefix = str(getattr(sys, "real_prefix", "") or "")
+    active = bool(env_path or legacy_prefix or (prefix and base_prefix and prefix != base_prefix))
+    resolved = env_path or (prefix if active else "")
+    message = resolved or "not in venv"
+    return active, message, {
+        "VIRTUAL_ENV": env_path or None,
+        "prefix": prefix,
+        "base_prefix": base_prefix,
+        "legacy_real_prefix": legacy_prefix or None,
+    }
+
 
 def print_banner():
     text = Text(BANNER, style="bold cyan")
@@ -562,8 +582,7 @@ def audit(
                 }
                 if status_path is not None:
                     try:
-                        status_path.parent.mkdir(parents=True, exist_ok=True)
-                        status_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                        atomic_write_text(status_path, json.dumps(redact_sensitive_data(payload), indent=2))
                     except Exception:
                         pass
 
@@ -930,9 +949,26 @@ def config(
     """
     logger.info("Command 'config' triggered")
     console.print(Panel("[bold green]Configuration Manager[/bold green]", expand=False))
-    
+
+    def require_saved(saved: bool, action: str) -> None:
+        if saved:
+            return
+        console.print(f"[bold red]Configuration update failed:[/bold red] {action} was not saved.")
+        raise typer.Exit(code=1)
+
     # 1. Handle Flags (Non-Interactive Mode)
-    if provider or key or model or api_base or allow_host or remove_host or list_allowed_hosts or accept_consent or reset_consent or allow_public_ips is not None:
+    if (
+        provider is not None
+        or key is not None
+        or model is not None
+        or api_base is not None
+        or allow_host is not None
+        or remove_host is not None
+        or list_allowed_hosts
+        or accept_consent
+        or reset_consent
+        or allow_public_ips is not None
+    ):
         any_changes = False
 
         if list_allowed_hosts:
@@ -941,61 +977,64 @@ def config(
             for h in allowed_hosts:
                 console.print(f"- {h}")
 
-        if allow_host:
-            config_manager.add_allowed_host(allow_host)
+        if allow_host is not None:
+            require_saved(config_manager.add_allowed_host(allow_host), "Allowed-host update")
             console.print(f"Added allowed host: [cyan]{allow_host}[/cyan]")
             any_changes = True
 
-        if remove_host:
-            config_manager.remove_allowed_host(remove_host)
+        if remove_host is not None:
+            require_saved(config_manager.remove_allowed_host(remove_host), "Allowed-host removal")
             console.print(f"Removed allowed host: [cyan]{remove_host}[/cyan]")
             any_changes = True
 
         if accept_consent:
-            config_manager.set_consent_accepted(True)
+            require_saved(config_manager.set_consent_accepted(True), "Consent update")
             console.print("[green]Consent persisted (consent_accepted=true).[/green]")
             any_changes = True
 
         if reset_consent:
-            config_manager.set_consent_accepted(False)
+            require_saved(config_manager.set_consent_accepted(False), "Consent reset")
             console.print("[yellow]Consent reset (consent_accepted=false).[/yellow]")
             any_changes = True
 
         if allow_public_ips is not None:
-            config_manager.set_allow_public_ips(allow_public_ips)
+            require_saved(config_manager.set_allow_public_ips(allow_public_ips), "Public-IP policy update")
             state = "enabled" if allow_public_ips else "disabled"
             console.print(f"[yellow]Public IP scanning {state}[/yellow] (core.allow_public_ips={bool(allow_public_ips)})")
             any_changes = True
 
-        if provider or key or model or api_base:
+        if provider is not None or key is not None or model is not None or api_base is not None:
             current_llm = config_manager.get_llm_config()
-            # Determine which provider we are editing (defaults to active if not specified)
-            target_provider = provider if provider else current_llm["provider"]
-            
+            target_provider = provider if provider is not None else current_llm["provider"]
+
             if target_provider not in ["openai", "anthropic", "gemini", "ollama", "lmstudio"]:
-                console.print(f"[yellow]Warning: '{target_provider}' is not a standard provider.[/yellow]")
+                console.print(f"[yellow]Warning: {target_provider!r} is not a standard provider.[/yellow]")
 
-            if provider:
-                config_manager.set_active_provider(provider)
-                console.print(f"Active provider set to: [cyan]{provider}[/cyan]")
-                any_changes = True
-            
-            if key:
-                config_manager.set_llm_key(target_provider, key)
-                console.print(f"API Key updated for: [cyan]{target_provider}[/cyan]")
-                any_changes = True
-                
-            if model:
-                config_manager.set_model(target_provider, model)
-                console.print(f"Model updated for [cyan]{target_provider}[/cyan] to: [green]{model}[/green]")
-                any_changes = True
-
+            provider_updates = {}
+            if key is not None:
+                provider_updates["api_key"] = key
+            if model is not None:
+                provider_updates["model"] = model
             if api_base is not None:
-                config_manager.set_api_base(target_provider, api_base)
+                provider_updates["api_base"] = api_base
+            saved = config_manager.configure_llm_provider(
+                target_provider,
+                make_active=provider is not None,
+                **provider_updates,
+            )
+            require_saved(saved, f"Provider update for {target_provider}")
+
+            if provider is not None:
+                console.print(f"Active provider set to: [cyan]{provider}[/cyan]")
+            if key is not None:
+                console.print(f"API Key updated for: [cyan]{target_provider}[/cyan]")
+            if model is not None:
+                console.print(f"Model updated for [cyan]{target_provider}[/cyan] to: [green]{model}[/green]")
+            if api_base is not None:
                 shown = api_base if api_base else "(cleared)"
                 console.print(f"API base updated for [cyan]{target_provider}[/cyan] to: [green]{shown}[/green]")
-                any_changes = True
-            
+            any_changes = True
+
         if any_changes:
             console.print(f"[bold green]Configuration saved to {config_manager.config_file}[/bold green]")
         return
@@ -1048,16 +1087,17 @@ def config(
         new_model = typer.prompt("Enter Model Name (e.g. 'mistral', 'gpt-4')")
         new_base = typer.prompt("Enter API Base URL (Optional, press Enter to skip)", default="")
         
-        # Save new provider
-        config_manager.config["llm"][new_name] = {
-            "api_key": new_key,
-            "model": new_model
-        }
-        if new_base:
-            config_manager.config["llm"][new_name]["api_base"] = new_base
-            
-        config_manager.set_active_provider(new_name)
-        console.print(f"[bold green]Successfully added and switched to custom provider '{new_name}'![/bold green]")
+        saved = config_manager.configure_llm_provider(
+            new_name,
+            api_key=new_key,
+            model=new_model,
+            api_base=new_base,
+            make_active=True,
+        )
+        require_saved(saved, f"Custom provider {new_name}")
+        console.print(
+            f"[bold green]Successfully added and switched to custom provider {new_name!r}![/bold green]"
+        )
         return
 
     # Option 1: Switch/Edit Logic
@@ -1072,9 +1112,9 @@ def config(
         console.print(f"[red]Provider '{choice}' not found.[/red]")
         return
         
-    config_manager.set_active_provider(choice)
+    require_saved(config_manager.set_active_provider(choice), f"Active provider {choice}")
     current_provider = choice
-        
+
     console.print(f"[green]Active provider is now: {current_provider}[/green]")
     
     # Ask to update key/model
@@ -1084,12 +1124,13 @@ def config(
         new_model = typer.prompt("Model Name", default=current_data.get("model", ""))
         new_base = typer.prompt("API Base URL (Optional)", default=current_data.get("api_base", ""))
         
-        config_manager.set_llm_key(current_provider, new_key)
-        config_manager.set_model(current_provider, new_model)
-        if new_base:
-             config_manager.config["llm"][current_provider]["api_base"] = new_base
-             config_manager.save_config(config_manager.config)
-             
+        saved = config_manager.configure_llm_provider(
+            current_provider,
+            api_key=new_key,
+            model=new_model,
+            api_base=new_base,
+        )
+        require_saved(saved, f"Settings for {current_provider}")
         console.print("[bold green]Settings updated![/bold green]")
 
 @app.command()
@@ -1911,6 +1952,140 @@ def chat():
                 pass
             session.save_state(state_path)
 
+@app.command("benchmark-report")
+def benchmark_report_command(
+    report_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Existing Supabash JSON report to evaluate",
+    ),
+    expectations_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="JSON object containing deterministic quality thresholds",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write the benchmark result JSON"),
+):
+    """Evaluate an existing report against deterministic benchmark thresholds."""
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        expectations = json.loads(expectations_path.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ValueError("report must be a JSON object")
+        normalized_expectations = validate_expectations(expectations)
+        result = evaluate_report_quality(report, normalized_expectations)
+    except Exception as e:
+        console.print(f"[red]Unable to evaluate benchmark:[/red] {e}")
+        raise typer.Exit(code=2)
+
+    response = {
+        "report": str(report_path),
+        "expectations": str(expectations_path),
+        "benchmark": result,
+    }
+    if output is not None:
+        try:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_text(output, json.dumps(response, indent=2))
+        except Exception as e:
+            console.print(f"[red]Unable to write benchmark output:[/red] {e}")
+            raise typer.Exit(code=2)
+
+    if json_output:
+        console.print_json(json.dumps(response, indent=2))
+    else:
+        failed = [item for item in result.get("checks", []) if isinstance(item, dict) and not item.get("passed")]
+        status = "[green]PASSED[/green]" if result.get("passed") else "[red]FAILED[/red]"
+        console.print(f"Benchmark: {status} ({len(failed)} failed check(s))")
+        for check in failed[:30]:
+            console.print(
+                f"{check.get('name')}: actual={check.get('actual')} expected={check.get('expected')} - "
+                f"{check.get('message')}",
+                markup=False,
+            )
+    raise typer.Exit(code=0 if result.get("passed") else 1)
+
+@app.command("lint-report")
+def lint_report_command(
+    report_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Existing Supabash JSON report to validate",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+    write_sidecars: bool = typer.Option(
+        False,
+        "--write-sidecars",
+        help="Write <report-stem>-lint.json and <report-stem>-lint.md next to the report",
+    ),
+    strict: bool = typer.Option(False, "--strict", help="Return a failure exit code when warnings are present"),
+):
+    """Validate an existing report without running scanners or an LLM."""
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        console.print(f"[red]Unable to read report JSON:[/red] {e}")
+        raise typer.Exit(code=2)
+    if not isinstance(payload, dict):
+        console.print("[red]Report JSON must contain an object at the top level.[/red]")
+        raise typer.Exit(code=2)
+
+    lint_result = run_report_lint(payload)
+    artifact_meta = None
+    if write_sidecars:
+        try:
+            lint_result, artifact_meta = write_report_lint_artifacts(payload, report_path)
+        except Exception as e:
+            console.print(f"[red]Unable to write lint sidecars:[/red] {e}")
+            raise typer.Exit(code=2)
+
+    response = {"report": str(report_path), "report_lint": lint_result}
+    if isinstance(artifact_meta, dict):
+        response["artifacts"] = artifact_meta
+
+    counts = lint_result.get("counts") if isinstance(lint_result.get("counts"), dict) else {}
+    warnings_count = int(counts.get("WARNING", 0) or 0)
+    if json_output:
+        console.print_json(json.dumps(response, indent=2))
+    else:
+        table = Table(title="Report Lint", show_header=True, header_style="bold magenta")
+        table.add_column("Status")
+        table.add_column("Errors")
+        table.add_column("Warnings")
+        table.add_column("Issues")
+        table.add_row(
+            "[green]VALID[/green]" if lint_result.get("valid") else "[red]INVALID[/red]",
+            str(int(counts.get("ERROR", 0) or 0)),
+            str(warnings_count),
+            str(int(lint_result.get("issue_count", 0) or 0)),
+        )
+        console.print(table)
+        for issue in [x for x in (lint_result.get("issues") or []) if isinstance(x, dict)][:30]:
+            severity = str(issue.get("severity") or "INFO").upper()
+            code = str(issue.get("code") or "unknown")
+            message = str(issue.get("message") or "")
+            path = str(issue.get("path") or "").strip()
+            suffix = f" ({path})" if path else ""
+            console.print(f"{severity} {code}: {message}{suffix}", markup=False)
+        if isinstance(artifact_meta, dict):
+            console.print(
+                f"[green]Lint sidecars:[/green] {artifact_meta.get('json_file')}, "
+                f"{artifact_meta.get('markdown_file')}"
+            )
+
+    exit_code = 1 if not bool(lint_result.get("valid")) or (strict and warnings_count > 0) else 0
+    raise typer.Exit(code=exit_code)
+
 @app.command()
 def doctor(
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
@@ -1942,7 +2117,8 @@ def doctor(
         required=True,
         details={"executable": sys.executable, "version": sys.version.split()[0]},
     )
-    add_check("venv", bool(os.getenv("VIRTUAL_ENV")), os.getenv("VIRTUAL_ENV", "not in venv"), required=False)
+    venv_active, venv_message, venv_details = _virtual_environment_status()
+    add_check("venv", venv_active, venv_message, required=False, details=venv_details)
 
     # Python deps (best-effort)
     for mod in ("typer", "rich", "yaml", "litellm", "requests"):

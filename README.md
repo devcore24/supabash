@@ -160,6 +160,8 @@ If you want Supabash to export reports to **HTML/PDF** (in addition to JSON/Mark
 - **Python packages (installed into the project venv, not system Python):**
   - `weasyprint`, `markdown`
 
+- **Project extra:** install with `pip install -e ".[report]"`.
+
 Installer support:
 - Interactive install: run `sudo ./install.sh` and answer **yes** to the optional PDF prompt
 - Non-interactive: `SUPABASH_PDF_EXPORT=1 sudo ./install.sh`
@@ -180,7 +182,7 @@ supabash doctor --verbose
     - Full manual guide (APT): `docs/system-requirements.md`
 2.  Install Python libraries:
     ```bash
-    pip3 install -r requirements.txt
+    pip install -e .
     ```
 3.  (Recommended for agentic authenticated web workflows) install browser-use:
     ```bash
@@ -219,6 +221,8 @@ SUPABASH_INTEGRATION=1 ./venv/bin/python -m unittest discover -s tests -q
 ---
 
 ## 🧭 AI Audit Workflow
+
+For deterministic report checks and benchmark thresholds, see [Report Quality and Benchmark Gates](docs/report-quality.md).
 
 For a clear breakdown of how `ai-audit` selects tools and produces its final report:
 - [AI Audit Workflow](docs/ai-audit-workflow.md)
@@ -537,6 +541,30 @@ supabash chat
 </details>
 
 <details>
+<summary><strong>lint-report</strong> — Offline deterministic report validation</summary>
+
+```bash
+supabash lint-report REPORT.json [--json] [--strict] [--write-sidecars]
+```
+
+- Runs schema, summary/detail, URL, cluster, evidence-reference, discovery-noise, and command/result secret checks.
+- Returns exit code `0` when valid, `1` for lint failures (or warnings with `--strict`), and `2` for input/I/O errors.
+- Does not run scanners or an LLM and leaves the source report unchanged.
+</details>
+
+<details>
+<summary><strong>benchmark-report</strong> — Offline deterministic quality gates</summary>
+
+```bash
+supabash benchmark-report REPORT.json EXPECTATIONS.json [--json] [--output SCORE.json]
+```
+
+- Recomputes lint and duplicate metrics instead of trusting embedded telemetry.
+- Supports duration, action-count, duplicate-rate, high-risk yield, open-cluster, required-signal, and protected-scenario false-positive budgets.
+- Returns exit code `0` on pass, `1` on gate failure, and `2` for invalid inputs or expectations.
+</details>
+
+<details>
 <summary><strong>doctor</strong> — Environment readiness checks</summary>
 
 ```bash
@@ -579,7 +607,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 
 ## ⚙️ Configuration
 
-- Default config lives in the project root as `config.yaml` (falls back to `~/.supabash/config.yaml`).
+- Config resolution order: `SUPABASH_CONFIG`, an existing `./config.yaml`, a source-checkout `config.yaml`, then `$XDG_CONFIG_HOME/supabash/config.yaml` (or `~/.config/supabash/config.yaml`) (legacy `~/.supabash/config.yaml` is migrated).
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `./debug.log` by default (override with `SUPABASH_LOG_DIR`).
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
@@ -589,6 +617,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Optionally scope Nuclei templates with `tools.nuclei.tags` or `tools.nuclei.severity` for faster audits.
 - `katana` is enabled by default and participates in baseline deep web coverage unless you disable `tools.katana.enabled`.
 - Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
+- Keep `tools.browser_use.auth.include_secrets_in_task=false` on shared systems: enabling it embeds login secrets in the local browser-use process arguments even though Supabash redacts persisted output.
 - Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.min_steps_success`, `tools.browser_use.require_done`, `tools.browser_use.auto_session`, `tools.browser_use.headless`, `tools.browser_use.session`, `tools.browser_use.profile`, `tools.browser_use.command`, `tools.browser_use.model`, `tools.browser_use.allow_deterministic_fallback`, `tools.browser_use.deterministic_max_paths`, `tools.browser_use.auth.{enabled,login_url,notes,username_env,password_env,cookie_env,include_secrets_in_task}`.
 - Browser-use credentials: set `tools.browser_use.api_key`, or set `tools.browser_use.api_key_env`, or export `BROWSER_USE_API_KEY` in the shell running Supabash. Prefer env vars for shared machines/repos instead of storing live keys in `config.yaml`.
 - Agentic browser-use tasks are evidence-aware: Supabash now passes prior findings + rationale/hypothesis into each browser run, then feeds browser observations back into planner context for the next step.
@@ -690,6 +719,9 @@ Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx 
 - **Styling:** Markdown reports include TOC + summary tables for readability
 - **Compliance context:** Reports capture compliance profile/focus and annotate relevant findings with control references
 - **Traceability:** AI-audit includes replay and LLM reasoning trace sidecars (`-replay.{json,md}`, `-llm-trace.{json,md}`) plus decision-trace highlights in the main report
+- **Report lint:** Every persisted audit emits deterministic `*-lint.json` and `*-lint.md` sidecars covering summary consistency, URL hygiene, cluster state, and evidence references.
+- **Secret handling:** Credential-bearing commands, scanner results, logs, LLM-bound JSON, URL query tokens, evidence, and replay traces pass through central redaction; sensitive config/report/trace/state/cache/log files are written atomically with owner-only permissions.
+- **Benchmark gates:** `supabash.benchmark_quality.evaluate_report_quality` provides reusable SOC2/PCI-aware thresholds for regression fixtures.
 - **Export:** Optional HTML/PDF export via WeasyPrint
 
 ---

@@ -21,13 +21,22 @@ dependencies = [
     "typer",
     "rich",
     "litellm",
-    "python-dotenv",
     "pyyaml",
     "requests"
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "markdown>=3.4"]
+report = ["markdown>=3.4", "weasyprint>=60"]
+release = ["build>=1", "twine>=5"]
+
+
 [project.scripts]
 supabash = "supabash.__main__:app"
+
+[tool.setuptools.package-data]
+supabash = ["data/wordlists/*.txt"]
+
 
 [tool.setuptools.packages.find]
 where = ["src"]

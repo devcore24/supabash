@@ -1,4 +1,6 @@
+import copy
 import os
+import tempfile
 import yaml
 import typer
 from pathlib import Path
@@ -6,14 +8,40 @@ from rich.console import Console
 from typing import Dict, Any, List
 
 console = Console()
-
 # Define paths
 APP_NAME = "supabash"
 
-# Prefer a repo-local config.yaml; fall back to ~/.supabash/config.yaml for compatibility
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_DIR = REPO_ROOT
-CONFIG_FILE = CONFIG_DIR / "config.yaml"
+
+def resolve_config_file(
+    *,
+    cwd: Path = None,
+    home: Path = None,
+    environ: Dict[str, str] = None,
+    source_root: Path = None,
+) -> Path:
+    """Resolve a writable config path without assuming a source-checkout layout."""
+    env = environ if isinstance(environ, dict) else os.environ
+    explicit = str(env.get("SUPABASH_CONFIG") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+
+    current = Path(cwd) if cwd is not None else Path.cwd()
+    local = current / "config.yaml"
+    if local.exists():
+        return local.resolve()
+
+    source = Path(source_root) if source_root is not None else Path(__file__).resolve().parents[2]
+    if (source / "pyproject.toml").is_file():
+        return (source / "config.yaml").resolve()
+
+    user_home = Path(home) if home is not None else Path.home()
+    xdg_home = str(env.get("XDG_CONFIG_HOME") or "").strip()
+    config_home = Path(xdg_home).expanduser() if xdg_home else user_home / ".config"
+    return (config_home / APP_NAME / "config.yaml").resolve()
+
+
+CONFIG_FILE = resolve_config_file()
+CONFIG_DIR = CONFIG_FILE.parent
 FALLBACK_CONFIG_DIR = Path.home() / f".{APP_NAME}"
 FALLBACK_CONFIG_FILE = FALLBACK_CONFIG_DIR / "config.yaml"
 
@@ -187,13 +215,16 @@ class ConfigManager:
     def __init__(self):
         self.config_file = CONFIG_FILE
         self.fallback_file = FALLBACK_CONFIG_FILE
-        # Ensure target dir exists
-        if not self.config_file.parent.exists():
-            self.config_file.parent.mkdir(parents=True, exist_ok=True)
-        if not self.fallback_file.parent.exists():
-            self.fallback_file.parent.mkdir(parents=True, exist_ok=True)
-
         self.config = self.load_config()
+
+    @staticmethod
+    def _harden_config_permissions(path: Path) -> None:
+        """Best-effort hardening for an existing credential-bearing config."""
+        try:
+            if path.is_file():
+                path.chmod(0o600)
+        except OSError as e:
+            console.print(f"[yellow]Warning: unable to restrict config permissions for {path}: {e}[/yellow]")
 
     def load_config(self) -> Dict[str, Any]:
         """
@@ -220,6 +251,7 @@ class ConfigManager:
             return DEFAULT_CONFIG
 
         try:
+            self._harden_config_permissions(target_file)
             with open(self.config_file, "r") as f:
                 loaded = yaml.safe_load(f)
                 if not loaded:
@@ -281,14 +313,43 @@ class ConfigManager:
             console.print(f"[bold red]Error parsing config file:[/bold red] {e}")
             raise typer.Exit(code=1)
 
-    def save_config(self, new_config: Dict[str, Any]):
-        """Saves configuration to the YAML file."""
+    def save_config(self, new_config: Dict[str, Any]) -> bool:
+        """Atomically save configuration with owner-only permissions."""
+        temp_path = None
+        fd = -1
         try:
-            with open(self.config_file, "w") as f:
-                yaml.dump(new_config, f, default_flow_style=False, sort_keys=False)
-            self.config = new_config
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
+            fd, temp_name = tempfile.mkstemp(
+                prefix=f".{self.config_file.name}.",
+                suffix=".tmp",
+                dir=str(self.config_file.parent),
+            )
+            temp_path = Path(temp_name)
+            os.fchmod(fd, 0o600)
+            handle = os.fdopen(fd, "w", encoding="utf-8")
+            fd = -1
+            with handle:
+                yaml.safe_dump(new_config, handle, default_flow_style=False, sort_keys=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, self.config_file)
+            self.config_file.chmod(0o600)
+            self.config = copy.deepcopy(new_config)
+            return True
         except Exception as e:
             console.print(f"[red]Error saving config: {e}[/red]")
+            return False
+        finally:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def get_llm_config(self):
         """Returns the active LLM configuration."""
@@ -299,70 +360,117 @@ class ConfigManager:
             "config": llm.get(provider, {})
         }
 
-    def set_llm_key(self, provider: str, api_key: str):
-        """Sets the API key for a specific provider."""
-        if "llm" not in self.config:
-            self.config["llm"] = DEFAULT_CONFIG["llm"]
-        
-        if provider not in self.config["llm"]:
-            self.config["llm"][provider] = {}
-            
-        self.config["llm"][provider]["api_key"] = api_key
-        self.save_config(self.config)
+    _UNSET = object()
 
-    def set_active_provider(self, provider: str):
-        """Sets the active LLM provider."""
-        if "llm" not in self.config:
-            self.config["llm"] = DEFAULT_CONFIG["llm"]
-        self.config["llm"]["provider"] = provider
-        self.save_config(self.config)
+    def _candidate_config(self) -> Dict[str, Any]:
+        current = self.config if isinstance(self.config, dict) else {}
+        return copy.deepcopy(current)
 
-    def set_model(self, provider: str, model: str):
-        """Sets the model for a specific provider."""
-        if provider not in self.config["llm"]:
-            self.config["llm"][provider] = {}
-        self.config["llm"][provider]["model"] = model
-        self.save_config(self.config)
+    def configure_llm_provider(
+        self,
+        provider: str,
+        *,
+        api_key: Any = _UNSET,
+        model: Any = _UNSET,
+        api_base: Any = _UNSET,
+        make_active: bool = False,
+    ) -> bool:
+        """Atomically apply one or more LLM provider updates."""
+        candidate = self._candidate_config()
+        llm = candidate.get("llm")
+        if not isinstance(llm, dict):
+            llm = {}
+            candidate["llm"] = llm
 
-    def set_api_base(self, provider: str, api_base: str):
-        if provider not in self.config["llm"]:
-            self.config["llm"][provider] = {}
-        if api_base is None or str(api_base).strip() == "":
-            self.config["llm"][provider].pop("api_base", None)
-        else:
-            self.config["llm"][provider]["api_base"] = str(api_base).strip()
-        self.save_config(self.config)
+        if any(value is not self._UNSET for value in (api_key, model, api_base)):
+            provider_config = llm.get(provider)
+            if not isinstance(provider_config, dict):
+                provider_config = {}
+                llm[provider] = provider_config
+            if api_key is not self._UNSET:
+                provider_config["api_key"] = api_key
+            if model is not self._UNSET:
+                provider_config["model"] = model
+            if api_base is not self._UNSET:
+                normalized_base = "" if api_base is None else str(api_base).strip()
+                if normalized_base:
+                    provider_config["api_base"] = normalized_base
+                else:
+                    provider_config.pop("api_base", None)
+        if make_active:
+            llm["provider"] = provider
+        return self.save_config(candidate)
+
+    def set_llm_key(self, provider: str, api_key: str) -> bool:
+        """Set an API key without mutating live state before persistence."""
+        return self.configure_llm_provider(provider, api_key=api_key)
+
+    def set_active_provider(self, provider: str) -> bool:
+        """Set the active LLM provider."""
+        return self.configure_llm_provider(provider, make_active=True)
+
+    def set_model(self, provider: str, model: str) -> bool:
+        """Set a provider model."""
+        return self.configure_llm_provider(provider, model=model)
+
+    def set_api_base(self, provider: str, api_base: str) -> bool:
+        """Set or clear a provider API base URL."""
+        return self.configure_llm_provider(provider, api_base=api_base)
 
     def get_allowed_hosts(self) -> List[str]:
-        core = self.config.setdefault("core", {})
-        return list(core.get("allowed_hosts", []))
+        core = self.config.get("core") if isinstance(self.config, dict) else {}
+        if not isinstance(core, dict):
+            return []
+        allowed = core.get("allowed_hosts")
+        return list(allowed) if isinstance(allowed, list) else []
 
-    def add_allowed_host(self, entry: str):
-        core = self.config.setdefault("core", {})
-        allowed = core.setdefault("allowed_hosts", [])
+    def add_allowed_host(self, entry: str) -> bool:
+        candidate = self._candidate_config()
+        core = candidate.get("core")
+        if not isinstance(core, dict):
+            core = {}
+            candidate["core"] = core
+        allowed = core.get("allowed_hosts")
+        if not isinstance(allowed, list):
+            allowed = []
+            core["allowed_hosts"] = allowed
         if entry not in allowed:
             allowed.append(entry)
-        self.save_config(self.config)
+        return self.save_config(candidate)
 
-    def remove_allowed_host(self, entry: str):
-        core = self.config.setdefault("core", {})
-        allowed = core.setdefault("allowed_hosts", [])
-        core["allowed_hosts"] = [x for x in allowed if x != entry]
-        self.save_config(self.config)
+    def remove_allowed_host(self, entry: str) -> bool:
+        candidate = self._candidate_config()
+        core = candidate.get("core")
+        if not isinstance(core, dict):
+            core = {}
+            candidate["core"] = core
+        allowed = core.get("allowed_hosts")
+        if not isinstance(allowed, list):
+            allowed = []
+        core["allowed_hosts"] = [value for value in allowed if value != entry]
+        return self.save_config(candidate)
 
-    def set_consent_accepted(self, accepted: bool):
-        core = self.config.setdefault("core", {})
+    def set_consent_accepted(self, accepted: bool) -> bool:
+        candidate = self._candidate_config()
+        core = candidate.get("core")
+        if not isinstance(core, dict):
+            core = {}
+            candidate["core"] = core
         core["consent_accepted"] = bool(accepted)
-        self.save_config(self.config)
+        return self.save_config(candidate)
 
     def get_allow_public_ips(self) -> bool:
-        core = self.config.setdefault("core", {})
-        return bool(core.get("allow_public_ips", False))
+        core = self.config.get("core") if isinstance(self.config, dict) else {}
+        return bool(core.get("allow_public_ips", False)) if isinstance(core, dict) else False
 
-    def set_allow_public_ips(self, allowed: bool):
-        core = self.config.setdefault("core", {})
+    def set_allow_public_ips(self, allowed: bool) -> bool:
+        candidate = self._candidate_config()
+        core = candidate.get("core")
+        if not isinstance(core, dict):
+            core = {}
+            candidate["core"] = core
         core["allow_public_ips"] = bool(allowed)
-        self.save_config(self.config)
+        return self.save_config(candidate)
 
 # Singleton instance
 config_manager = ConfigManager()

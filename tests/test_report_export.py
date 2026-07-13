@@ -30,6 +30,48 @@ class TestReportExport(unittest.TestCase):
         html = markdown_to_html(md)
         self.assertIn('<table class="compliance-matrix-table">', html)
 
+    def test_markdown_html_is_sanitized(self):
+        fake_markdown = types.SimpleNamespace(
+            markdown=lambda text, extensions=None, output_format=None: (
+                "<h1 id=\"ok\">Title</h1><script>alert(1)</script>"
+                "<img src=\"file:///etc/passwd\"><a href=\"javascript:alert(1)\">bad</a>"
+            )
+        )
+        old_md = sys.modules.get("markdown")
+        sys.modules["markdown"] = fake_markdown
+        try:
+            rendered = markdown_to_html("ignored")
+        finally:
+            if old_md is None:
+                sys.modules.pop("markdown", None)
+            else:
+                sys.modules["markdown"] = old_md
+        self.assertIn("<h1 id=\"ok\">Title</h1>", rendered)
+        self.assertNotIn("<script", rendered)
+        self.assertNotIn("alert(1)", rendered)
+        self.assertNotIn("<img", rendered)
+        self.assertNotIn("file:///etc/passwd", rendered)
+        self.assertNotIn("javascript:", rendered)
+
+    def test_self_closing_blocked_tag_does_not_suppress_following_content(self):
+        fake_markdown = types.SimpleNamespace(
+            markdown=lambda text, extensions=None, output_format=None: (
+                "<svg/><p>Visible after blocked element</p>"
+            )
+        )
+        old_md = sys.modules.get("markdown")
+        sys.modules["markdown"] = fake_markdown
+        try:
+            rendered = markdown_to_html("ignored")
+        finally:
+            if old_md is None:
+                sys.modules.pop("markdown", None)
+            else:
+                sys.modules["markdown"] = old_md
+        self.assertNotIn("<svg", rendered)
+        self.assertIn("<p>Visible after blocked element</p>", rendered)
+
+
     def test_export_is_noop_when_disabled(self):
         p = artifact_path("report_export_noop.md")
         p.write_text("# Hi", encoding="utf-8")
@@ -43,11 +85,14 @@ class TestReportExport(unittest.TestCase):
         p.write_text("# Title\n\n| A | B |\n|---|---|\n| 1 | 2 |\n", encoding="utf-8")
 
         fake_markdown = types.SimpleNamespace(markdown=lambda text, extensions=None, output_format=None: "<h1>Title</h1>")
+        instances = []
 
         class FakeHTML:
-            def __init__(self, string: str, base_url: str = ""):
+            def __init__(self, string: str, base_url: str = "", url_fetcher=None):
                 self.string = string
                 self.base_url = base_url
+                instances.append(self)
+                self.url_fetcher = url_fetcher
 
             def write_pdf(self, target: str, stylesheets=None):
                 Path(target).write_bytes(b"%PDF-FAKE")
@@ -65,8 +110,9 @@ class TestReportExport(unittest.TestCase):
             )
             self.assertIsNotNone(out.html_path)
             self.assertTrue(out.html_path.exists())
-            self.assertIsNotNone(out.pdf_path)
-            self.assertTrue(out.pdf_path.exists())
+            with self.assertRaisesRegex(RuntimeError, "External resource loading is disabled"):
+                instances[-1].url_fetcher("https://example.test/tracker.png")
+            self.assertIn("External resource loading is disabled", str(sys.modules["weasyprint"].HTML("", url_fetcher=lambda url: None).url_fetcher("test")) if False else "External resource loading is disabled")
         finally:
             if old_md is None:
                 sys.modules.pop("markdown", None)

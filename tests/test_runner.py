@@ -28,6 +28,13 @@ class TestCommandRunner(unittest.TestCase):
         self.assertEqual(result.return_code, 0)
         self.assertEqual(result.stdout, "hello")
 
+    def test_persisted_command_redacts_generic_secret_flags(self):
+        result = self.runner.run(["/bin/echo", "--api-token", "secret-value"])
+        self.assertTrue(result.success)
+        self.assertNotIn("secret-value", result.command)
+        self.assertIn("<redacted>", result.command)
+
+
     def test_run_collects_output_across_timeouts(self):
         result = self.runner.run(["bash", "-lc", "echo hi; sleep 0.2; echo bye"], timeout=5)
         self.assertTrue(result.success)

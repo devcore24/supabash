@@ -1,30 +1,47 @@
-# Core Recon & Scanning Tools (Install via apt/pacman/brew)
+# Supabash system-tool manifest (human-readable quick list).
+# Package names and availability vary by Debian/Ubuntu/Kali release; install.sh
+# applies APT, release-download, Go, gem, pipx, and source fallbacks as needed.
+
+# Core APT-distributed scanners/utilities
 nmap
 masscan
-rustscan
-subfinder
-katana
-httpx
 nikto
 sqlmap
 hydra
+medusa
 gobuster
 ffuf
 whatweb
 sslscan
 dnsenum
-# SMB enumeration (optional)
-enum4linux-ng
-
-# Exploit reference lookup (optional; provides `searchsploit`)
-exploitdb
-
-# Wireless (Optional)
-aircrack-ng
-wifite
-
-# Utilities
+netdiscover
+postgresql-client
 jq
 curl
 wget
 git
+unzip
+
+# ProjectDiscovery / release-installed tools (install.sh handles fallbacks)
+nuclei
+subfinder
+katana
+httpx
+rustscan
+
+# Optional vulnerability/container/cloud tooling
+trivy
+wpscan
+theharvester
+enum4linux-ng
+exploitdb              # provides searchsploit where packaged
+scoutsuite
+prowler
+browser-use
+
+# Wireless (optional)
+aircrack-ng
+wifite
+
+# Optional report export system libraries are documented in
+# docs/system-requirements.md and installed with SUPABASH_PDF_EXPORT=1.
