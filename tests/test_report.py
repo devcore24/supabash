@@ -79,6 +79,114 @@ class TestReport(unittest.TestCase):
         self.assertNotIn("super-secret", md)
         self.assertIn("<redacted>", md)
 
+    def test_generate_markdown_includes_codex_planner_trust_boundary(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "findings": [],
+            "ai_audit": {"phase": "baseline+agentic", "planner": {"type": "codex_cli"}},
+            "codex_agent": {
+                "backend": "codex_cli",
+                "mode": "structured_planner",
+                "version": "codex-cli 0.144.3",
+                "auth_mode": "chatgpt",
+                "sandbox": "read-only",
+                "thread_id": "thread-1",
+                "call_count": 2,
+                "planner_attempt_count": 1,
+                "planner_call_count": 1,
+                "summary_call_count": 1,
+                "event_count": 8,
+                "safe_boundary_enforced": True,
+                "trace_file": "report-codex-trace.jsonl",
+                "trace_sha256": "a" * 64,
+                "trace_size_bytes": 1234,
+                "usage": {"input_tokens": 100, "output_tokens": 25},
+            },
+        }
+
+        md = generate_markdown(report)
+
+        self.assertIn("## Codex Planner", md)
+        self.assertIn("auth_mode: chatgpt", md)
+        self.assertIn("sandbox: read-only", md)
+        self.assertIn("report-codex-trace.jsonl", md)
+        self.assertIn("Supabash retained exclusive authority", md)
+
+    def test_generate_markdown_marks_codex_policy_violation_untrusted(self):
+        report = {
+            "target": "localhost",
+            "results": [],
+            "findings": [],
+            "ai_audit": {"phase": "baseline+agentic", "planner": {"type": "codex_cli"}},
+            "codex_agent": {
+                "backend": "codex_cli",
+                "call_count": 1,
+                "planner_call_count": 0,
+                "policy_violation": True,
+                "error": "Codex attempted web_search",
+                "error_operation": "summary",
+                "trace_error": "disk full",
+            },
+        }
+
+        md = generate_markdown(report)
+
+        self.assertIn("prohibited direct Codex activity", md)
+        self.assertIn("run is marked failed", md)
+        self.assertIn("trace_error: disk full", md)
+        self.assertNotIn("retained exclusive authority", md)
+
+    def test_generate_markdown_surfaces_codex_summary_failure(self):
+        report = {
+            "target": "localhost",
+            "run_error": "Codex summary operation failed: unavailable",
+            "results": [],
+            "findings": [],
+            "ai_audit": {"phase": "baseline+agentic", "planner": {"type": "codex_cli"}},
+            "codex_agent": {
+                "backend": "codex_cli",
+                "call_count": 2,
+                "planner_attempt_count": 1,
+                "planner_call_count": 1,
+                "error": "unavailable",
+                "error_operation": "summary",
+                "safe_boundary_enforced": True,
+            },
+        }
+
+        md = generate_markdown(report)
+
+        self.assertIn("## Error", md)
+        self.assertIn("Codex summary operation failed: unavailable", md)
+        self.assertIn("Codex summary operation failed or was rejected", md)
+        self.assertIn("report is marked failed", md)
+        self.assertNotIn("retained exclusive authority", md)
+
+    def test_generate_markdown_surfaces_codex_trace_failure(self):
+        report = {
+            "target": "localhost",
+            "run_error": "Codex trace persistence failed",
+            "results": [],
+            "findings": [],
+            "ai_audit": {"phase": "baseline+agentic", "planner": {"type": "codex_cli"}},
+            "codex_agent": {
+                "backend": "codex_cli",
+                "call_count": 1,
+                "planner_attempt_count": 1,
+                "planner_call_count": 1,
+                "trace_error": "disk full",
+                "safe_boundary_enforced": True,
+            },
+        }
+
+        md = generate_markdown(report)
+
+        self.assertIn("Codex trace persistence failed", md)
+        self.assertIn("audit trail is incomplete", md)
+        self.assertIn("report is incomplete and marked failed", md)
+        self.assertNotIn("retained exclusive authority", md)
+
 
     def test_generate_markdown_compacts_browser_use_command_display(self):
         report = {

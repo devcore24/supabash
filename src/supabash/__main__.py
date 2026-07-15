@@ -493,6 +493,11 @@ def audit(
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
     agentic: bool = typer.Option(False, "--agentic", help="Run an agentic audit (baseline + tool-calling expansion)"),
+    agent_backend: str = typer.Option(
+        "legacy",
+        "--agent-backend",
+        help="Planner backend for agentic mode: legacy|codex (Codex CLI is experimental)",
+    ),
     llm_plan: bool = typer.Option(
         True,
         "--llm-plan/--no-llm-plan",
@@ -505,6 +510,21 @@ def audit(
     """
     Run a full security audit (Infrastructure + Web + Container).
     """
+    normalized_agent_backend = str(agent_backend or "legacy").strip().lower().replace("_", "-")
+    if normalized_agent_backend == "codex-cli":
+        normalized_agent_backend = "codex"
+    if normalized_agent_backend not in {"legacy", "codex"}:
+        console.print("[red]Invalid agent backend. Choose: legacy or codex[/red]")
+        raise typer.Exit(code=1)
+    if normalized_agent_backend == "codex":
+        agentic = True
+        if no_llm:
+            console.print("[red]--no-llm cannot be combined with --agent-backend codex[/red]")
+            raise typer.Exit(code=1)
+        if not llm_plan:
+            console.print("[red]--no-llm-plan cannot be combined with --agent-backend codex[/red]")
+            raise typer.Exit(code=1)
+
     allowed = config_manager.config.get("core", {}).get("allowed_hosts", [])
     if not allow_unsafe and not is_allowed_target(target, allowed):
         console.print(f"[red]Target '{target}' not in allowed_hosts. Edit config.yaml or use --force to proceed.[/red]")
@@ -639,7 +659,18 @@ def audit(
             except Exception:
                 return
 
-    orchestrator = AIAuditOrchestrator() if agentic else AuditOrchestrator()
+    codex_error_types: tuple = ()
+    if normalized_agent_backend == "codex":
+        from supabash.codex_audit import CodexAIAuditOrchestrator, CodexBackendUnavailable
+
+        codex_error_types = (CodexBackendUnavailable,)
+        try:
+            orchestrator = CodexAIAuditOrchestrator()
+        except codex_error_types as exc:
+            console.print(f"[red]Codex backend is not ready:[/red] {exc}")
+            raise typer.Exit(code=1)
+    else:
+        orchestrator = AIAuditOrchestrator() if agentic else AuditOrchestrator()
     run_kwargs = dict(
         container_image=container_image,
         mode=mode,
@@ -708,8 +739,12 @@ def audit(
         run_kwargs["llm_plan"] = bool(llm_plan)
         run_kwargs["max_actions"] = int(max_actions)
 
-    with console.status("[bold green]Running AI audit steps...[/bold green]" if agentic else "[bold green]Running audit steps...[/bold green]"):
-        report = orchestrator.run(target, out_path, **run_kwargs)
+    try:
+        with console.status("[bold green]Running AI audit steps...[/bold green]" if agentic else "[bold green]Running audit steps...[/bold green]"):
+            report = orchestrator.run(target, out_path, **run_kwargs)
+    except codex_error_types as exc:
+        console.print(f"[red]Codex backend is not ready:[/red] {exc}")
+        raise typer.Exit(code=1)
 
     saved_path = report.get("saved_to")
     run_error = report.get("run_error")
@@ -727,25 +762,32 @@ def audit(
         if run_error:
             console.print(f"[red]{run_error}[/red]")
 
+    markdown_write_failed = False
     if saved_path:
         try:
             from supabash.report import write_markdown
-            from supabash.report_export import export_from_markdown_file
             md_written = write_markdown(report, md_path)
             console.print(f"[green]Markdown report written to {md_written}[/green]")
-            exports = export_from_markdown_file(Path(md_written), config=config_manager.config)
-            if exports.html_path:
-                console.print(f"[green]HTML report written to {exports.html_path}[/green]")
-            if exports.pdf_path:
-                console.print(f"[green]PDF report written to {exports.pdf_path}[/green]")
-            if exports.html_error:
-                console.print(f"[yellow]HTML export skipped:[/yellow] {exports.html_error}")
-            if exports.pdf_error:
-                console.print(f"[yellow]PDF export skipped:[/yellow] {exports.pdf_error}")
         except Exception as e:
+            markdown_write_failed = True
             console.print(f"[yellow]Failed to write Markdown report:[/yellow] {e}")
+        else:
+            try:
+                from supabash.report_export import export_from_markdown_file
 
-    if agentic and run_error:
+                exports = export_from_markdown_file(Path(md_written), config=config_manager.config)
+                if exports.html_path:
+                    console.print(f"[green]HTML report written to {exports.html_path}[/green]")
+                if exports.pdf_path:
+                    console.print(f"[green]PDF report written to {exports.pdf_path}[/green]")
+                if exports.html_error:
+                    console.print(f"[yellow]HTML export skipped:[/yellow] {exports.html_error}")
+                if exports.pdf_error:
+                    console.print(f"[yellow]PDF export skipped:[/yellow] {exports.pdf_error}")
+            except Exception as e:
+                console.print(f"[yellow]Optional report export skipped:[/yellow] {e}")
+
+    if run_error or not saved_path or markdown_write_failed:
         raise typer.Exit(code=1)
 
 
@@ -841,6 +883,11 @@ def ai_audit(
         "--llm-plan/--no-llm-plan",
         help="Use tool-calling LLM planning for agentic expansion (requires LLM enabled)",
     ),
+    agent_backend: str = typer.Option(
+        "legacy",
+        "--agent-backend",
+        help="Planner backend: legacy|codex (Codex CLI is experimental)",
+    ),
     max_actions: int = typer.Option(10, "--max-actions", help="Maximum agentic expansion actions"),
     remediate: bool = typer.Option(False, "--remediate", help="Use the LLM to generate concrete remediation steps + code snippets"),
     no_llm: bool = typer.Option(False, "--no-llm", help="Disable LLM summary/remediation for this run (offline/no-LLM mode)"),
@@ -919,6 +966,7 @@ def ai_audit(
         aircrack_airmon=aircrack_airmon,
         no_browser_use=no_browser_use,
         agentic=True,
+        agent_backend=agent_backend,
         llm_plan=llm_plan,
         max_actions=max_actions,
         remediate=remediate,
@@ -1523,6 +1571,8 @@ def chat():
                 continue
 
             invoked_ai_audit = str(parts[0] if parts else "").strip().lower() == "/ai-audit"
+            requested_agent_backend = "legacy"
+            agent_backend_parse_error = ""
             target = None
             mode = "normal"
             # `/ai-audit` in chat is a convenience alias to `/audit --agentic`.
@@ -1556,6 +1606,23 @@ def chat():
                     continue
                 if token == "--agentic":
                     agentic = True
+                    i += 1
+                    continue
+                if token == "--agent-backend":
+                    if i + 1 >= len(parts):
+                        agent_backend_parse_error = "--agent-backend requires legacy or codex"
+                        break
+                    requested_agent_backend = str(parts[i + 1]).strip().lower()
+                    if requested_agent_backend not in {"legacy", "codex"}:
+                        agent_backend_parse_error = "--agent-backend must be legacy or codex"
+                        break
+                    i += 2
+                    continue
+                if token.startswith("--agent-backend="):
+                    requested_agent_backend = token.split("=", 1)[1].strip().lower()
+                    if requested_agent_backend not in {"legacy", "codex"}:
+                        agent_backend_parse_error = "--agent-backend must be legacy or codex"
+                        break
                     i += 1
                     continue
                 if token == "--compliance" and i + 1 < len(parts):
@@ -1643,6 +1710,16 @@ def chat():
                     i += 1
                     continue
                 i += 1
+
+            if agent_backend_parse_error:
+                console.print(f"[red]Invalid option:[/red] {agent_backend_parse_error}")
+                continue
+            if requested_agent_backend == "codex":
+                console.print(
+                    "[yellow]The Codex agent backend is currently available from the terminal CLI only.[/yellow] "
+                    "Run `supabash ai-audit TARGET --agent-backend codex`."
+                )
+                continue
 
             if not target:
                 console.print(
@@ -2090,6 +2167,11 @@ def lint_report_command(
 def doctor(
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
     verbose: bool = typer.Option(False, "--verbose", help="Print extra details"),
+    codex: bool = typer.Option(
+        False,
+        "--codex",
+        help="Require Codex CLI readiness (ChatGPT-subscription authentication by default)",
+    ),
 ):
     """
     Check environment readiness (config + system binaries).
@@ -2142,6 +2224,93 @@ def doctor(
         add_check("llm.key", True, "checked at runtime", required=False)
     except Exception as e:
         add_check("llm", False, f"error: {e}", required=False)
+
+    codex_cfg = config_manager.config.get("codex", {})
+    if not isinstance(codex_cfg, dict):
+        codex_cfg = {}
+    codex_command = str(codex_cfg.get("command") or "codex")
+    require_chatgpt = bool(codex_cfg.get("require_chatgpt", True))
+    codex_path = shutil.which(codex_command)
+    add_check(
+        "bin:codex",
+        bool(codex_path),
+        codex_path or "missing",
+        required=bool(codex),
+        details={"which": codex_path},
+    )
+    if codex:
+        try:
+            from supabash.codex_audit import build_codex_runtime_config
+            from supabash.codex_runtime import CodexRuntime, ambient_codex_context_keys
+
+            inspection = CodexRuntime(
+                build_codex_runtime_config(config_manager.config)
+            ).inspect()
+            ambient_context = ambient_codex_context_keys()
+            add_check(
+                "codex.context",
+                not ambient_context,
+                (
+                    "standalone terminal"
+                    if not ambient_context
+                    else "ambient Codex/ChatGPT task context detected; use a standalone terminal"
+                ),
+                required=True,
+                details={"ambient_markers": list(ambient_context)},
+            )
+            add_check(
+                "codex.version",
+                bool(inspection.installed and inspection.version),
+                inspection.version or inspection.error or "unavailable",
+                required=True,
+                details={"command": inspection.command},
+            )
+            add_check(
+                "codex.capabilities",
+                bool(getattr(inspection, "capabilities_ok", True)),
+                (
+                    "required non-interactive flags available"
+                    if getattr(inspection, "capabilities_ok", True)
+                    else "missing: "
+                    + ", ".join(getattr(inspection, "missing_capabilities", ()) or ())
+                ),
+                required=True,
+                details={
+                    "missing": list(getattr(inspection, "missing_capabilities", ()) or ())
+                },
+            )
+            instruction_files = tuple(
+                getattr(inspection, "global_instruction_files", ()) or ()
+            )
+            add_check(
+                "codex.instructions",
+                bool(getattr(inspection, "global_instructions_ok", True)),
+                (
+                    "no global Codex AGENTS instructions"
+                    if getattr(inspection, "global_instructions_ok", True)
+                    else "global AGENTS instructions detected; use an auth-only Codex home"
+                ),
+                required=True,
+                details={"files": list(instruction_files)},
+            )
+            add_check(
+                "codex.auth",
+                bool(
+                    inspection.authenticated
+                    and (inspection.is_chatgpt or not require_chatgpt)
+                ),
+                inspection.auth_mode or inspection.error or "not authenticated with ChatGPT",
+                required=True,
+                details={
+                    "authenticated": inspection.authenticated,
+                    "is_chatgpt": inspection.is_chatgpt,
+                },
+            )
+        except Exception as exc:
+            add_check("codex.version", False, f"error: {exc}", required=True)
+            add_check("codex.capabilities", False, f"error: {exc}", required=True)
+            add_check("codex.instructions", False, f"error: {exc}", required=True)
+            add_check("codex.auth", False, f"error: {exc}", required=True)
 
     # Reports directory
     reports_dir = Path("reports")

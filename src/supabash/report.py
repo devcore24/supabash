@@ -1511,6 +1511,7 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         ("Report Lint", "#report-lint") if isinstance(report.get("report_lint"), dict) else None,
         ("Reproducibility Trace", "#reproducibility-trace") if isinstance(report.get("replay_trace"), dict) else None,
         ("LLM Reasoning Trace", "#llm-reasoning-trace") if isinstance(report.get("llm_reasoning_trace"), dict) else None,
+        ("Codex Planner", "#codex-planner") if isinstance(report.get("codex_agent"), dict) else None,
         ("Agentic Expansion", "#agentic-expansion") if isinstance(report.get("ai_audit"), dict) else None,
         ("Unresolved High-Risk Clusters", "#unresolved-high-risk-clusters")
         if isinstance(report.get("unresolved_high_risk_clusters"), list)
@@ -1534,6 +1535,9 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     err = report.get("error")
     if isinstance(err, str) and err.strip():
         errors.append(err.strip())
+    run_error = report.get("run_error")
+    if isinstance(run_error, str) and run_error.strip() and run_error.strip() not in errors:
+        errors.append(run_error.strip())
     ai = report.get("ai_audit")
     if isinstance(ai, dict):
         planner = ai.get("planner")
@@ -1733,7 +1737,54 @@ def generate_markdown(report: Dict[str, Any]) -> str:
     lines.append("\n## Methodology")
     lines.append("- Baseline: deterministic evidence collection with scope controls and safe defaults.")
     if isinstance(report.get("ai_audit"), dict):
-        lines.append("- Agentic expansion: tool-calling planner proposes additional evidence collection within allowed scope.")
+        codex_agent = report.get("codex_agent")
+        if isinstance(codex_agent, dict):
+            codex_error = str(codex_agent.get("error") or "").strip()
+            codex_error_operation = str(codex_agent.get("error_operation") or "").strip()
+            codex_calls = codex_agent.get("planner_call_count")
+            policy_violation = bool(codex_agent.get("policy_violation"))
+            integrity_failure = bool(codex_agent.get("policy_integrity_failure"))
+            trace_failure = bool(
+                str(codex_agent.get("trace_error") or "").strip()
+                or codex_agent.get("trace_truncated")
+            )
+            if policy_violation:
+                lines.append(
+                    "- Agentic expansion: prohibited direct Codex activity was detected; "
+                    "the Codex portion of this run is untrusted and the report is marked failed."
+                )
+            elif integrity_failure:
+                lines.append(
+                    "- Agentic expansion: the Codex event stream was incomplete or malformed; "
+                    "policy compliance could not be verified and the report is marked failed."
+                )
+            elif trace_failure:
+                lines.append(
+                    "- Agentic expansion: the Codex trace could not be persisted; "
+                    "the report is incomplete and marked failed."
+                )
+            elif codex_error and codex_error_operation == "planner":
+                lines.append(
+                    "- Agentic expansion: the Codex planner was enabled but encountered an error; "
+                    "Supabash retained scope enforcement and report finalization."
+                )
+            elif codex_error:
+                lines.append(
+                    f"- Agentic expansion: the Codex {codex_error_operation or 'report'} operation "
+                    "failed; collected evidence was preserved and the report is marked failed."
+                )
+            elif isinstance(codex_calls, int) and codex_calls > 0:
+                lines.append(
+                    "- Agentic expansion: Codex returned schema-constrained planning decisions; "
+                    "Supabash retained scope validation and tool execution authority."
+                )
+            else:
+                lines.append(
+                    "- Agentic expansion: the Codex planner was configured, but no successful "
+                    "planner turn was recorded."
+                )
+        else:
+            lines.append("- Agentic expansion: tool-calling planner proposes additional evidence collection within allowed scope.")
     else:
         lines.append("- Agentic expansion: not enabled for this run.")
     if isinstance(compliance_profile, str) and compliance_profile.strip():
@@ -1922,6 +1973,96 @@ def generate_markdown(report: Dict[str, Any]) -> str:
         lines.append(
             "- note: captures explicit planner rationale/messages and decisions; hidden model internals are not included."
         )
+
+    codex_agent = report.get("codex_agent")
+    if isinstance(codex_agent, dict):
+        lines.append("\n## Codex Planner")
+        for label, key in (
+            ("backend", "backend"),
+            ("mode", "mode"),
+            ("cli_version", "version"),
+            ("auth_mode", "auth_mode"),
+            ("sandbox", "sandbox"),
+            ("session_retention", "session_retention"),
+            ("thread_id", "thread_id"),
+            ("calls", "call_count"),
+            ("planner_attempts", "planner_attempt_count"),
+            ("planner_calls", "planner_call_count"),
+            ("summary_calls", "summary_call_count"),
+            ("remediation_calls", "remediation_call_count"),
+            ("events", "event_count"),
+            ("trace_size_bytes", "trace_size_bytes"),
+        ):
+            value = codex_agent.get(key)
+            if isinstance(value, (str, int)) and str(value).strip():
+                lines.append(f"- {label}: {str(value).strip()}")
+        trace_file = codex_agent.get("trace_file")
+        if isinstance(trace_file, str) and trace_file.strip():
+            lines.append(f"- trace_file: `{trace_file.strip()}`")
+        trace_sha256 = codex_agent.get("trace_sha256")
+        if isinstance(trace_sha256, str) and trace_sha256.strip():
+            lines.append(f"- trace_sha256: `{trace_sha256.strip()}`")
+        usage = codex_agent.get("usage")
+        if isinstance(usage, dict) and usage:
+            usage_parts = [f"{key}={value}" for key, value in usage.items() if isinstance(value, (int, float))]
+            if usage_parts:
+                lines.append(f"- usage: {', '.join(usage_parts)}")
+        error = codex_agent.get("error")
+        if isinstance(error, str) and error.strip():
+            lines.append(f"- error: {error.strip()}")
+        error_operation = codex_agent.get("error_operation")
+        if isinstance(error_operation, str) and error_operation.strip():
+            lines.append(f"- error_operation: {error_operation.strip()}")
+        trace_error = codex_agent.get("trace_error")
+        if isinstance(trace_error, str) and trace_error.strip():
+            lines.append(f"- trace_error: {trace_error.strip()}")
+        if codex_agent.get("trace_truncated"):
+            lines.append("- trace_truncated: true")
+        codex_error = str(codex_agent.get("error") or "").strip()
+        codex_calls = codex_agent.get("planner_call_count")
+        policy_violation = bool(codex_agent.get("policy_violation"))
+        integrity_failure = bool(codex_agent.get("policy_integrity_failure"))
+        trace_failure = bool(
+            str(codex_agent.get("trace_error") or "").strip()
+            or codex_agent.get("trace_truncated")
+        )
+        safe_boundary = bool(codex_agent.get("safe_boundary_enforced"))
+        if policy_violation:
+            lines.append(
+                "- trust boundary: prohibited direct Codex activity was observed. The Codex turn "
+                "and any derived output are untrusted; the run is marked failed."
+            )
+        elif integrity_failure:
+            lines.append(
+                "- trust boundary: Codex event integrity could not be verified, so direct activity "
+                "cannot be excluded; the run is untrusted and marked failed."
+            )
+        elif trace_failure:
+            lines.append(
+                "- trust boundary: the sanitized Codex trace was not persisted, so the expected "
+                "audit trail is incomplete; the report is marked failed."
+            )
+        elif codex_error:
+            lines.append(
+                f"- trust boundary: the Codex {str(error_operation or 'report').strip()} operation "
+                "failed or was rejected; Supabash retained scope enforcement, tool execution "
+                "authority, and deterministic report finalization."
+            )
+        elif safe_boundary and isinstance(codex_calls, int) and codex_calls > 0:
+            lines.append(
+                "- trust boundary: Codex returned structured planning decisions; Supabash retained "
+                "exclusive authority to validate scope and execute registered tools."
+            )
+        elif isinstance(codex_calls, int) and codex_calls > 0:
+            lines.append(
+                "- trust boundary: Codex returned planning output, but the required planner safety "
+                "boundary was not fully verified; do not treat tool-execution isolation as proven."
+            )
+        else:
+            lines.append(
+                "- trust boundary: Codex was configured but no planning decision was recorded; "
+                "Supabash remained the enforcement and evidence layer."
+            )
 
     # Agentic expansion details (if present)
     ai = report.get("ai_audit")

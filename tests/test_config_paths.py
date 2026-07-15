@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 import supabash.__main__ as main_module
 
-from supabash.config import ConfigManager, resolve_config_file
+from supabash.config import DEFAULT_CONFIG, ConfigManager, resolve_config_file
 from supabash.session_state import default_chat_state_path
 
 
@@ -118,6 +118,56 @@ class TestConfigPaths(unittest.TestCase):
             self.assertIsInstance(loaded, dict)
             self.assertEqual(stat.S_IMODE(config_file.stat().st_mode), 0o600)
             self.assertFalse(fallback_file.parent.exists())
+
+    def test_codex_defaults_are_added_without_overwriting_user_values(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            root = Path(td)
+            config_file = root / "config.yaml"
+            config_file.write_text(
+                "codex:\n"
+                "  command: /opt/codex/bin/codex\n"
+                "  timeout_seconds: 45\n"
+                "  ignore_user_config: false\n"
+                "  custom_setting: retained\n",
+                encoding="utf-8",
+            )
+            manager = ConfigManager.__new__(ConfigManager)
+            manager.config_file = config_file
+            manager.fallback_file = root / "legacy" / "config.yaml"
+
+            loaded = manager.load_config()
+
+            self.assertEqual(loaded["codex"]["command"], "/opt/codex/bin/codex")
+            self.assertIsNone(loaded["codex"]["codex_home"])
+            self.assertEqual(loaded["codex"]["timeout_seconds"], 45)
+            self.assertFalse(loaded["codex"]["ignore_user_config"])
+            self.assertEqual(loaded["codex"]["custom_setting"], "retained")
+            self.assertEqual(loaded["codex"]["sandbox"], "read-only")
+            self.assertTrue(loaded["codex"]["require_chatgpt"])
+            self.assertFalse(loaded["codex"]["persistent_thread"])
+            self.assertEqual(loaded["codex"]["preflight_timeout_seconds"], 10)
+            self.assertEqual(loaded["codex"]["max_input_chars"], 24000)
+            self.assertEqual(loaded["codex"]["max_events"], 500)
+            self.assertEqual(loaded["codex"]["max_event_chars"], 16384)
+            self.assertIn("shell_tool", loaded["codex"]["disabled_features"])
+
+    def test_missing_codex_block_uses_an_independent_default_copy(self):
+        with tempfile.TemporaryDirectory(dir="/tmp") as td:
+            root = Path(td)
+            config_file = root / "config.yaml"
+            config_file.write_text("core: {}\n", encoding="utf-8")
+            manager = ConfigManager.__new__(ConfigManager)
+            manager.config_file = config_file
+            manager.fallback_file = root / "legacy" / "config.yaml"
+
+            loaded = manager.load_config()
+
+            self.assertEqual(loaded["codex"], DEFAULT_CONFIG["codex"])
+            self.assertIsNot(loaded["codex"], DEFAULT_CONFIG["codex"])
+            loaded["codex"]["command"] = "changed"
+            loaded["codex"]["disabled_features"].append("test-only")
+            self.assertEqual(DEFAULT_CONFIG["codex"]["command"], "codex")
+            self.assertNotIn("test-only", DEFAULT_CONFIG["codex"]["disabled_features"])
 
     def test_failed_atomic_save_preserves_existing_config(self):
         with tempfile.TemporaryDirectory() as td:

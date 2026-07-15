@@ -82,6 +82,37 @@ DEFAULT_CONFIG = {
         # Redact secrets from chat history/state.
         "redact_secrets": True,
     },
+    # Experimental Codex CLI planner backend (used by `ai-audit --agent-backend codex`).
+    # Codex proposes actions; Supabash remains responsible for scope validation,
+    # wrapper execution, evidence collection, and report generation.
+    "codex": {
+        "command": "codex",
+        # Optional dedicated auth-only Codex home. Authenticate this home separately
+        # and keep global AGENTS files absent/empty so planner context stays isolated.
+        "codex_home": None,
+        "timeout_seconds": 300,
+        "preflight_timeout_seconds": 10,
+        "sandbox": "read-only",
+        "require_chatgpt": True,
+        "ignore_user_config": True,
+        "persistent_thread": False,
+        "max_input_chars": 24000,
+        "max_events": 500,
+        "max_event_chars": 16384,
+        # Codex is a reasoning-only planner here; Supabash owns all tool execution.
+        "disabled_features": [
+            "plugins",
+            "remote_plugin",
+            "apps",
+            "shell_tool",
+            "browser_use",
+            "computer_use",
+            "in_app_browser",
+            "image_generation",
+            "multi_agent",
+            "workspace_dependencies",
+        ],
+    },
     # Tool registry (enable/disable tools globally)
     # Note: some tools are also conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL).
     "tools": {
@@ -279,6 +310,12 @@ class ConfigManager:
                             loaded["chat"].setdefault(k, v)
                     else:
                         loaded["chat"] = DEFAULT_CONFIG.get("chat", {})
+                default_codex = DEFAULT_CONFIG.get("codex", {})
+                if not isinstance(loaded.get("codex"), dict):
+                    loaded["codex"] = copy.deepcopy(default_codex)
+                else:
+                    for k, v in default_codex.items():
+                        loaded["codex"].setdefault(k, copy.deepcopy(v))
                 if "tools" not in loaded:
                     loaded["tools"] = DEFAULT_CONFIG["tools"]
                 else:

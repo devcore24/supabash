@@ -50,6 +50,43 @@ chat:
   summary_keep_last_messages: 24
   max_summary_chars: 1200
   redact_secrets: true
+# Experimental Codex CLI planner backend. Codex proposes actions while Supabash
+# validates scope, executes its wrappers, and owns evidence/report generation.
+codex:
+  command: codex
+  # Optional auth-only home for maximum isolation. Authenticate it separately with:
+  # CODEX_HOME=/path/to/auth-only-home codex login
+  # Global AGENTS.md/AGENTS.override.md files in the effective home must be absent or empty.
+  codex_home: null
+  timeout_seconds: 300
+  preflight_timeout_seconds: 10
+  sandbox: read-only
+  # Require an existing ChatGPT-subscription login instead of silently using an API key.
+  require_chatgpt: true
+  # Ignore mutable Codex CLI behavior settings while retaining CODEX_HOME authentication.
+  ignore_user_config: true
+  # Ephemeral by default so target context is not retained in Codex's session store.
+  # Set true only when you explicitly want resumable per-engagement Codex context.
+  persistent_thread: false
+  # Bound the evidence/context sent to each planner turn.
+  max_input_chars: 24000
+  # Defensive per-turn limits for captured Codex JSONL events. Supabash caps
+  # these at 1,000 events and 32,768 characters per event. The sanitized,
+  # metadata-only engagement trace is separately capped at 4 MiB/4,000 records.
+  max_events: 500
+  max_event_chars: 16384
+  # Planner-only boundary: Codex reasons; Supabash executes registered tools.
+  disabled_features:
+    - plugins
+    - remote_plugin
+    - apps
+    - shell_tool
+    - browser_use
+    - computer_use
+    - in_app_browser
+    - image_generation
+    - multi_agent
+    - workspace_dependencies
 # Tool registry (enable/disable tools globally)
 # Notes:
 # - Some tools are conditional/opt-in at runtime (e.g. sqlmap requires a parameterized URL, nikto is slow/noisy).

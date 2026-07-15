@@ -14,6 +14,11 @@ class FakeAuditOrchestrator:
         return {"saved_to": str(output)}
 
 
+class FakeFailedWriteOrchestrator:
+    def run(self, target, output, **kwargs):
+        return {"saved_to": None, "write_error": "disk full"}
+
+
 class TestAuditCLI(unittest.TestCase):
     def test_audit_blocks_public_ip_by_default(self):
         main_module.config_manager.config.setdefault("core", {})["allow_public_ips"] = False
@@ -43,6 +48,16 @@ class TestAuditCLI(unittest.TestCase):
         cleanup_artifact(out.with_suffix(".md"))
         cleanup_artifact(out.with_suffix(".html"))
         cleanup_artifact(out.with_suffix(".pdf"))
+
+    def test_audit_returns_nonzero_when_report_was_not_saved(self):
+        with patch.object(main_module, "AuditOrchestrator", FakeFailedWriteOrchestrator):
+            result = runner.invoke(
+                main_module.app,
+                ["audit", "localhost", "--force", "--yes"],
+            )
+        self.assertNotEqual(result.exit_code, 0, result.stdout)
+        self.assertIn("failed to write report file", result.stdout)
+        self.assertIn("disk full", result.stdout)
 
 
 if __name__ == "__main__":

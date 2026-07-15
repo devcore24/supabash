@@ -103,11 +103,12 @@ Supabash tracks open HIGH/CRITICAL finding clusters during the run.
 - Endpoint-level browser observations can close matching high-risk clusters when the target/path and risk family align; broad host-only correlation is intentionally constrained.
 
 ### 5) Graceful fallback is built‑in
-If tool‑calling fails or isn’t supported, Supabash skips the agentic phase and still writes the baseline report.
+With the legacy backend, unsupported provider tool-calling skips the agentic phase and still writes the baseline report. With the opt-in Codex backend, preflight happens before baseline scanning; a preflight failure starts no scan. A later Codex failure preserves collected evidence but marks the report failed.
+
+The Codex backend must be launched from a standalone WSL/Linux terminal. Supabash rejects nested launches from Codex or ChatGPT app tasks before preflight or scanning so ambient task instructions cannot become planner context. It also rejects non-empty or symlinked global `AGENTS.md`/`AGENTS.override.md` files in the effective Codex home; use an empty normal home or a separately authenticated `codex.codex_home`. `supabash doctor --codex` checks both boundaries together with the installed CLI version, required non-interactive flags, and ChatGPT authentication.
 
 ### LLM Enablement
-`ai-audit` only uses the LLM when `llm.enabled=true` in `config.yaml`.  
-If `llm.enabled=false` (or `--no-llm` is passed), the run stays baseline‑only.
+The default `legacy` backend follows `llm.enabled` and `--no-llm`; disabling the LLM keeps the run baseline-only. The explicit `--agent-backend codex` path uses the separate `codex` configuration and requires planning, so it rejects `--no-llm` and `--no-llm-plan` instead of silently downgrading.
 
 ---
 
@@ -132,8 +133,10 @@ The combined report also exposes run-quality metrics such as:
 
 ## Key Guarantees
 
-- Baseline audit always runs (agentic is optional).
+- Baseline audit runs for normal and ready agentic backends. A requested Codex backend must pass its preflight first, so an unavailable Codex installation causes a clean failure before scanning.
 - Tool calling cannot bypass hard constraints or enable disabled tools.
+- Codex is a schema-constrained planner only: it runs read-only in an empty private workspace with user config, rules, global AGENTS instructions, generated context, web access, and direct tool features disabled or rejected. Supabash remains the only scanner executor.
+- Codex protocol capture fails closed on incomplete, malformed, truncated, unknown-action, or direct-tool events. The optional trace contains bounded structural metadata rather than raw model or tool payloads.
 - Report output is deterministic and auditable.
 - Low-signal duplicate `INFO` findings are suppressed in the final finding list while raw tool evidence remains preserved in the evidence/result artifacts.
 - Deep web follow-up can skip a target that becomes unavailable after baseline pressure instead of continuing to hammer an unhealthy service.

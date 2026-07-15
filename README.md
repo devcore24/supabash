@@ -174,6 +174,8 @@ Enable exports:
 supabash doctor
 supabash doctor --json
 supabash doctor --verbose
+# Include Codex CLI installation and ChatGPT-login checks for the experimental backend.
+supabash doctor --codex
 ```
 
 ### Manual Installation
@@ -311,7 +313,7 @@ If web tools show `Executable not found`, install system requirements via `insta
 Cloud posture checks and Supabase audits are **beta** and not comprehensive; validate findings with manual review where required.
 
 ### 2b. AI Audit (Baseline + Agentic Expansion)
-AI audit combines the deterministic `audit` pipeline with a bounded, tool-calling expansion phase for additional evidence collection (useful when Nmap finds multiple web ports). It produces one unified report.
+AI audit combines the deterministic `audit` pipeline with a bounded planning and expansion phase for additional evidence collection (useful when Nmap finds multiple web ports). It produces one unified report. The existing `legacy` planner remains the default.
 ```bash
 supabash ai-audit 192.168.1.10 --yes
 supabash audit 192.168.1.10 --agentic --yes   # alias
@@ -341,7 +343,7 @@ supabash ai-audit 192.168.1.10 --yes --compliance bsi
 
 ```
 Notes:
-- AI audit uses provider tool-calling to plan additional evidence collection. If tool-calling is unsupported, Supabash logs a warning, skips the agentic phase, and still produces the baseline report.
+- The default `legacy` backend uses provider tool-calling to plan additional evidence collection. If tool-calling is unsupported, Supabash logs a warning, skips the agentic phase, and still produces the baseline report.
 - Agentic planning uses a `profile` field (`fast|standard|aggressive|compliance_*`) to guide assessment intensity and compliance posture.
 - Baseline pipeline uses fast port discovery (`rustscan` and `masscan` fallback) before nmap service detection when applicable.
 - Baseline web coverage runs one broad nuclei pass across deduplicated live targets, then deep scans on prioritized top targets.
@@ -356,6 +358,40 @@ Notes:
 - Live terminal status includes planner decisions (candidate selection, replan, selected action, critique).
 - LLM trace captures explicit planner messages and decisions only; hidden model-internal reasoning is not exposed by API providers.
 - AI audit writes JSON + Markdown by default; HTML/PDF exports are optional via `core.report_exports`.
+
+### 2c. Experimental Codex CLI Planner
+
+The opt-in Codex backend uses the locally installed Codex CLI as the reasoning layer while keeping Supabash as the audit controller:
+
+```bash
+# Authenticate Codex once with your ChatGPT subscription, then verify readiness.
+codex login
+supabash doctor --codex
+
+# The legacy planner is still the default; select Codex explicitly.
+supabash ai-audit TARGET --agent-backend codex
+```
+
+Run these commands from a standalone WSL/Linux terminal. This backend intentionally refuses to start inside a Codex or ChatGPT app task because ambient task instructions could cross the planner boundary. In an app task, `supabash doctor --codex` reports `codex.context` as failed while still showing the installed version, capabilities, and authentication status; rerun it in a standalone terminal for the final readiness check.
+
+The effective Codex home must also have no non-empty or symlinked `AGENTS.md`/`AGENTS.override.md`; Codex loads those independently of `--ignore-user-config`. `supabash doctor --codex` reports this as `codex.instructions`. You can leave those files absent/empty in your normal Codex home, or set `codex.codex_home` to a dedicated auth-only directory and authenticate that home separately with `CODEX_HOME=/path/to/home codex login`.
+
+This backend is **experimental**. It reuses the Codex CLI's existing ChatGPT login, so a separate OpenAI API key is not required in Supabash configuration. With the safe default `codex.require_chatgpt=true`, Supabash requires ChatGPT-backed Codex authentication rather than silently falling back to API-key billing.
+
+The integration is deliberately narrow:
+
+- Codex receives bounded, redacted audit context and proposes the next structured action.
+- Supabash validates target scope and action policy, invokes only its registered tool wrappers, evaluates the result, and generates the final report and evidence pack.
+- Codex is not given a direct scanner shell. Planner mode requires the `read-only` sandbox and isolated user configuration; unsafe overrides are rejected before scanning.
+- Planner turns run in an owner-only empty workspace, ignore user configuration and exec-policy rules, reject global Codex AGENTS instructions, and suppress generated environment, permission, app, collaboration, and skill context.
+- Codex web search, shell, plugin, app, browser, computer-use, image, and multi-agent features are disabled for planner turns. Required protections may not be removed from `codex.disabled_features`; additional features may be disabled. Unknown configuration fields fail closed.
+- No MCP server is required. Supabash communicates with the local Codex CLI through its non-interactive JSONL interface.
+- Codex JSONL must contain a complete successful lifecycle. Malformed, oversized, truncated, unknown-action, or direct-tool events fail the operation instead of being silently accepted.
+- When enabled, a sanitized `<report-stem>-codex-trace.jsonl` is written beside the normal report, replay, evidence, and lint artifacts. It contains allowlisted structural metadata only—no raw model messages or tool output—and is bounded to 4 MiB and 4,000 records per engagement. The trace does not expose hidden model reasoning.
+- Planner turns are ephemeral by default (`codex.persistent_thread=false`), so target context is not retained in Codex's session store. Opting into persistent threads improves conversational continuity but stores the engagement thread under Codex's own retention controls.
+- The initial Codex preflight checks the executable, required non-interactive capabilities, login mode, global-instruction boundary, and launch context before baseline scanners. If Codex becomes unavailable later, Supabash preserves collected evidence, marks the report failed, and exits nonzero.
+
+Run this backend only against systems you are authorized to assess. A successful Codex preflight does not bypass Supabash consent, allowed-host, public-IP, rate, or tool-specific safety controls.
 
 ### 3. Container Image Scan
 Scan a local Docker image for CVEs and configuration issues (via Trivy).
@@ -393,6 +429,7 @@ I want to audit my staging app for common web vulns
 
 Notes:
 - Chat slash parsing supports a focused subset of `audit`/`ai-audit` options for safe interactive use.
+- The experimental Codex backend is standalone-terminal-only in this release; use `supabash ai-audit TARGET --agent-backend codex` from WSL/Linux rather than a chat slash command or a nested Codex/ChatGPT app task.
 - Use terminal mode (`supabash audit --help` / `supabash ai-audit --help`) for advanced flags such as Hydra/Medusa/CME, ScoutSuite/Prowler, TheHarvester, Netdiscover, Aircrack, and Nuclei tag/severity tuning.
 - Chat suggestions intentionally omit `--yes`; consent still applies via `core.consent_accepted` or interactive prompt behavior.
 
@@ -503,6 +540,7 @@ supabash audit [OPTIONS] TARGET
   - `--remediate` — LLM remediation (steps + code snippets)
   - `--no-llm` — disable LLM for this run
   - `--agentic` — agentic audit mode (baseline + bounded expansion)
+  - `--agent-backend` (default: `legacy`) — planner backend for agentic mode (`legacy|codex`; Codex is experimental)
   - `--llm-plan/--no-llm-plan` — tool-calling LLM planning for agentic expansion (only with `--agentic`)
   - `--no-browser-use` — disable browser-use actions in agentic phase (enabled by default when available)
   - `--max-actions` (default: `10`) — cap agentic expansion length (only with `--agentic`)
@@ -523,6 +561,7 @@ supabash ai-audit [OPTIONS] TARGET
   - `--compliance` — compliance profile (`pci|soc2|iso|dora|nis2|gdpr|bsi`)
   - `--status/--no-status` (default: `--status`) — print live progress
   - `--status-file` — write JSON status updates while running
+  - `--agent-backend` (default: `legacy`) — planner backend (`legacy|codex`; Codex is experimental)
   - `--llm-plan/--no-llm-plan` — tool-calling LLM planning for agentic expansion
   - `--no-browser-use` — disable browser-use actions in agentic phase (enabled by default when available)
   - `--max-actions` (default: `10`) — cap agentic expansion length
@@ -568,8 +607,10 @@ supabash benchmark-report REPORT.json EXPECTATIONS.json [--json] [--output SCORE
 <summary><strong>doctor</strong> — Environment readiness checks</summary>
 
 ```bash
-supabash doctor [--json] [--verbose]
+supabash doctor [--json] [--verbose] [--codex]
 ```
+
+- `--codex` — require Codex CLI availability and compatible authentication in readiness results (ChatGPT subscription by default; governed by `codex.require_chatgpt`)
 </details>
 
 <details>
@@ -610,6 +651,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Config resolution order: `SUPABASH_CONFIG`, an existing `./config.yaml`, a source-checkout `config.yaml`, then `$XDG_CONFIG_HOME/supabash/config.yaml` (or `~/.config/supabash/config.yaml`) (legacy `~/.supabash/config.yaml` is migrated).
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `./debug.log` by default (override with `SUPABASH_LOG_DIR`).
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
+- Experimental Codex planner settings live under `codex`: executable (`command`), process timeout and event/input caps, ChatGPT-auth requirement, and thread persistence. Planner safety requires a standalone terminal, read-only sandboxing, isolated user config and rules, disabled generated context and web/tool features, and an owner-only empty workspace.
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
 - Fast discovery tuning: `tools.nmap.fast_discovery`, `tools.nmap.fast_discovery_ports`, `tools.nmap.fast_discovery_max_ports`.
 - Set a default Nuclei throttling rate via `tools.nuclei.rate_limit` (overridden by `--nuclei-rate`).
@@ -706,6 +748,7 @@ Fast discovery (rustscan/masscan) → targeted Nmap service detection → httpx 
 
 ### AI & Orchestration
 - **AI audit (agentic):** `supabash ai-audit ...` (or `supabash audit --agentic ...`) runs the baseline audit + a bounded expansion phase and writes one unified report.
+- **Codex planner (experimental):** `--agent-backend codex` reuses local Codex CLI ChatGPT authentication for reasoning while Supabash validates and executes registered wrappers; no MCP server or Codex-controlled scanner shell is involved.
 - **LLM integration:** litellm-based client with config-driven provider/model selection (OpenAI, Anthropic, Gemini, Mistral, Ollama, LM Studio)
 - **Chat mode:** slash commands `/scan`, `/audit`, `/ai-audit`, `/status`, `/stop`, `/details`, `/report`, `/test`, `/summary`, `/fix`, `/plan`, `/clear-state` with a focused interactive option subset.
 - **Planner robustness:** one-time automatic replan with exclusions when candidates are already baseline-covered.
