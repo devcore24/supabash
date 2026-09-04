@@ -1,13 +1,15 @@
 import typer
 import shlex
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 import os
 import sys
 import shutil
-import importlib
+from importlib import import_module
+import subprocess
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -28,7 +30,92 @@ from supabash.tool_settings import get_tool_timeout_seconds
 from supabash.report_lint import lint_report as run_report_lint, write_report_lint_artifacts
 from supabash.benchmark_quality import evaluate_report_quality, validate_expectations
 from supabash.secure_io import atomic_write_text
-from supabash.redaction import redact_sensitive_data
+from supabash.redaction import (
+    is_sensitive_field_name,
+    redact_sensitive_data,
+    text_contains_unredacted_secret,
+)
+
+
+def _inline_config_secret_paths(value, path: str = "$") -> list[str]:
+    """Return configured credential fields that contain literal values."""
+    findings: list[str] = []
+
+    def is_reference_or_placeholder(item) -> bool:
+        if item is None:
+            return True
+        text = str(item).strip()
+        if not text:
+            return True
+        upper = text.upper()
+        if upper in {
+            "NONE",
+            "NULL",
+            "<REDACTED>",
+            "***",
+            "CHANGEME",
+            "EXAMPLE",
+            "PLACEHOLDER",
+            "REPLACE_ME",
+            "YOUR_KEY_HERE",
+        }:
+            return True
+        if re.fullmatch(r"(?:YOUR|EXAMPLE|PLACEHOLDER)(?:_[A-Z0-9]+)+", upper):
+            return True
+        if re.fullmatch(r"<(?:YOUR|EXAMPLE|PLACEHOLDER)(?:_[A-Z0-9]+)+>", upper):
+            return True
+        if re.fullmatch(r"[^*\s]{1,2}\*{3}[^*\s]{1,2}", text):
+            return True
+        if (text.startswith("${") and text.endswith("}")) or re.fullmatch(
+            r"\$[A-Za-z_][A-Za-z0-9_]*", text
+        ):
+            return True
+        return text.lower().startswith(("env:", "env://"))
+
+    def container_has_literal(item) -> bool:
+        if isinstance(item, dict):
+            return any(container_has_literal(child) for child in item.values())
+        if isinstance(item, (list, tuple)):
+            return any(container_has_literal(child) for child in item)
+        return not is_reference_or_placeholder(item)
+
+    def add_finding(finding_path: str) -> None:
+        if finding_path not in findings:
+            findings.append(finding_path)
+
+    def visit(item, current_path: str) -> None:
+        if isinstance(item, dict):
+            for raw_key, child in item.items():
+                key = str(raw_key)
+                child_path = f"{current_path}.{key}"
+                normalized_key = re.sub(r"[^a-z0-9]", "", key.lower())
+                key_is_sensitive = is_sensitive_field_name(key) or normalized_key in {
+                    "cookies",
+                    "credentials",
+                    "tokens",
+                }
+                if key_is_sensitive:
+                    if isinstance(child, (dict, list, tuple)):
+                        if container_has_literal(child):
+                            add_finding(child_path)
+                    elif not is_reference_or_placeholder(child):
+                        add_finding(child_path)
+                    continue
+                visit(child, child_path)
+            return
+        if isinstance(item, (list, tuple)):
+            for index, child in enumerate(item):
+                visit(child, f"{current_path}[{index}]")
+            return
+        if (
+            isinstance(item, str)
+            and not is_reference_or_placeholder(item)
+            and text_contains_unredacted_secret(item)
+        ):
+            add_finding(current_path)
+
+    visit(value, path)
+    return findings
 
 app = typer.Typer(
     name="supabash",
@@ -2167,6 +2254,11 @@ def lint_report_command(
 def doctor(
     json_output: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
     verbose: bool = typer.Option(False, "--verbose", help="Print extra details"),
+    deep: bool = typer.Option(
+        False,
+        "--deep",
+        help="Run short, non-networking executable health probes from the tool registry",
+    ),
     codex: bool = typer.Option(
         False,
         "--codex",
@@ -2205,7 +2297,7 @@ def doctor(
     # Python deps (best-effort)
     for mod in ("typer", "rich", "yaml", "litellm", "requests"):
         try:
-            importlib.import_module(mod)
+            import_module(mod)
             add_check(f"py:{mod}", True, "installed", required=True)
         except Exception as e:
             add_check(f"py:{mod}", False, f"missing ({e})", required=True)
@@ -2214,6 +2306,18 @@ def doctor(
     cfg_path = getattr(config_manager, "config_file", None)
     cfg_ok = bool(cfg_path and Path(cfg_path).exists())
     add_check("config", cfg_ok, str(cfg_path) if cfg_path else "unknown", required=True)
+    sensitive_config_paths = _inline_config_secret_paths(config_manager.config)
+    add_check(
+        "config.secrets",
+        not sensitive_config_paths,
+        (
+            "no inline credentials detected"
+            if not sensitive_config_paths
+            else "inline credentials detected; use environment variables and rotate shared values"
+        ),
+        required=False,
+        details={"paths": sensitive_config_paths, "count": len(sensitive_config_paths)},
+    )
     try:
         llm_client = LLMClient()
         provider = config_manager.config.get("llm", {}).get("provider")
@@ -2323,70 +2427,164 @@ def doctor(
     except Exception as e:
         add_check("reports_dir", False, f"not writable: {e}", required=True)
 
-    # System binaries used by wrappers
-    required_bins = [
-        ("nmap", True),
-        ("whatweb", True),
-        ("nuclei", True),
-        ("gobuster", True),
-    ]
-    optional_bins = [
-        ("sqlmap", False),
-        ("masscan", False),
-        ("rustscan", False),
-        ("subfinder", False),
-        ("httpx", False),
-        ("nikto", False),
-        ("hydra", False),
-        ("medusa", False),
-        ("trivy", False),
-        ("scout", False),
-        ("prowler", False),
-        ("sslscan", False),
-        ("dnsenum", False),
-        ("ffuf", False),
-        ("katana", False),
-        ("searchsploit", False),
-        ("wpscan", False),
-        ("netdiscover", False),
-        ("airodump-ng", False),
-        ("airmon-ng", False),
-    ]
+    # System binaries used by wrappers. The manifest is also consumed by the
+    # installer and evidence capture, so aliases/version probes cannot drift.
+    try:
+        from supabash.tool_registry import (
+            iter_doctor_executables,
+            load_tool_registry,
+            resolve_best_executable,
+            resolve_executable_candidates,
+        )
 
-    for bin_name, req in required_bins + optional_bins:
-        path = shutil.which(bin_name)
-        add_check(f"bin:{bin_name}", bool(path), path or "missing", required=req, details={"which": path})
+        tool_registry = load_tool_registry()
+        add_check(
+            "tool_registry",
+            True,
+            f"schema={tool_registry.schema_version}, version={tool_registry.registry_version}",
+            required=True,
+            details={
+                "schema_version": tool_registry.schema_version,
+                "registry_version": tool_registry.registry_version,
+                "tool_count": len(tool_registry.tools),
+            },
+        )
+        for tool_spec, executable_spec in iter_doctor_executables(tool_registry):
+            ranked_resolution = None
+            if deep:
+                ranked_resolution = resolve_best_executable(
+                    executable_spec,
+                    recommended_version=tool_spec.recommended_version,
+                    tool_names=tool_spec.names,
+                    which=shutil.which,
+                    run=subprocess.run,
+                )
+                candidate_resolutions = ranked_resolution.candidate_paths
+            else:
+                candidate_resolutions = resolve_executable_candidates(
+                    executable_spec,
+                    which=shutil.which,
+                )
+            candidate_paths = dict(candidate_resolutions)
+            resolved_path = next(
+                (path for _candidate, path in candidate_resolutions if path),
+                None,
+            )
 
-    # enum4linux / enum4linux-ng (either works)
-    enum_legacy = shutil.which("enum4linux")
-    enum_ng = shutil.which("enum4linux-ng")
-    add_check(
-        "bin:enum4linux",
-        bool(enum_legacy or enum_ng),
-        enum_legacy or enum_ng or "missing",
-        required=False,
-        details={"enum4linux": enum_legacy, "enum4linux-ng": enum_ng},
-    )
+            required = (
+                executable_spec.doctor_required
+                if executable_spec.doctor_required is not None
+                else tool_spec.doctor_required
+            )
+            check_name = executable_spec.doctor_name or f"bin:{executable_spec.preferred_candidate}"
+            check_ok = bool(resolved_path)
+            message = resolved_path or "missing"
+            details = {
+                "which": resolved_path,
+                "candidates": candidate_paths,
+                "tool": tool_spec.id,
+                "recommended_version": tool_spec.recommended_version,
+                "check_mode": "deep" if deep else "presence_only",
+                "deep_check_run": False,
+            }
 
-    # theHarvester (case-sensitive, check both variants)
-    theharvester_path = shutil.which("theHarvester") or shutil.which("theharvester")
-    add_check(
-        "bin:theHarvester",
-        bool(theharvester_path),
-        theharvester_path or "missing",
-        required=False,
-        details={"which": theharvester_path},
-    )
+            if not deep:
+                message = (
+                    f"{resolved_path} (presence-only check; deep check not run)"
+                    if resolved_path
+                    else "missing (presence-only check; deep check not run)"
+                )
 
-    # CrackMapExec / NetExec (multiple possible binary names)
-    cme_path = shutil.which("netexec") or shutil.which("nxc") or shutil.which("crackmapexec") or shutil.which("cme")
-    add_check(
-        "bin:crackmapexec",
-        bool(cme_path),
-        cme_path or "missing",
-        required=False,
-        details={"which": cme_path},
-    )
+            probe = executable_spec.health_probe
+            if deep and resolved_path and probe is not None:
+                details["deep_check_run"] = True
+                recommended_version = tool_spec.recommended_version
+                selected = ranked_resolution.selected if ranked_resolution else None
+                if selected is not None:
+                    resolved_path = selected.path
+                    health = selected.health
+                    detected_version = selected.detected_version
+                    version_status = selected.version_status
+                    details["which"] = resolved_path
+                    details["candidate_checks"] = []
+                    for evaluation in ranked_resolution.evaluations:
+                        candidate_details = {
+                            "candidates": list(evaluation.candidates),
+                            "path": evaluation.path,
+                            "health_ok": evaluation.health.ok,
+                            "health_return_code": evaluation.health.return_code,
+                        }
+                        if evaluation.detected_version:
+                            candidate_details["detected_version"] = (
+                                evaluation.detected_version
+                            )
+                        if evaluation.version_status:
+                            candidate_details["version_status"] = evaluation.version_status
+                        if evaluation.health.fatal_marker:
+                            candidate_details["health_fatal_marker"] = (
+                                evaluation.health.fatal_marker
+                            )
+                        if evaluation.health.error:
+                            candidate_details["health_error"] = evaluation.health.error
+                        if evaluation is selected:
+                            candidate_details["selected"] = True
+                        details["candidate_checks"].append(candidate_details)
+                    details["health_command"] = list(health.command)
+                    if health.return_code is not None:
+                        details["health_return_code"] = health.return_code
+                    if health.output:
+                        details["health_output"] = health.output[:500]
+                    if health.fatal_marker:
+                        details["health_fatal_marker"] = health.fatal_marker
+                    if health.error:
+                        details["health_error"] = health.error
+                    if health.timed_out:
+                        details["health_timeout_seconds"] = probe.timeout_seconds
+                    if detected_version:
+                        details["detected_version"] = detected_version
+                    if version_status:
+                        details["version_status"] = version_status
+
+                    check_ok = health.ok and version_status not in {
+                        "outdated",
+                        "unavailable",
+                    }
+                    if check_ok:
+                        message = f"{resolved_path} (health probe passed)"
+                    elif version_status == "outdated":
+                        message = (
+                            f"{resolved_path} (version {detected_version} is older than "
+                            f"recommended {recommended_version})"
+                        )
+                    elif version_status == "unavailable":
+                        message = (
+                            f"{resolved_path} (health probe passed, but version metadata "
+                            "was unavailable)"
+                        )
+                    elif health.fatal_marker:
+                        message = (
+                            f"{resolved_path} (health probe reported {health.fatal_marker})"
+                        )
+                    elif health.timed_out:
+                        message = f"{resolved_path} (health probe timed out)"
+                    elif health.error:
+                        message = f"{resolved_path} ({health.error})"
+                    else:
+                        message = (
+                            f"{resolved_path} (health probe exited {health.return_code})"
+                        )
+            elif deep and resolved_path:
+                details["health_probe"] = "not_configured"
+
+            add_check(
+                check_name,
+                check_ok,
+                message,
+                required=bool(required),
+                details=details,
+            )
+    except Exception as exc:
+        add_check("tool_registry", False, f"error: {exc}", required=True)
 
     required_failed = [c for c in checks if c["required"] and not c["ok"]]
     overall_ok = not required_failed
@@ -2394,7 +2592,17 @@ def doctor(
     if json_output:
         import json
 
-        console.print_json(json.dumps({"ok": overall_ok, "checks": checks}, indent=2))
+        console.print_json(
+            json.dumps(
+                {
+                    "ok": overall_ok,
+                    "check_mode": "deep" if deep else "presence_only",
+                    "deep_check_run": bool(deep),
+                    "checks": checks,
+                },
+                indent=2,
+            )
+        )
         raise typer.Exit(code=0 if overall_ok else 1)
 
     table = Table(show_header=True, header_style="bold magenta")
@@ -2412,8 +2620,13 @@ def doctor(
     console.print(table)
     if overall_ok:
         console.print("[green]Doctor: OK[/green]")
+        if not deep:
+            console.print(
+                "[yellow]Tool checks were presence-only; run "
+                "'supabash doctor --deep' for health and version verification.[/yellow]"
+            )
         raise typer.Exit(code=0)
-    console.print("[red]Doctor: FAILED[/red] (missing required dependencies)")
+    console.print("[red]Doctor: FAILED[/red] (required readiness checks failed)")
     raise typer.Exit(code=1)
 
 if __name__ == "__main__":

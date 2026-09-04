@@ -1,5 +1,4 @@
 import json
-import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -7,6 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
 from supabash.tool_settings import resolve_timeout_seconds
+from supabash.tool_registry import resolve_tool_executable
 
 logger = setup_logger(__name__)
 
@@ -24,7 +24,7 @@ class HttpxScanner:
         targets: Union[str, Sequence[str]],
         *,
         threads: int = 50,
-        follow_redirects: bool = True,
+        follow_redirects: bool = False,
         timeout_seconds: Optional[int] = None,
         cancel_event=None,
     ) -> Dict[str, Any]:
@@ -39,12 +39,23 @@ class HttpxScanner:
         if not inputs:
             return {"success": False, "error": "No targets provided", "command": ""}
 
+        httpx_bin = self._resolve_httpx_binary()
+        self.last_executable = httpx_bin
+        if not httpx_bin:
+            return {
+                "success": False,
+                "error": (
+                    "ProjectDiscovery httpx is missing or failed its ToolSpec startup "
+                    "probe; refusing to execute an unverified 'httpx' command"
+                ),
+                "command": "",
+            }
+
         # httpx supports -l for input list; easiest way to probe multiple URLs.
         tmpdir = Path(tempfile.mkdtemp(prefix="supabash-httpx-"))
         input_file = tmpdir / "targets.txt"
         input_file.write_text("\n".join(inputs) + "\n", encoding="utf-8")
 
-        httpx_bin = self._resolve_httpx_binary()
         command = [
             httpx_bin,
             "-silent",
@@ -91,6 +102,7 @@ class HttpxScanner:
                 "canceled": bool(getattr(result, "canceled", False)),
                 "raw_output": result.stdout,
                 "command": result.command,
+                "executable": httpx_bin,
             }
 
         entries = self._parse_json_lines(result.stdout)
@@ -101,6 +113,7 @@ class HttpxScanner:
             "alive": alive,
             "results": entries,
             "command": result.command,
+            "executable": httpx_bin,
         }
 
     def _parse_json_lines(self, output: str) -> List[Dict[str, Any]]:
@@ -118,9 +131,5 @@ class HttpxScanner:
                 logger.debug(f"Skipping invalid JSON line from httpx: {s[:120]}")
         return items
 
-    def _resolve_httpx_binary(self) -> str:
-        # Prefer system-installed ProjectDiscovery httpx over any venv-provided httpx CLI.
-        for candidate in ("/usr/local/bin/httpx", "/usr/bin/httpx"):
-            if Path(candidate).is_file():
-                return candidate
-        return shutil.which("httpx") or "httpx"
+    def _resolve_httpx_binary(self) -> Optional[str]:
+        return resolve_tool_executable("httpx", require_healthy=True)

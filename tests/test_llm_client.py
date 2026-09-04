@@ -9,7 +9,14 @@ from supabash.llm import LLMClient
 
 
 class DummyConfig:
-    def __init__(self, provider="openai", model="gpt-4", api_key="sk-test", api_base=None):
+    def __init__(
+        self,
+        provider="openai",
+        model="gpt-4",
+        api_key="sk-test",
+        api_base=None,
+        api_key_env=None,
+    ):
         llm_cfg = {
             "provider": provider,
             provider: {
@@ -17,6 +24,8 @@ class DummyConfig:
                 "model": model,
             }
         }
+        if api_key_env is not None:
+            llm_cfg[provider]["api_key_env"] = api_key_env
         if api_base:
             llm_cfg[provider]["api_base"] = api_base
         llm_cfg.setdefault("cache_enabled", False)
@@ -79,8 +88,65 @@ class TestLLMClient(unittest.TestCase):
     def test_missing_key_raises(self):
         cfg = DummyConfig(api_key="YOUR_KEY_HERE")
         client = LLMClient(config=cfg)
-        with self.assertRaises(ValueError):
-            client.chat([{"role": "user", "content": "hi"}])
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(ValueError):
+                client.chat([{"role": "user", "content": "hi"}])
+
+    def test_provider_default_environment_keys(self):
+        defaults = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+        }
+        for provider, env_name in defaults.items():
+            with self.subTest(provider=provider):
+                cfg = DummyConfig(provider=provider, api_key="")
+                with patch.dict(os.environ, {env_name: f"{provider}-secret"}, clear=True):
+                    settings = LLMClient(config=cfg)._active_settings()
+                self.assertEqual(settings["api_key"], f"{provider}-secret")
+
+    def test_configured_api_key_env_is_used_for_custom_provider(self):
+        cfg = DummyConfig(
+            provider="custom",
+            api_key="YOUR_CUSTOM_KEY",
+            api_key_env="SUPABASH_TEST_CUSTOM_KEY",
+        )
+        with patch.dict(
+            os.environ, {"SUPABASH_TEST_CUSTOM_KEY": "custom-secret"}, clear=True
+        ):
+            settings = LLMClient(config=cfg)._active_settings()
+        self.assertEqual(settings["api_key"], "custom-secret")
+
+    def test_inline_api_key_takes_precedence_over_environment(self):
+        cfg = DummyConfig(api_key="inline-secret", api_key_env="SUPABASH_TEST_LLM_KEY")
+        with patch.dict(
+            os.environ, {"SUPABASH_TEST_LLM_KEY": "environment-secret"}, clear=True
+        ):
+            settings = LLMClient(config=cfg)._active_settings()
+        self.assertEqual(settings["api_key"], "inline-secret")
+
+    def test_legacy_env_reference_is_resolved_not_sent_literally(self):
+        cfg = DummyConfig(provider="custom", api_key="${SUPABASH_TEST_LEGACY_KEY}")
+        with patch.dict(
+            os.environ, {"SUPABASH_TEST_LEGACY_KEY": "legacy-secret"}, clear=True
+        ):
+            settings = LLMClient(config=cfg)._active_settings()
+        self.assertEqual(settings["api_key"], "legacy-secret")
+
+    def test_invalid_api_key_env_fails_without_exposing_environment_value(self):
+        cfg = DummyConfig(api_key="", api_key_env="NOT A VALID NAME")
+        with patch.dict(os.environ, {"NOT A VALID NAME": "do-not-expose"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "environment variable name") as ctx:
+                LLMClient(config=cfg)._active_settings()
+        self.assertNotIn("do-not-expose", str(ctx.exception))
+
+    def test_placeholder_environment_value_is_rejected(self):
+        cfg = DummyConfig(api_key="", api_key_env="SUPABASH_TEST_LLM_KEY")
+        with patch.dict(
+            os.environ, {"SUPABASH_TEST_LLM_KEY": "YOUR_OPENAI_KEY"}, clear=True
+        ):
+            with self.assertRaisesRegex(ValueError, "SUPABASH_TEST_LLM_KEY"):
+                LLMClient(config=cfg)._active_settings()
 
     def test_ollama_provider_allows_missing_key_and_omits_api_key_param(self):
         cfg = DummyConfig(provider="ollama", model="ollama/llama3.1", api_key=None, api_base="http://localhost:11434")

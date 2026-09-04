@@ -150,20 +150,27 @@ DEFAULT_CONFIG = {
         "ffuf": {"enabled": False, "timeout_seconds": 1800},
         # Crawling/spidering (attack-surface expansion; opt-in for noise control)
         "katana": {"enabled": True, "timeout_seconds": 1800, "depth": 3, "concurrency": 10},
-        # Browser-driven exploration (agentic tool only; enabled by default but auto-skips when CLI is unavailable).
+        # Browser-driven exploration (agentic tool only). Guarded scans require
+        # the browser-use Python runtime so Browser.allowed_domains can enforce scope.
         "browser_use": {
             "enabled": True,
             "timeout_seconds": 900,
             "max_steps": 25,
             "min_steps_success": 1,
             "require_done": True,
+            # Deprecated compatibility keys. Native CLI sessions and deterministic
+            # CLI fallback cannot enforce exact-origin boundaries and stay disabled.
+            "auto_session": False,
+            "allow_deterministic_fallback": False,
+            "deterministic_max_paths": 8,
             "headless": True,
             # Optional browser-use cloud API key; Supabash exports it as
-            # BROWSER_USE_API_KEY when invoking the browser-use CLI.
+            # BROWSER_USE_API_KEY when invoking the isolated Python runtime.
             "api_key": "",
             # Optional alternate environment variable name to read when api_key is empty.
             "api_key_env": "",
-            # Optional browser-use session/profile for authenticated workflows.
+            # Named sessions are currently unsupported by guarded scans. A profile
+            # can be used by the policy-enforcing Python-library path.
             "session": "",
             "profile": "",
             # Optional auth guidance for browser tasks (kept generic by default).
@@ -181,8 +188,8 @@ DEFAULT_CONFIG = {
                 # When false (default), secrets are never injected into the task text.
                 "include_secrets_in_task": False,
             },
-            # Optional command template override, supports placeholders:
-            # {target}, {task}, {max_steps}, {headless}, {model}, {session}, {profile}
+            # Custom commands are retained for config compatibility but are rejected
+            # by guarded scans because their origin enforcement cannot be verified.
             "command": "",
             "model": "",
         },
@@ -196,10 +203,47 @@ DEFAULT_CONFIG = {
         # Informational only: offline exploit reference lookups based on service fingerprints (opt-in)
         "searchsploit": {"enabled": False, "timeout_seconds": 120},
         "trivy": {"enabled": True, "timeout_seconds": 1800},
-        "supabase_audit": {"enabled": True, "timeout_seconds": 10, "max_pages": 5, "extra_urls": []},
+        "scoutsuite": {
+            "enabled": False,
+            "timeout_seconds": 3600,
+            "provider": "aws",
+            "arguments": "",
+        },
+        "prowler": {"enabled": False, "timeout_seconds": 3600, "arguments": ""},
+        "supabase_audit": {
+            "enabled": True,
+            "timeout_seconds": 10,
+            "max_pages": 5,
+            "extra_urls": [],
+        },
         "readiness_probe": {"enabled": True, "max_web_targets": 30},
         # Credentials brute forcing should remain opt-in/manual for safety.
         "hydra": {"enabled": False, "timeout_seconds": 3600},
+        "medusa": {"enabled": False, "timeout_seconds": 3600},
+        "wpscan": {
+            "enabled": True,
+            "timeout_seconds": 1200,
+            "api_token": "",
+            "enumerate": "",
+            "arguments": "",
+        },
+        "theharvester": {
+            "enabled": True,
+            "timeout_seconds": 900,
+            "sources": "",
+            "limit": 500,
+            "start": 0,
+            "arguments": "",
+        },
+        "netdiscover": {"enabled": True, "timeout_seconds": 300},
+        "aircrack_ng": {
+            "enabled": False,
+            "timeout_seconds": 120,
+            "airmon": False,
+            "channel": "",
+            "arguments": "",
+        },
+        "crackmapexec": {"enabled": True, "timeout_seconds": 600},
     },
     "llm": {
         # Global kill-switch: disable all LLM calls (offline/no-LLM mode).
@@ -215,15 +259,18 @@ DEFAULT_CONFIG = {
         "cache_max_entries": 500,
         "provider": "openai",  # active provider: openai, anthropic, gemini, ollama, lmstudio
         "openai": {
-            "api_key": "YOUR_KEY_HERE",
+            "api_key": "",
+            "api_key_env": "OPENAI_API_KEY",
             "model": "gpt-4-turbo"
         },
         "anthropic": {
-            "api_key": "YOUR_KEY_HERE",
+            "api_key": "",
+            "api_key_env": "ANTHROPIC_API_KEY",
             "model": "claude-3-opus-20240229"
         },
         "gemini": {
-            "api_key": "YOUR_KEY_HERE",
+            "api_key": "",
+            "api_key_env": "GEMINI_API_KEY",
             "model": "gemini-1.5-pro-latest"
         },
         # Local models via Ollama (no API key required)

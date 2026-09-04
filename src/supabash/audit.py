@@ -6,13 +6,14 @@ from collections import Counter
 import platform
 import socket
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Sequence, Set, Tuple
 from urllib.parse import parse_qsl, unquote_plus, urlparse, urlunparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.error import HTTPError, URLError
 import time
 from threading import Event
@@ -69,8 +70,21 @@ from supabash.report_finalize import (
     attach_evidence_artifact_references,
     finalize_report_content,
 )
+from supabash.tool_registry import (
+    extract_version_from_output,
+    load_tool_registry,
+    python_distribution_version,
+    resolve_executable,
+)
 
 logger = setup_logger(__name__)
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Expose redirect status to readiness checks without following Location."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 COMPLIANCE_PROFILE_ALIASES = {
     "pci": "compliance_pci",
@@ -195,27 +209,6 @@ COMPLIANCE_CONTROL_REFERENCES = {
         "compliance_bsi": "BSI IT-Grundschutz: Data Protection",
     },
 }
-
-EVIDENCE_VERSION_COMMANDS: Dict[str, List[List[str]]] = {
-    "nmap": [["nmap", "--version"]],
-    "httpx": [["httpx", "-version"], ["httpx", "--version"]],
-    "whatweb": [["whatweb", "--version"]],
-    "nuclei": [["nuclei", "-version"], ["nuclei", "--version"]],
-    "gobuster": [["gobuster", "version"], ["gobuster", "--version"]],
-    "ffuf": [["ffuf", "-V"], ["ffuf", "--version"]],
-    "katana": [["katana", "-version"], ["katana", "--version"]],
-    "sqlmap": [["sqlmap", "--version"]],
-    "sslscan": [["sslscan", "--version"]],
-    "dnsenum": [["dnsenum", "--help"]],
-    "subfinder": [["subfinder", "-version"], ["subfinder", "--version"]],
-    "trivy": [["trivy", "--version"]],
-    "wpscan": [["wpscan", "--version"]],
-    "hydra": [["hydra", "-h"]],
-    "medusa": [["medusa", "-h"]],
-    "nikto": [["nikto", "-Version"]],
-    "browser_use": [["browser-use", "--version"], ["browser_use", "--version"]],
-}
-
 
 class AuditOrchestrator:
     """
@@ -589,8 +582,55 @@ class AuditOrchestrator:
                 h.update(chunk)
         return h.hexdigest()
 
+    def _scan_time_tool_executable(self, tool: str) -> Tuple[bool, Optional[str]]:
+        """Return an exact wrapper-recorded executable without re-resolving PATH."""
+
+        scanner = None
+        if isinstance(self.scanners, dict):
+            candidate_keys = [tool]
+            spec = load_tool_registry().get(tool)
+            if spec is not None:
+                candidate_keys.extend((*spec.names, spec.config_key))
+            for key in candidate_keys:
+                if self.scanners.get(key) is not None:
+                    scanner = self.scanners.get(key)
+                    break
+        if scanner is None:
+            return False, None
+        if hasattr(scanner, "last_executable"):
+            candidate = getattr(scanner, "last_executable", None)
+            if isinstance(candidate, str) and candidate.strip():
+                return True, candidate.strip()
+            return True, None
+        # Compatibility for lightweight/custom HTTPX scanners that predate the
+        # scan-time provenance attribute.
+        if tool == "httpx" and hasattr(scanner, "_resolve_httpx_binary"):
+            try:
+                candidate = scanner._resolve_httpx_binary()
+            except Exception:
+                candidate = None
+            if isinstance(candidate, str) and candidate.strip():
+                return True, candidate.strip()
+            return True, None
+        return False, None
+
     def _best_effort_tool_version(self, tool: str) -> Optional[str]:
         tool_name = str(tool or "").strip().lower()
+        spec = load_tool_registry().get(tool_name)
+        executable_spec = spec.primary_executable if spec is not None else None
+        if executable_spec is not None and executable_spec.python_distribution:
+            attempted, resolved = self._scan_time_tool_executable(spec.id)
+            if not attempted:
+                resolved = resolve_executable(executable_spec, which=shutil.which)
+            if not resolved:
+                return None
+            package_version = python_distribution_version(
+                resolved,
+                executable_spec.python_distribution,
+            )
+            if package_version:
+                return package_version
+            return None
         commands = self._version_commands_for_tool(tool_name)
         for cmd in commands:
             try:
@@ -612,93 +652,35 @@ class AuditOrchestrator:
         return None
 
     def _extract_tool_version_value(self, tool: str, text: str) -> Optional[str]:
-        lines = [line.strip() for line in str(text or "").splitlines() if str(line).strip()]
-        if not lines:
+        normalized_tool = str(tool or "").strip().lower()
+        if normalized_tool in {"browser_use", "browser-use"}:
             return None
-
-        token_re = re.compile(r"[vV]?\d+(?:\.\d+)+(?:[A-Za-z0-9._#-]*)")
-        plain_version_re = re.compile(r"^[vV]?\d+(?:\.\d+)+(?:[A-Za-z0-9._#-]*)$")
-        noise_prefixes = (
-            "usage:",
-            "options:",
-            "general options:",
-            "note:",
-            "projectdiscovery.io",
-            "wordpress security scanner",
-        )
-
-        best: Optional[Tuple[int, str]] = None
-        for raw in lines:
-            line = str(raw).strip()
-            if not line:
-                continue
-            low = line.lower()
-            if low.startswith(noise_prefixes):
-                continue
-            if set(line) <= {"_", "-", "/", "\\", "|", " "}:
-                continue
-
-            score = 0
-            value: Optional[str] = None
-
-            if "version" in low:
-                m = re.search(r"(?i)\b(?:current\s+)?version\b\s*:?\s*([vV]?\d+(?:\.\d+)+(?:[A-Za-z0-9._#-]*)?)", line)
-                if m and m.group(1):
-                    value = m.group(1).strip()
-                    score = 100
-                else:
-                    m2 = token_re.search(line)
-                    if m2:
-                        value = m2.group(0).strip()
-                        score = 90
-            elif plain_version_re.fullmatch(line):
-                value = line
-                score = 80
-            elif tool and tool in low:
-                m3 = token_re.search(line)
-                if m3:
-                    value = m3.group(0).strip()
-                    score = 70
-            else:
-                m4 = token_re.search(line)
-                if m4 and len(line) <= 48:
-                    value = m4.group(0).strip()
-                    score = 40
-
-            if value:
-                if best is None or score > best[0]:
-                    best = (score, value)
-
-        if best:
-            return best[1]
-        return None
+        spec = load_tool_registry().get(normalized_tool)
+        names: Tuple[str, ...] = (normalized_tool,)
+        if spec is not None and spec.primary_executable is not None:
+            names = (*spec.names, *spec.primary_executable.candidates)
+        return extract_version_from_output(text, tool_names=names)
 
     def _version_commands_for_tool(self, tool: str) -> List[List[str]]:
-        base = list(EVIDENCE_VERSION_COMMANDS.get(str(tool or "").strip().lower(), []))
-        if tool != "httpx":
-            return base
-        resolved: Optional[str] = None
-        scanner = self.scanners.get("httpx") if isinstance(self.scanners, dict) else None
-        if scanner is not None and hasattr(scanner, "_resolve_httpx_binary"):
-            try:
-                candidate = scanner._resolve_httpx_binary()
-                if isinstance(candidate, str) and candidate.strip():
-                    resolved = candidate.strip()
-            except Exception:
-                resolved = None
-        if not resolved or resolved == "httpx":
-            return base
-        preferred = [[resolved, "-version"], [resolved, "--version"]]
-        existing = {tuple(x) for x in base if isinstance(x, list)}
-        for cmd in reversed(preferred):
-            t = tuple(cmd)
-            if t not in existing:
-                base.insert(0, cmd)
-        return base
+        tool_name = str(tool or "").strip().lower()
+        spec = load_tool_registry().get(tool_name)
+        if spec is None or spec.primary_executable is None:
+            return []
+
+        executable_spec = spec.primary_executable
+        scanner_resolution_attempted, resolved = self._scan_time_tool_executable(spec.id)
+        if not resolved and not scanner_resolution_attempted:
+            resolved = resolve_executable(executable_spec, which=shutil.which)
+        if scanner_resolution_attempted and not resolved:
+            return []
+        commands = executable_spec.render_version_commands(
+            resolved or executable_spec.preferred_candidate
+        )
+        return [list(command) for command in commands]
 
     def _collect_nuclei_metadata(self) -> Dict[str, Any]:
         details: Dict[str, Any] = {}
-        commands = EVIDENCE_VERSION_COMMANDS.get("nuclei", [])
+        commands = self._version_commands_for_tool("nuclei")
         for cmd in commands:
             try:
                 out = subprocess.run(
@@ -862,6 +844,58 @@ class AuditOrchestrator:
                         "created_at": now,
                     }
                 )
+
+                # Prowler's normalized tool-result JSON is useful for reports,
+                # but the original OCSF document is the behavioral evidence.
+                # Register and hash only regular .ocsf.json files rooted in the
+                # scanner's unique output directory.
+                if str(entry.get("tool") or "").strip().lower() == "prowler":
+                    entry_data = entry.get("data") if isinstance(entry.get("data"), dict) else {}
+                    scan_data = (
+                        entry_data.get("scan_data")
+                        if isinstance(entry_data.get("scan_data"), dict)
+                        else {}
+                    )
+                    output_dir_value = scan_data.get("output_dir")
+                    try:
+                        prowler_root = Path(str(output_dir_value or "")).expanduser().resolve(strict=True)
+                    except (OSError, RuntimeError, ValueError):
+                        prowler_root = None
+                    for raw_index, raw_value in enumerate(scan_data.get("results_paths") or []):
+                        try:
+                            raw_path = Path(str(raw_value)).expanduser()
+                            if raw_path.is_symlink():
+                                continue
+                            resolved_raw = raw_path.resolve(strict=True)
+                            if (
+                                prowler_root is None
+                                or not resolved_raw.is_file()
+                                or not resolved_raw.name.endswith(".ocsf.json")
+                                or not resolved_raw.is_relative_to(prowler_root)
+                            ):
+                                continue
+                            if resolved_raw.is_relative_to(report_root.resolve()):
+                                registered_path = resolved_raw
+                            else:
+                                registered_path = results_dir / (
+                                    f"{idx:03d}-prowler-raw-{raw_index:03d}.ocsf.json"
+                                )
+                                shutil.copyfile(resolved_raw, registered_path)
+                            raw_rel_path = str(registered_path.relative_to(report_root))
+                            artifacts.append(
+                                {
+                                    "kind": "tool_raw_result",
+                                    "tool": "prowler",
+                                    "status": payload["status"],
+                                    "path": raw_rel_path,
+                                    "sha256": self._sha256_file(registered_path),
+                                    "bytes": registered_path.stat().st_size,
+                                    "created_at": now,
+                                    "format": "ocsf-json",
+                                }
+                            )
+                        except (OSError, RuntimeError, TypeError, ValueError):
+                            continue
 
             runtime = self._collect_runtime_metadata(agg)
             status_counts = {
@@ -1028,6 +1062,12 @@ class AuditOrchestrator:
         return self._run_tool(name, func)
 
     def _run_tool(self, name: str, func) -> Dict[str, Any]:
+        # Enforce an explicit config disable at the final execution boundary.
+        # Several optional/high-impact paths call this helper directly after
+        # their own prerequisites, so relying only on call-site checks can let
+        # a disabled tool run when a new path is added.
+        if not self._tool_enabled(name, default=True):
+            return self._skip_disabled(name)
         try:
             result = func()
             if isinstance(result, dict):
@@ -1847,20 +1887,66 @@ class AuditOrchestrator:
             # Prowler findings (AWS)
             if tool == "prowler":
                 scan_data = data.get("scan_data", {})
-                for item in (scan_data.get("findings") or [])[:500]:
+                if scan_data.get("coverage_complete") is False:
+                    diagnostics = scan_data.get("parse_diagnostics") or []
+                    affected = [
+                        str(item.get("path") or "artifact")
+                        for item in diagnostics
+                        if isinstance(item, dict) and item.get("status") != "parsed"
+                    ]
+                    findings.append(
+                        {
+                            "severity": "INFO",
+                            "title": "Prowler scan coverage incomplete",
+                            "evidence": (
+                                "One or more Prowler result artifacts were missing or only "
+                                "partially represented: "
+                                f"{', '.join(affected[:8]) or 'unknown artifact'}; "
+                                f"findings={int(scan_data.get('finding_count') or 0)}, "
+                                f"normalized={int(scan_data.get('normalized_finding_count') or 0)}"
+                            ),
+                            "recommendation": "Review Prowler parse diagnostics and rerun before treating the AWS result set as complete.",
+                            "tool": "prowler",
+                        }
+                    )
+                prowler_findings = [
+                    item for item in (scan_data.get("findings") or []) if isinstance(item, dict)
+                ]
+                if len(prowler_findings) > 500:
+                    findings.append(
+                        {
+                            "severity": "INFO",
+                            "title": "Prowler report presentation truncated",
+                            "evidence": (
+                                f"The main report includes 500 of {len(prowler_findings)} normalized "
+                                "Prowler findings; review the hashed raw OCSF artifact for the complete set."
+                            ),
+                            "recommendation": "Use the Prowler OCSF evidence artifact for complete review and remediation tracking.",
+                            "tool": "prowler",
+                        }
+                    )
+                for item in prowler_findings[:500]:
                     if not isinstance(item, dict):
                         continue
                     severity = str(item.get("severity") or "MEDIUM").upper()
                     title = str(item.get("title") or "Prowler finding")
                     evidence = str(item.get("evidence") or "")
-                    findings.append(
-                        {
-                            "severity": severity,
-                            "title": title,
-                            "evidence": evidence,
-                            "tool": "prowler",
-                        }
-                    )
+                    finding = {
+                        "severity": severity,
+                        "title": title,
+                        "evidence": evidence,
+                        "tool": "prowler",
+                    }
+                    for source_key, report_key in (
+                        ("description", "description"),
+                        ("remediation", "recommendation"),
+                        ("check_id", "check_id"),
+                        ("resource", "resource"),
+                    ):
+                        value = item.get(source_key)
+                        if value is not None and str(value).strip():
+                            finding[report_key] = str(value).strip()
+                    findings.append(finding)
             # subfinder subdomains
             if tool == "subfinder":
                 for host in (data.get("hosts") or data.get("findings") or [])[:200]:
@@ -2062,6 +2148,16 @@ class AuditOrchestrator:
                                 "tool": "supabase_audit",
                             }
                         )
+                    elif exp_type == "rest_root_reachable":
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "Supabase REST gateway reachable without authentication",
+                                "evidence": evidence,
+                                "recommendation": "Treat this as discovery evidence only; validate named table access and RLS policies before concluding exposure.",
+                                "tool": "supabase_audit",
+                            }
+                        )
                     elif exp_type == "rpc_root_public":
                         findings.append(
                             {
@@ -2069,6 +2165,16 @@ class AuditOrchestrator:
                                 "title": "Supabase RPC endpoint exposed without authentication",
                                 "evidence": evidence,
                                 "recommendation": "Restrict RPC access with policies and authentication.",
+                                "tool": "supabase_audit",
+                            }
+                        )
+                    elif exp_type == "rpc_root_reachable":
+                        findings.append(
+                            {
+                                "severity": "INFO",
+                                "title": "Supabase RPC gateway reachable without authentication",
+                                "evidence": evidence,
+                                "recommendation": "Treat this as discovery evidence only; validate a known read-only RPC under explicit authorization.",
                                 "tool": "supabase_audit",
                             }
                         )
@@ -3580,7 +3686,8 @@ class AuditOrchestrator:
     def _http_probe_status(self, url: str, timeout_seconds: int = 3) -> Tuple[Optional[int], Optional[str], Optional[str]]:
         request = Request(url, headers={"User-Agent": "supabash-readiness-probe/1.0"})
         try:
-            with urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
+            opener = build_opener(_NoRedirectHandler())
+            with opener.open(request, timeout=max(1, int(timeout_seconds))) as response:
                 status = int(response.getcode())
                 body = response.read(2048).decode("utf-8", errors="ignore")
                 return status, body, None

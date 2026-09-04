@@ -4,9 +4,9 @@ import re
 import shlex
 import shutil
 from urllib.parse import urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 from urllib.error import HTTPError, URLError
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from supabash.logger import setup_logger
 from supabash.runner import CommandResult, CommandRunner
@@ -23,6 +23,13 @@ _BROWSER_USE_FINDING_SEVERITY_RANK = {
 }
 
 
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Return redirect responses to the caller instead of following them."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 _BROWSER_USE_LIBRARY_RUNNER = r"""
 import asyncio
 import json
@@ -34,6 +41,7 @@ max_steps = int(sys.argv[2])
 headless = sys.argv[3] == "1"
 model = sys.argv[4] or None
 profile = sys.argv[5] or None
+allowed_origins = json.loads(sys.argv[6]) if len(sys.argv) > 6 else []
 
 for name in ("browser_use", "Agent", "BrowserSession", "service", "tools"):
     logging.getLogger(name).setLevel(logging.ERROR)
@@ -48,6 +56,9 @@ async def main():
         browser_kwargs = {"headless": headless}
         if profile:
             browser_kwargs["profile_directory"] = profile
+        if allowed_origins:
+            browser_kwargs["allowed_domains"] = allowed_origins
+            browser_kwargs["cross_origin_iframes"] = False
         browser = Browser(**browser_kwargs)
         llm = ChatBrowserUse(model=model) if model else ChatBrowserUse()
         agent = Agent(task=task, llm=llm, browser=browser)
@@ -120,11 +131,13 @@ asyncio.run(main())
 
 class BrowserUseScanner:
     """
-    Best-effort wrapper for browser-use CLI automation.
+    Guarded wrapper for browser-use Python-library automation.
 
     Notes:
-    - This wrapper is intentionally defensive because browser-use deployments vary.
-    - If the browser-use CLI is unavailable, calls fail fast with a clear error.
+    - Browser execution is allowed only when the Python library can enforce the
+      exact-origin boundary through ``Browser.allowed_domains``.
+    - Native CLI, named-session, and custom-command paths fail closed because a
+      prompt or post-run telemetry check cannot prevent an out-of-scope request.
     - Results are parsed heuristically from stdout/stderr into URLs + finding signals.
     """
 
@@ -133,8 +146,8 @@ class BrowserUseScanner:
 
     def is_available(self, command_override: Optional[str] = None) -> bool:
         if isinstance(command_override, str) and command_override.strip():
-            return True
-        return bool(self._resolve_cli_binary())
+            return False
+        return bool(self._resolve_python_binary())
 
     def prefers_library_run(
         self,
@@ -145,6 +158,68 @@ class BrowserUseScanner:
         return self._should_use_library_run(
             session=explicit_session,
             command_override=command_override,
+        )
+
+    def _canonical_http_origin(self, value: str) -> Optional[str]:
+        """Return a canonical exact HTTP origin suitable for browser-use policy."""
+        try:
+            parsed = urlparse(str(value or "").strip())
+            scheme = str(parsed.scheme or "").strip().lower()
+            host = str(parsed.hostname or "").strip().lower()
+            port = parsed.port
+        except (TypeError, ValueError):
+            return None
+        if scheme not in {"http", "https"} or not host:
+            return None
+
+        display_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+        default_port = 443 if scheme == "https" else 80
+        port_suffix = f":{int(port)}" if port is not None and int(port) != default_port else ""
+        # The trailing slash gives browser-use a full URL prefix instead of an
+        # ambiguous hostname prefix (for example, example.test.evil.invalid).
+        return f"{scheme}://{display_host}{port_suffix}/"
+
+    def _normalize_allowed_origins(
+        self,
+        target_url: str,
+        allowed_origins: Optional[Sequence[str]],
+    ) -> List[str]:
+        target_origin = self._canonical_http_origin(target_url)
+        if not target_origin:
+            raise ValueError("Browser target must contain a valid HTTP origin")
+
+        if allowed_origins is None:
+            raw_origins: Sequence[str] = [target_url]
+        elif isinstance(allowed_origins, str):
+            raw_origins = [allowed_origins]
+        else:
+            raw_origins = allowed_origins
+
+        normalized: List[str] = []
+        for raw in raw_origins:
+            origin = self._canonical_http_origin(str(raw or "").strip())
+            if not origin:
+                raise ValueError(f"Invalid allowed browser origin: {raw!r}")
+            if origin not in normalized:
+                normalized.append(origin)
+        if target_origin not in normalized:
+            raise ValueError(
+                f"Allowed browser origins must include the target origin {target_origin}"
+            )
+        return normalized
+
+    def _url_is_allowed(self, value: str, allowed_origins: Sequence[str]) -> bool:
+        origin = self._canonical_http_origin(value)
+        return bool(origin and origin in set(allowed_origins or []))
+
+    def _task_with_origin_policy(self, task: str, allowed_origins: Sequence[str]) -> str:
+        origins = ", ".join(str(origin) for origin in allowed_origins)
+        return (
+            f"{str(task or '').strip()}\n\n"
+            "Mandatory navigation policy: remain within these exact URL origins only: "
+            f"{origins}. Do not open or follow cross-origin links, redirects, popups, "
+            "iframes, downloads, or authentication handoffs. Stop and report the redirect "
+            "instead of leaving the allowed origins."
         )
 
     def scan(
@@ -161,8 +236,9 @@ class BrowserUseScanner:
         command: Optional[str] = None,
         require_done: bool = True,
         min_steps_success: int = 1,
-        allow_deterministic_fallback: bool = True,
+        allow_deterministic_fallback: bool = False,
         deterministic_max_paths: int = 8,
+        allowed_origins: Optional[Sequence[str]] = None,
         cancel_event=None,
         timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -172,6 +248,11 @@ class BrowserUseScanner:
         if not target_url.startswith(("http://", "https://")):
             return {"success": False, "error": "Browser target must include http:// or https://", "command": ""}
 
+        try:
+            origin_policy = self._normalize_allowed_origins(target_url, allowed_origins)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc), "command": ""}
+
         steps = max(1, min(int(max_steps or 25), 100))
         task_text = str(task or "").strip()
         if not task_text:
@@ -179,26 +260,62 @@ class BrowserUseScanner:
                 f"Open {target_url} and inspect for security-relevant issues, exposed endpoints, "
                 "authentication weaknesses, and sensitive data leakage."
             )
+        execution_task = self._task_with_origin_policy(task_text, origin_policy)
 
         use_library_run = self._should_use_library_run(
             session=session,
             command_override=command,
         )
+        policy_metadata = {
+            "allowed_origins": list(origin_policy),
+            "native_enforcement": "browser.allowed_domains" if use_library_run else "unavailable",
+            "structured_url_validation": True,
+            "deterministic_cli_fallback": "disabled",
+        }
+
+        # Kept in the signature for configuration compatibility. The deterministic
+        # probe uses native browser-use CLI commands, so it cannot provide the same
+        # preventive origin boundary as Browser.allowed_domains.
+        if bool(allow_deterministic_fallback):
+            logger.warning(
+                "Ignoring deprecated browser-use deterministic CLI fallback; "
+                "guarded scans require native exact-origin enforcement."
+            )
+        allow_deterministic_fallback = False
+
+        if not use_library_run:
+            if isinstance(command, str) and command.strip():
+                error = (
+                    "Custom browser-use commands are disabled for guarded scans because "
+                    "Supabash cannot verify native exact-origin enforcement."
+                )
+            elif isinstance(session, str) and session.strip():
+                error = (
+                    "Named browser-use sessions require the native CLI and are disabled for "
+                    "guarded scans because that path cannot enforce exact-origin boundaries."
+                )
+            else:
+                error = (
+                    "browser-use Python library runtime with native exact-origin enforcement "
+                    "was not found. Install browser-use in an isolated Python environment."
+                )
+            return {
+                "success": False,
+                "error": error,
+                "command": "",
+                "target": target_url,
+                "task": task_text,
+                "policy_blocked": True,
+                "origin_policy": policy_metadata,
+            }
+
         command_list = self._build_library_command(
-            task=task_text,
+            task=execution_task,
             max_steps=steps,
             headless=bool(headless),
             model=model,
             profile=profile,
-        ) if use_library_run else self._build_command(
-            target=target_url,
-            task=task_text,
-            max_steps=steps,
-            headless=bool(headless),
-            model=model,
-            session=session,
-            profile=profile,
-            command_override=command,
+            allowed_origins=origin_policy,
         )
         if not command_list:
             return {
@@ -249,13 +366,14 @@ class BrowserUseScanner:
             ):
                 retry_cmd = self._build_command(
                     target=target_url,
-                    task=task_text,
+                    task=execution_task,
                     max_steps=steps,
                     headless=bool(headless),
                     model=model,
                     session=None,
                     profile=profile,
                     command_override=command,
+                    allowed_origins=origin_policy,
                 )
                 if retry_cmd:
                     if isinstance(arguments, str) and arguments.strip():
@@ -287,6 +405,7 @@ class BrowserUseScanner:
                         profile=profile,
                         headless=bool(headless),
                         max_paths=int(max(1, min(int(deterministic_max_paths or 8), 24))),
+                        allowed_origins=origin_policy,
                         cancel_event=cancel_event,
                         timeout=timeout,
                     )
@@ -323,7 +442,10 @@ class BrowserUseScanner:
                         "raw_output": combined_output,
                         "command": result.command,
                         "display_command": display_command,
+                        "origin_policy": policy_metadata,
                     }
+                if isinstance(fallback, dict) and str(fallback.get("error") or "").strip():
+                    err = f"{err}\nDeterministic fallback stopped: {str(fallback.get('error')).strip()}"
                 return {
                     "success": False,
                     "error": err,
@@ -346,13 +468,14 @@ class BrowserUseScanner:
             if can_retry_without_session:
                 retry_cmd = self._build_command(
                     target=target_url,
-                    task=task_text,
+                    task=execution_task,
                     max_steps=steps,
                     headless=bool(headless),
                     model=model,
                     session=None,
                     profile=profile,
                     command_override=command,
+                    allowed_origins=origin_policy,
                 )
                 if retry_cmd:
                     if isinstance(arguments, str) and arguments.strip():
@@ -395,6 +518,7 @@ class BrowserUseScanner:
                         profile=profile,
                         headless=bool(headless),
                         max_paths=int(max(1, min(int(deterministic_max_paths or 8), 24))),
+                        allowed_origins=origin_policy,
                         cancel_event=cancel_event,
                         timeout=timeout,
                     )
@@ -431,7 +555,13 @@ class BrowserUseScanner:
                         "raw_output": combined_output,
                         "command": result.command,
                         "display_command": display_command,
+                        "origin_policy": policy_metadata,
                     }
+                if isinstance(fallback, dict) and str(fallback.get("error") or "").strip():
+                    status_error = (
+                        f"{status_error}\nDeterministic fallback stopped: "
+                        f"{str(fallback.get('error')).strip()}"
+                    )
                 return {
                     "success": False,
                     "error": status_error,
@@ -441,7 +571,27 @@ class BrowserUseScanner:
                     "display_command": display_command,
                 }
 
+        origin_violations = self._payload_origin_violations(payload, origin_policy)
+        if origin_violations:
+            return {
+                "success": False,
+                "error": (
+                    "browser-use reported navigation outside the allowed origin policy: "
+                    + ", ".join(origin_violations[:5])
+                ),
+                "canceled": False,
+                "target": target_url,
+                "task": task_text,
+                "raw_output": combined_output,
+                "command": result.command,
+                "display_command": display_command,
+                "origin_policy": policy_metadata,
+            }
+
         parsed = self._parse_output(combined_output, target_url, payload=payload)
+        parsed["urls"] = [
+            url for url in (parsed.get("urls") or []) if self._url_is_allowed(str(url), origin_policy)
+        ] or [target_url]
         completion = self._extract_completion(payload, parsed)
         try:
             min_steps = int(min_steps_success)
@@ -475,6 +625,7 @@ class BrowserUseScanner:
                     profile=profile,
                     headless=bool(headless),
                     max_paths=int(max(1, min(int(deterministic_max_paths or 8), 24))),
+                    allowed_origins=origin_policy,
                     cancel_event=cancel_event,
                     timeout=timeout,
                 )
@@ -511,7 +662,13 @@ class BrowserUseScanner:
                     "raw_output": combined_output,
                     "command": result.command,
                     "display_command": display_command,
+                    "origin_policy": policy_metadata,
                 }
+            if isinstance(fallback, dict) and str(fallback.get("error") or "").strip():
+                completion_error = (
+                    f"{completion_error}\nDeterministic fallback stopped: "
+                    f"{str(fallback.get('error')).strip()}"
+                )
             return {
                 "success": False,
                 "error": completion_error,
@@ -535,6 +692,7 @@ class BrowserUseScanner:
             "raw_output": combined_output,
             "command": result.command,
             "display_command": display_command,
+            "origin_policy": policy_metadata,
         }
 
     def _is_socket_timeout_error(self, error_text: Any) -> bool:
@@ -614,6 +772,7 @@ class BrowserUseScanner:
         headless: bool,
         model: Optional[str],
         profile: Optional[str],
+        allowed_origins: Optional[Sequence[str]] = None,
     ) -> Optional[List[str]]:
         python_binary = self._resolve_python_binary()
         if not python_binary:
@@ -627,6 +786,7 @@ class BrowserUseScanner:
             "1" if headless else "0",
             str(model or "").strip(),
             str(profile or "").strip(),
+            json.dumps(list(allowed_origins or []), separators=(",", ":")),
         ]
 
     def _build_command(
@@ -640,6 +800,7 @@ class BrowserUseScanner:
         session: Optional[str],
         profile: Optional[str],
         command_override: Optional[str],
+        allowed_origins: Optional[Sequence[str]] = None,
     ) -> Optional[List[str]]:
         if isinstance(command_override, str) and command_override.strip():
             fmt_values = {
@@ -650,6 +811,7 @@ class BrowserUseScanner:
                 "model": str(model or "").strip(),
                 "session": str(session or "").strip(),
                 "profile": str(profile or "").strip(),
+                "allowed_origins": ",".join(str(x) for x in (allowed_origins or [])),
             }
             templ = command_override.strip()
             try:
@@ -738,6 +900,46 @@ class BrowserUseScanner:
         urls = self._extract_urls(analysis_text, target=target, payload=payload, result_text=payload_result)
         findings = self._extract_findings(analysis_text, target=target)
         return {"urls": urls, "findings": findings, "result_text": payload_result, "target": target}
+
+    def _payload_navigation_urls(self, payload: Optional[Dict[str, Any]]) -> List[str]:
+        """Extract only structured navigation telemetry, not URLs mentioned in prose."""
+        if not isinstance(payload, dict):
+            return []
+        containers: List[Dict[str, Any]] = [payload]
+        data = payload.get("data")
+        if isinstance(data, dict):
+            containers.insert(0, data)
+
+        urls: List[str] = []
+        seen: Set[str] = set()
+        for container in containers:
+            values: List[Any] = []
+            raw_urls = container.get("urls")
+            if isinstance(raw_urls, (list, tuple)):
+                values.extend(raw_urls)
+            values.extend([container.get("current_url"), container.get("url")])
+            for raw in values:
+                candidate = self._strip_trailing_url_artifacts(str(raw or "").strip())
+                try:
+                    scheme = str(urlparse(candidate).scheme or "").lower()
+                except Exception:
+                    continue
+                if scheme not in {"http", "https"} or candidate in seen:
+                    continue
+                seen.add(candidate)
+                urls.append(candidate)
+        return urls
+
+    def _payload_origin_violations(
+        self,
+        payload: Optional[Dict[str, Any]],
+        allowed_origins: Sequence[str],
+    ) -> List[str]:
+        return [
+            url
+            for url in self._payload_navigation_urls(payload)
+            if not self._url_is_allowed(url, allowed_origins)
+        ]
 
     def _extract_cli_status(self, output: str, payload: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         text = str(output or "").strip()
@@ -1226,10 +1428,15 @@ class BrowserUseScanner:
         max_paths: int,
         cancel_event: Any,
         timeout: int,
+        allowed_origins: Optional[Sequence[str]] = None,
     ) -> Dict[str, Any]:
         binary = self._resolve_cli_binary()
         if not binary:
             return {"success": False, "error": "browser-use CLI not found for deterministic probe"}
+        try:
+            origin_policy = self._normalize_allowed_origins(target_url, allowed_origins)
+        except ValueError as exc:
+            return {"success": False, "error": str(exc)}
 
         base_cmd: List[str] = [binary, "--json"]
         if isinstance(session, str) and session.strip():
@@ -1247,14 +1454,32 @@ class BrowserUseScanner:
         meaningful_artifacts = 0
         focus_hits = 0
         focused_endpoint_artifacts = 0
-        focus_urls = self._extract_task_focus_urls(
+        probe_timeout = min(5, max(2, int(timeout)))
+        root_preflight = self._preflight_navigation(
             target_url,
+            allowed_origins=origin_policy,
+            timeout_seconds=probe_timeout,
+        )
+        if not root_preflight.get("success"):
+            return {
+                "success": False,
+                "error": str(root_preflight.get("error") or "Origin policy stopped target navigation"),
+                "steps": probe_steps,
+                "origin_policy": {"allowed_origins": list(origin_policy)},
+            }
+        root_navigation_url = str(root_preflight.get("effective_url") or target_url).strip()
+        focus_urls = self._extract_task_focus_urls(
+            root_navigation_url,
             objective_text or "",
             max_urls=max(2, min(int(max_paths), 24)),
         )
         focus_url_set = set(focus_urls)
 
-        open_root = self._run_cli_json(base_cmd + ["open", target_url], cancel_event=cancel_event, timeout=timeout)
+        open_root = self._run_cli_json(
+            base_cmd + ["open", root_navigation_url],
+            cancel_event=cancel_event,
+            timeout=timeout,
+        )
         probe_steps += 1
         if not open_root.get("success"):
             return {
@@ -1262,17 +1487,37 @@ class BrowserUseScanner:
                 "error": str(open_root.get("error") or "Deterministic probe could not open target"),
                 "steps": probe_steps,
             }
-        visited_urls.append(target_url)
+        open_violations = self._payload_origin_violations(open_root.get("payload"), origin_policy)
+        if open_violations:
+            return {
+                "success": False,
+                "error": (
+                    "Origin policy stopped deterministic navigation after browser telemetry "
+                    f"reported {open_violations[0]}"
+                ),
+                "steps": probe_steps,
+            }
+        visited_urls.append(root_navigation_url)
 
         state_payload = self._run_cli_json(base_cmd + ["state"], cancel_event=cancel_event, timeout=timeout)
         probe_steps += 1
+        state_violations = self._payload_origin_violations(state_payload.get("payload"), origin_policy)
+        if state_violations:
+            return {
+                "success": False,
+                "error": (
+                    "Origin policy stopped deterministic navigation after browser state "
+                    f"reported {state_violations[0]}"
+                ),
+                "steps": probe_steps,
+            }
         title_payload = self._run_cli_json(base_cmd + ["get", "title"], cancel_event=cancel_event, timeout=timeout)
         probe_steps += 1
         html_payload = self._run_cli_json(base_cmd + ["get", "html"], cancel_event=cancel_event, timeout=timeout)
         probe_steps += 1
         root_html = str(self._extract_text_from_payload(html_payload.get("payload")) or "").strip()
         if root_html:
-            html_cache[target_url] = root_html
+            html_cache[root_navigation_url] = root_html
             meaningful_artifacts += 1
 
         root_title = str(self._extract_text_from_payload(title_payload.get("payload")) or "").strip()
@@ -1283,16 +1528,16 @@ class BrowserUseScanner:
                 seen_findings,
                 severity="INFO",
                 title="Browser page title observed",
-                evidence=f"{target_url} title={root_title[:180]}",
+                evidence=f"{root_navigation_url} title={root_title[:180]}",
                 confidence="low",
             )
 
-        root_status, root_body, root_content_type, _root_error = self._http_probe_response(
-            target_url,
-            timeout_seconds=min(5, max(2, int(timeout))),
-        )
+        root_response = root_preflight.get("response") if isinstance(root_preflight.get("response"), dict) else {}
+        root_status = root_response.get("status")
+        root_body = root_response.get("body")
+        root_content_type = str(root_response.get("content_type") or "")
         added = self._extract_response_signals(
-            target_url,
+            root_navigation_url,
             status=root_status,
             body=root_body,
             content_type=root_content_type,
@@ -1301,11 +1546,11 @@ class BrowserUseScanner:
         )
         if added > 0:
             meaningful_artifacts += int(added)
-            if target_url in focus_url_set:
+            if root_navigation_url in focus_url_set:
                 focused_endpoint_artifacts += int(added)
 
         candidates = self._derive_probe_urls(
-            target_url,
+            root_navigation_url,
             root_html,
             max_paths=max_paths,
             prioritized_urls=focus_urls,
@@ -1317,20 +1562,51 @@ class BrowserUseScanner:
                         break
                 except Exception:
                     pass
-            open_out = self._run_cli_json(base_cmd + ["open", candidate], cancel_event=cancel_event, timeout=timeout)
+            candidate_preflight = self._preflight_navigation(
+                candidate,
+                allowed_origins=origin_policy,
+                timeout_seconds=probe_timeout,
+            )
+            if not candidate_preflight.get("success"):
+                self._append_browser_finding(
+                    findings,
+                    seen_findings,
+                    severity="INFO",
+                    title="Redirect blocked by navigation policy",
+                    evidence=str(candidate_preflight.get("error") or f"Navigation to {candidate} was blocked."),
+                    confidence="high",
+                )
+                continue
+            effective_candidate = str(candidate_preflight.get("effective_url") or candidate).strip()
+            is_focus_candidate = candidate in focus_url_set or effective_candidate in focus_url_set
+            open_out = self._run_cli_json(
+                base_cmd + ["open", effective_candidate],
+                cancel_event=cancel_event,
+                timeout=timeout,
+            )
             probe_steps += 1
             if not open_out.get("success"):
                 continue
-            if candidate in focus_url_set:
+            open_violations = self._payload_origin_violations(open_out.get("payload"), origin_policy)
+            if open_violations:
+                return {
+                    "success": False,
+                    "error": (
+                        "Origin policy stopped deterministic navigation after browser telemetry "
+                        f"reported {open_violations[0]}"
+                    ),
+                    "steps": probe_steps,
+                }
+            if is_focus_candidate:
                 focus_hits += 1
-            if candidate not in visited_urls:
-                visited_urls.append(candidate)
+            if effective_candidate not in visited_urls:
+                visited_urls.append(effective_candidate)
             title_out = self._run_cli_json(base_cmd + ["get", "title"], cancel_event=cancel_event, timeout=timeout)
             probe_steps += 1
             page_title = str(self._extract_text_from_payload(title_out.get("payload")) or "").strip()
             if page_title:
                 meaningful_artifacts += 1
-                if candidate in focus_url_set:
+                if is_focus_candidate:
                     focused_endpoint_artifacts += 1
                     self._append_browser_finding(
                         findings,
@@ -1338,7 +1614,7 @@ class BrowserUseScanner:
                         severity="MEDIUM",
                         title="Focused endpoint rendered in browser workflow",
                         evidence=(
-                            f"{candidate} rendered a browser page without explicit pre-auth steps; "
+                            f"{effective_candidate} rendered a browser page without explicit pre-auth steps; "
                             f"title={page_title[:180]}"
                         ),
                         confidence="high",
@@ -1350,23 +1626,27 @@ class BrowserUseScanner:
                         seen_findings,
                         severity="MEDIUM",
                         title="Authentication surface discovered",
-                        evidence=f"{candidate} title={page_title[:180]}",
+                        evidence=f"{effective_candidate} title={page_title[:180]}",
                         confidence="medium",
                     )
             html_out = self._run_cli_json(base_cmd + ["get", "html"], cancel_event=cancel_event, timeout=timeout)
             probe_steps += 1
             page_html = str(self._extract_text_from_payload(html_out.get("payload")) or "").strip()
             if page_html:
-                html_cache[candidate] = page_html
+                html_cache[effective_candidate] = page_html
                 meaningful_artifacts += 1
-                if candidate in focus_url_set:
+                if is_focus_candidate:
                     focused_endpoint_artifacts += 1
-            response_status, response_body, response_content_type, _response_error = self._http_probe_response(
-                candidate,
-                timeout_seconds=min(5, max(2, int(timeout))),
+            candidate_response = (
+                candidate_preflight.get("response")
+                if isinstance(candidate_preflight.get("response"), dict)
+                else {}
             )
+            response_status = candidate_response.get("status")
+            response_body = candidate_response.get("body")
+            response_content_type = str(candidate_response.get("content_type") or "")
             added = self._extract_response_signals(
-                candidate,
+                effective_candidate,
                 status=response_status,
                 body=response_body,
                 content_type=response_content_type,
@@ -1375,13 +1655,13 @@ class BrowserUseScanner:
             )
             if added > 0:
                 meaningful_artifacts += int(added)
-                if candidate in focus_url_set:
+                if is_focus_candidate:
                     focused_endpoint_artifacts += int(added)
 
         for u, html in list(html_cache.items()):
             self._extract_html_signals(u, html, findings, seen_findings)
         if not html_cache and root_html:
-            self._extract_html_signals(target_url, root_html, findings, seen_findings)
+            self._extract_html_signals(root_navigation_url, root_html, findings, seen_findings)
         if findings:
             meaningful_artifacts += len(findings)
 
@@ -1791,26 +2071,148 @@ class BrowserUseScanner:
         *,
         timeout_seconds: int = 5,
     ) -> tuple[Optional[int], Optional[str], str, Optional[str]]:
+        details = self._http_probe_details(url, timeout_seconds=timeout_seconds)
+        return (
+            details.get("status"),
+            details.get("body"),
+            str(details.get("content_type") or ""),
+            details.get("error"),
+        )
+
+    def _http_probe_details(
+        self,
+        url: str,
+        *,
+        timeout_seconds: int = 5,
+    ) -> Dict[str, Any]:
+        """Fetch one HTTP response without following redirects."""
         request = Request(url, headers={"User-Agent": "supabash-browser-use-fallback/1.0"})
         try:
-            with urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
+            opener = build_opener(_NoRedirectHandler())
+            with opener.open(request, timeout=max(1, int(timeout_seconds))) as response:
                 status = int(response.getcode())
                 content_type = str(response.headers.get("Content-Type") or "").strip()
+                location = str(response.headers.get("Location") or "").strip() or None
                 body = response.read(4096).decode("utf-8", errors="ignore")
-                return status, body, content_type, None
+                return {
+                    "status": status,
+                    "body": body,
+                    "content_type": content_type,
+                    "location": location,
+                    "error": None,
+                }
         except HTTPError as e:
             status = int(getattr(e, "code", 0) or 0) or None
-            content_type = str(getattr(e, "headers", {}).get("Content-Type") or "").strip()
+            headers = getattr(e, "headers", None)
+            content_type = str((headers.get("Content-Type") if headers is not None else "") or "").strip()
+            location = str((headers.get("Location") if headers is not None else "") or "").strip() or None
             body = ""
             try:
                 body = (e.read() or b"").decode("utf-8", errors="ignore")
             except Exception:
                 body = ""
-            return status, body, content_type, None
+            return {
+                "status": status,
+                "body": body,
+                "content_type": content_type,
+                "location": location,
+                "error": None,
+            }
         except (URLError, TimeoutError, OSError) as e:
-            return None, None, "", str(e)
+            return {
+                "status": None,
+                "body": None,
+                "content_type": "",
+                "location": None,
+                "error": str(e),
+            }
         except Exception as e:
-            return None, None, "", str(e)
+            return {
+                "status": None,
+                "body": None,
+                "content_type": "",
+                "location": None,
+                "error": str(e),
+            }
+
+    def _preflight_navigation(
+        self,
+        url: str,
+        *,
+        allowed_origins: Sequence[str],
+        timeout_seconds: int,
+        max_redirects: int = 5,
+    ) -> Dict[str, Any]:
+        """Resolve same-origin HTTP redirects before a deterministic browser open."""
+        current = str(url or "").strip()
+        seen: Set[str] = set()
+        redirect_chain: List[str] = []
+        redirect_statuses = {301, 302, 303, 307, 308}
+
+        for redirect_count in range(max(0, int(max_redirects)) + 1):
+            if not self._url_is_allowed(current, allowed_origins):
+                return {
+                    "success": False,
+                    "error": f"Origin policy blocked navigation to {current}",
+                    "blocked_url": current,
+                    "redirect_chain": redirect_chain,
+                }
+            if current in seen:
+                return {
+                    "success": False,
+                    "error": f"Redirect loop detected before navigation at {current}",
+                    "blocked_url": current,
+                    "redirect_chain": redirect_chain,
+                }
+            seen.add(current)
+
+            response = self._http_probe_details(current, timeout_seconds=timeout_seconds)
+            status = response.get("status")
+            if status not in redirect_statuses:
+                return {
+                    "success": True,
+                    "effective_url": current,
+                    "response": response,
+                    "redirect_chain": redirect_chain,
+                    "verified": status is not None,
+                }
+
+            location = str(response.get("location") or "").strip()
+            if not location:
+                return {
+                    "success": False,
+                    "error": f"HTTP {int(status)} redirect from {current} had no Location header",
+                    "blocked_url": current,
+                    "redirect_chain": redirect_chain,
+                }
+            if redirect_count >= max(0, int(max_redirects)):
+                return {
+                    "success": False,
+                    "error": f"Redirect limit exceeded before navigation from {url}",
+                    "blocked_url": current,
+                    "redirect_chain": redirect_chain,
+                }
+
+            redirected = urljoin(current, location)
+            if not self._url_is_allowed(redirected, allowed_origins):
+                return {
+                    "success": False,
+                    "error": (
+                        f"Origin policy blocked cross-origin redirect from {current} "
+                        f"to {redirected}"
+                    ),
+                    "blocked_url": redirected,
+                    "redirect_chain": redirect_chain + [redirected],
+                }
+            redirect_chain.append(redirected)
+            current = redirected
+
+        return {
+            "success": False,
+            "error": f"Redirect validation failed before navigation to {url}",
+            "blocked_url": current,
+            "redirect_chain": redirect_chain,
+        }
 
     def _looks_like_embedded_authority_path(self, path: str) -> bool:
         text = str(path or "").strip()

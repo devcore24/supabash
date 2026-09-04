@@ -38,10 +38,10 @@ exploitdb              # provides searchsploit where packaged
 scoutsuite
 prowler
 browser-use
+netexec                 # provided by the pinned NetExec GitHub install in install.sh
 
-# Wireless (optional)
+# Wireless (optional; integrated wrappers only)
 aircrack-ng
-wifite
 
 # Optional report export system libraries are documented in
 # docs/system-requirements.md and installed with SUPABASH_PDF_EXPORT=1.

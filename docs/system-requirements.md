@@ -26,40 +26,67 @@ Notes:
 #### httpx (HTTP probing / alive web targets)
 Install from GitHub release (Linux example):
 ```bash
-tag="$(curl -fsSL https://api.github.com/repos/projectdiscovery/httpx/releases/latest | jq -r .tag_name)"
+(
+set -euo pipefail
+tag="v1.10.0"
 ver="${tag#v}"
-curl -fsSL -o /tmp/httpx.zip "https://github.com/projectdiscovery/httpx/releases/download/${tag}/httpx_${ver}_linux_amd64.zip"
-unzip -q /tmp/httpx.zip -d /tmp/httpx
-sudo install -m 0755 /tmp/httpx/httpx /usr/local/bin/httpx
-rm -rf /tmp/httpx /tmp/httpx.zip
+asset="httpx_${ver}_linux_amd64.zip"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+curl -fsSL -o "$tmpdir/$asset" "https://github.com/projectdiscovery/httpx/releases/download/${tag}/${asset}"
+curl -fsSL -o "$tmpdir/checksums.txt" "https://github.com/projectdiscovery/httpx/releases/download/${tag}/httpx_${ver}_checksums.txt"
+(cd "$tmpdir" && grep -E "[[:space:]]${asset}$" checksums.txt | sha256sum -c -)
+unzip -q "$tmpdir/$asset" -d "$tmpdir/unpacked"
+sudo install -m 0755 "$tmpdir/unpacked/httpx" /usr/local/bin/httpx
+rm -rf "$tmpdir"
+trap - EXIT
+)
 ```
 
 #### subfinder (subdomain discovery)
 Install from GitHub release (Linux example):
 ```bash
-tag="$(curl -fsSL https://api.github.com/repos/projectdiscovery/subfinder/releases/latest | jq -r .tag_name)"
+(
+set -euo pipefail
+tag="v2.14.0"
 ver="${tag#v}"
-curl -fsSL -o /tmp/subfinder.zip "https://github.com/projectdiscovery/subfinder/releases/download/${tag}/subfinder_${ver}_linux_amd64.zip"
-unzip -q /tmp/subfinder.zip -d /tmp/subfinder
-sudo install -m 0755 /tmp/subfinder/subfinder /usr/local/bin/subfinder
-rm -rf /tmp/subfinder /tmp/subfinder.zip
+asset="subfinder_${ver}_linux_amd64.zip"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+curl -fsSL -o "$tmpdir/$asset" "https://github.com/projectdiscovery/subfinder/releases/download/${tag}/${asset}"
+curl -fsSL -o "$tmpdir/checksums.txt" "https://github.com/projectdiscovery/subfinder/releases/download/${tag}/subfinder_${ver}_checksums.txt"
+(cd "$tmpdir" && grep -E "[[:space:]]${asset}$" checksums.txt | sha256sum -c -)
+unzip -q "$tmpdir/$asset" -d "$tmpdir/unpacked"
+sudo install -m 0755 "$tmpdir/unpacked/subfinder" /usr/local/bin/subfinder
+rm -rf "$tmpdir"
+trap - EXIT
+)
 ```
 
 #### katana (crawler/spider)
 Install from GitHub release (Linux example):
 ```bash
-tag="$(curl -fsSL https://api.github.com/repos/projectdiscovery/katana/releases/latest | jq -r .tag_name)"
+(
+set -euo pipefail
+tag="v1.6.1"
 ver="${tag#v}"
-curl -fsSL -o /tmp/katana.zip "https://github.com/projectdiscovery/katana/releases/download/${tag}/katana_${ver}_linux_amd64.zip"
-unzip -q /tmp/katana.zip -d /tmp/katana
-sudo install -m 0755 /tmp/katana/katana /usr/local/bin/katana
-rm -rf /tmp/katana /tmp/katana.zip
+asset="katana_${ver}_linux_amd64.zip"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+curl -fsSL -o "$tmpdir/$asset" "https://github.com/projectdiscovery/katana/releases/download/${tag}/${asset}"
+curl -fsSL -o "$tmpdir/checksums.txt" "https://github.com/projectdiscovery/katana/releases/download/${tag}/katana-${ver}-checksums.txt"
+(cd "$tmpdir" && grep -E "[[:space:]]${asset}$" checksums.txt | sha256sum -c -)
+unzip -q "$tmpdir/$asset" -d "$tmpdir/unpacked"
+sudo install -m 0755 "$tmpdir/unpacked/katana" /usr/local/bin/katana
+rm -rf "$tmpdir"
+trap - EXIT
+)
 ```
 
 #### enum4linux-ng (SMB enumeration)
 ```bash
 sudo apt-get install -y smbclient samba-common-bin python3-impacket python3-ldap3 python3-yaml
-sudo curl -fsSL https://raw.githubusercontent.com/cddmp/enum4linux-ng/v1.3.7/enum4linux-ng.py -o /usr/local/bin/enum4linux-ng
+sudo curl -fsSL https://raw.githubusercontent.com/cddmp/enum4linux-ng/v1.3.10/enum4linux-ng.py -o /usr/local/bin/enum4linux-ng
 sudo chmod +x /usr/local/bin/enum4linux-ng
 ```
 
@@ -71,14 +98,23 @@ sudo apt-get install -y exploitdb
 
 #### browser-use (browser-driven agentic validation)
 ```bash
-pipx install browser-use
+pipx install uv
+uv python install 3.12
+pipx install --python "$(uv python find 3.12)" "browser-use==0.13.7"
 pipx ensurepath
 browser-use install
 ```
 
+Supabash uses the isolated installation's Python interpreter and browser-use
+library for guarded scans. That path enforces the engagement's exact origins
+with `Browser.allowed_domains`. Native CLI runs, named sessions, and custom
+commands are not accepted for guarded execution because they cannot provide the
+same preventive boundary; the legacy deterministic CLI fallback is disabled.
+
 If `browser-use install` fails with a `uvx` permission/runtime error:
 ```bash
 pipx install --force uv
+uv python install 3.12
 browser-use install
 ```
 

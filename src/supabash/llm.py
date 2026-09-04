@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
@@ -10,6 +11,56 @@ from supabash.logger import setup_logger
 from supabash.llm_cache import CacheSettings, LLMCache, make_cache_key
 
 logger = setup_logger(__name__)
+
+
+_DEFAULT_API_KEY_ENV = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_ENV_REFERENCE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}\Z")
+_KEY_PLACEHOLDERS = {"none", "null", "changeme", "your_key_here"}
+
+
+def _normalize_api_key(value: Any) -> Optional[str]:
+    """Return a usable secret, never a documentation placeholder or env reference."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    lowered = normalized.lower()
+    if lowered in _KEY_PLACEHOLDERS:
+        return None
+    if _ENV_REFERENCE_RE.fullmatch(normalized):
+        return None
+    # Examples historically used values such as YOUR_OPENAI_KEY. Do not send
+    # those strings to a provider as if they were credentials.
+    if lowered.startswith("your_") and ("key" in lowered or "token" in lowered):
+        return None
+    if normalized.startswith("<") and normalized.endswith(">"):
+        return None
+    return normalized
+
+
+def _normalize_env_name(value: Any) -> Optional[str]:
+    """Normalize a plain env name (or ${NAME}) without ever reading its value."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("LLM api_key_env must be an environment variable name.")
+    normalized = value.strip()
+    if not normalized:
+        return None
+    match = _ENV_REFERENCE_RE.fullmatch(normalized)
+    if match:
+        normalized = match.group(1)
+    if not _ENV_NAME_RE.fullmatch(normalized):
+        raise ValueError(
+            "LLM api_key_env must contain only a valid environment variable name."
+        )
+    return normalized
 
 
 class ToolCallingNotSupported(RuntimeError):
@@ -47,7 +98,9 @@ class LLMClient:
         cfg = self.config.config.get("llm", {})
         provider = cfg.get("provider", "openai")
         provider_cfg = cfg.get(provider, {})
-        api_key = provider_cfg.get("api_key")
+        if not isinstance(provider_cfg, dict):
+            provider_cfg = {}
+        configured_api_key = provider_cfg.get("api_key")
         model = provider_cfg.get("model")
         api_base = provider_cfg.get("api_base")
 
@@ -59,24 +112,29 @@ class LLMClient:
                 "llm.local_only=true is enabled; only local providers are allowed (ollama, lmstudio)."
             )
 
-        def normalize_key(value: Any) -> Optional[str]:
-            if value is None:
-                return None
-            if isinstance(value, str):
-                v = value.strip()
-                if not v:
-                    return None
-                if v.lower() in ("none", "null"):
-                    return None
-                if v == "YOUR_KEY_HERE":
-                    return None
-                return v
-            return None
-
-        api_key = normalize_key(api_key)
+        # A real inline key is deliberately authoritative for backwards
+        # compatibility. Otherwise resolve an explicit api_key_env, a legacy
+        # ${NAME} reference in api_key, or the provider's conventional default.
+        api_key = _normalize_api_key(configured_api_key)
+        api_key_env: Optional[str] = None
+        if provider not in keyless_providers and not api_key:
+            configured_env = provider_cfg.get("api_key_env")
+            api_key_env = _normalize_env_name(configured_env)
+            if api_key_env is None and isinstance(configured_api_key, str):
+                inline_env_match = _ENV_REFERENCE_RE.fullmatch(configured_api_key.strip())
+                if inline_env_match:
+                    api_key_env = inline_env_match.group(1)
+            if api_key_env is None:
+                api_key_env = _DEFAULT_API_KEY_ENV.get(str(provider).lower())
+            if api_key_env:
+                api_key = _normalize_api_key(os.environ.get(api_key_env))
 
         if provider not in keyless_providers and not api_key:
-            raise ValueError(f"Missing API key for provider '{provider}'. Set it via config.")
+            env_hint = f" or export {api_key_env}" if api_key_env else ""
+            raise ValueError(
+                f"Missing API key for provider '{provider}'. Set llm.{provider}.api_key, "
+                f"set llm.{provider}.api_key_env{env_hint}."
+            )
         if not model:
             raise ValueError(f"Missing model for provider '{provider}'. Set it via config.")
 

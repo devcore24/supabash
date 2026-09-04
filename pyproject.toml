@@ -35,7 +35,7 @@ release = ["build>=1", "twine>=5"]
 supabash = "supabash.__main__:app"
 
 [tool.setuptools.package-data]
-supabash = ["data/wordlists/*.txt"]
+supabash = ["data/*.json", "data/wordlists/*.txt"]
 
 
 [tool.setuptools.packages.find]

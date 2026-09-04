@@ -63,6 +63,41 @@ KNOWN_CODEX_EVENT_TYPES = frozenset(
     }
 )
 CODEX_ITEM_EVENT_TYPES = frozenset({"item.started", "item.updated", "item.completed"})
+CODEX_CHILD_ENV_ALLOWLIST = frozenset(
+    {
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "PATH",
+        "SHELL",
+        "LANG",
+        "LANGUAGE",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TZ",
+        "TERM",
+        "NO_COLOR",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_RUNTIME_DIR",
+        "WSL_DISTRO_NAME",
+    }
+)
+CODEX_CHILD_FORBIDDEN_ENV_PREFIXES = ("CODEX_", "CHATGPT_", "OPENAI_")
+CODEX_CHILD_PASSTHROUGH_ENV_PREFIX = "SUPABASH_CODEX_CHILD_"
 
 
 def ambient_codex_context_keys(
@@ -98,6 +133,7 @@ class CodexRuntimeConfig:
     poll_interval_seconds: float = 0.05
     terminate_grace_seconds: float = 1.0
     disable_web_search: bool = True
+    passthrough_environment: Tuple[str, ...] = ()
     disabled_features: Tuple[str, ...] = (
         "plugins",
         "remote_plugin",
@@ -437,12 +473,29 @@ class CodexRuntime:
                 or any(char in normalized for char in ("\x00", "\r", "\n"))
             ):
                 raise ValueError("Invalid disabled Codex feature name.")
+        for name in self.config.passthrough_environment:
+            normalized = str(name or "").strip()
+            if (
+                not normalized
+                or not normalized.replace("_", "a").isalnum()
+                or normalized[0].isdigit()
+                or not normalized.startswith(CODEX_CHILD_PASSTHROUGH_ENV_PREFIX)
+            ):
+                raise ValueError(
+                    "Codex child passthrough environment names must use the inert "
+                    f"{CODEX_CHILD_PASSTHROUGH_ENV_PREFIX} prefix."
+                )
 
     def _child_env(self) -> Dict[str, str]:
-        env = os.environ.copy()
-        for key in tuple(env):
-            if key.startswith("CODEX_") or key.startswith("CHATGPT_") or key.startswith("OPENAI_"):
-                env.pop(key, None)
+        allowed_names = CODEX_CHILD_ENV_ALLOWLIST.union(self.config.passthrough_environment)
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key in allowed_names
+            and not key.upper().startswith(CODEX_CHILD_FORBIDDEN_ENV_PREFIXES)
+        }
+        if os.name == "posix" and Path("/tmp").is_dir():
+            env.update({"TMPDIR": "/tmp", "TMP": "/tmp", "TEMP": "/tmp"})
         env["CODEX_HOME"] = str(self._codex_home())
         env["SUPABASH_CODEX_CHILD"] = "1"
         return env

@@ -1,7 +1,10 @@
+import json
 import os
 import shutil
 import subprocess
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import List
 
 from supabash.runner import CommandResult
@@ -37,6 +40,39 @@ class _SequenceRunner:
 
 
 class BrowserUseScannerTests(unittest.TestCase):
+    def test_http_probe_does_not_follow_redirects(self):
+        class RedirectHandler(BaseHTTPRequestHandler):
+            final_hits = 0
+
+            def do_GET(self):
+                if self.path == "/redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "/final")
+                    self.end_headers()
+                    return
+                type(self).final_hits += 1
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"followed")
+
+            def log_message(self, format, *args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/redirect"
+            status, _body, _content_type, error = BrowserUseScanner()._http_probe_response(url)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(status, 302)
+        self.assertIsNone(error)
+        self.assertEqual(RedirectHandler.final_hits, 0)
+
     def test_build_command_headless_true_uses_json_without_headless_flag(self):
         scanner = BrowserUseScanner()
         scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
@@ -57,6 +93,131 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertNotIn("--headless", cmd)
         self.assertNotIn("--headed", cmd)
         self.assertEqual(cmd[:3], ["/usr/bin/browser-use", "--json", "run"])
+
+    def test_scan_rejects_native_cli_without_origin_enforcement(self):
+        result = CommandResult(
+            command="browser-use --json run task --max-steps 5",
+            return_code=0,
+            stdout='{"success":true,"data":{"success":true,"steps":2,"done":true}}',
+            stderr="",
+            success=True,
+        )
+        runner = _FakeRunner(result)
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+        scanner._resolve_python_binary = lambda: None
+
+        out = scanner.scan(
+            "http://example.test/path",
+            task="Open site",
+            max_steps=5,
+            allowed_origins=["http://example.test/"],
+        )
+
+        self.assertFalse(out.get("success"))
+        self.assertTrue(out.get("policy_blocked"))
+        self.assertIn("native exact-origin enforcement", str(out.get("error") or ""))
+        self.assertIsNone(runner.last_command)
+        self.assertEqual(
+            (out.get("origin_policy") or {}).get("native_enforcement"),
+            "unavailable",
+        )
+
+    def test_build_library_command_passes_exact_origin_allowlist(self):
+        scanner = BrowserUseScanner()
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
+
+        cmd = scanner._build_library_command(
+            task="Open site",
+            max_steps=5,
+            headless=True,
+            model=None,
+            profile=None,
+            allowed_origins=["http://example.test/"],
+        )
+
+        self.assertIsNotNone(cmd)
+        self.assertEqual(json.loads(cmd[-1]), ["http://example.test/"])
+        self.assertIn('browser_kwargs["allowed_domains"]', cmd[2])
+        self.assertIn('browser_kwargs["cross_origin_iframes"] = False', cmd[2])
+
+    def test_deterministic_probe_blocks_cross_origin_redirect_before_open(self):
+        runner = _SequenceRunner([])
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+        scanner._http_probe_details = lambda *args, **kwargs: {
+            "status": 302,
+            "body": "",
+            "content_type": "",
+            "location": "https://outside.test/landing",
+            "error": None,
+        }
+
+        out = scanner._run_deterministic_probe(
+            target_url="http://example.test/start",
+            objective_text="Inspect target",
+            session=None,
+            profile=None,
+            headless=True,
+            max_paths=0,
+            cancel_event=None,
+            timeout=5,
+            allowed_origins=["http://example.test/"],
+        )
+
+        self.assertFalse(out.get("success"))
+        self.assertIn("cross-origin redirect", str(out.get("error") or ""))
+        self.assertEqual(runner.calls, [])
+
+    def test_preflight_resolves_same_origin_redirect_without_following_automatically(self):
+        scanner = BrowserUseScanner()
+        responses = iter(
+            [
+                {
+                    "status": 302,
+                    "body": "",
+                    "content_type": "",
+                    "location": "/login",
+                    "error": None,
+                },
+                {
+                    "status": 200,
+                    "body": "ok",
+                    "content_type": "text/plain",
+                    "location": None,
+                    "error": None,
+                },
+            ]
+        )
+        scanner._http_probe_details = lambda *args, **kwargs: next(responses)
+
+        out = scanner._preflight_navigation(
+            "http://example.test/start",
+            allowed_origins=["http://example.test/"],
+            timeout_seconds=2,
+        )
+
+        self.assertTrue(out.get("success"))
+        self.assertEqual(out.get("effective_url"), "http://example.test/login")
+
+    def test_scan_rejects_structured_cross_origin_navigation_telemetry(self):
+        result = CommandResult(
+            command="browser-use --json run task --max-steps 2",
+            return_code=0,
+            stdout=(
+                '{"success":true,"data":{"success":true,"steps":2,"done":true,'
+                '"urls":["http://example.test/","https://outside.test/"]}}'
+            ),
+            stderr="",
+            success=True,
+        )
+        scanner = BrowserUseScanner(runner=_FakeRunner(result))
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
+
+        out = scanner.scan("http://example.test", task="Inspect target", max_steps=2)
+
+        self.assertFalse(out.get("success"))
+        self.assertIn("outside the allowed origin policy", str(out.get("error") or ""))
 
     def test_build_command_headed_mode_uses_headed_flag(self):
         scanner = BrowserUseScanner()
@@ -124,7 +285,7 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertEqual(obs.get("done"), True)
         self.assertEqual(obs.get("steps"), 2)
 
-    def test_scan_uses_cli_runner_when_session_requested_even_if_python_api_is_available(self):
+    def test_scan_rejects_session_path_even_if_python_api_is_available(self):
         cli_json = (
             '{"id":"x-lib-1","success":true,"data":{"success":true,'
             '"task":"Inspect target","steps":2,"done":true,'
@@ -149,10 +310,48 @@ class BrowserUseScannerTests(unittest.TestCase):
             session="audit-session",
         )
 
-        self.assertTrue(out.get("success"))
-        self.assertEqual(runner.last_command[:4], ["/usr/bin/browser-use", "--json", "--session", "audit-session"])
+        self.assertFalse(out.get("success"))
+        self.assertTrue(out.get("policy_blocked"))
+        self.assertIn("Named browser-use sessions", str(out.get("error") or ""))
+        self.assertIsNone(runner.last_command)
 
-    def test_scan_marks_cli_level_failure_when_return_code_is_zero(self):
+    def test_scan_rejects_custom_command_even_if_python_api_is_available(self):
+        runner = _FakeRunner(
+            CommandResult(
+                command="custom-browser",
+                return_code=0,
+                stdout='{"success":true}',
+                stderr="",
+                success=True,
+            )
+        )
+        scanner = BrowserUseScanner(runner=runner)
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
+
+        out = scanner.scan(
+            "http://example.test",
+            task="Inspect target",
+            command="custom-browser {target}",
+        )
+
+        self.assertFalse(out.get("success"))
+        self.assertTrue(out.get("policy_blocked"))
+        self.assertIn("Custom browser-use commands", str(out.get("error") or ""))
+        self.assertIsNone(runner.last_command)
+
+    def test_is_available_requires_policy_enforcing_library_runtime(self):
+        scanner = BrowserUseScanner()
+        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+        scanner._resolve_python_binary = lambda: None
+
+        self.assertFalse(scanner.is_available())
+        self.assertFalse(scanner.is_available(command_override="custom-browser {target}"))
+
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
+        self.assertTrue(scanner.is_available())
+        self.assertFalse(scanner.is_available(command_override="custom-browser {target}"))
+
+    def test_scan_marks_library_level_failure_when_return_code_is_zero(self):
         cli_json = (
             '{"id":"x1","success":true,"data":{"success":false,'
             '"error":"API key required"}}'
@@ -166,16 +365,13 @@ class BrowserUseScannerTests(unittest.TestCase):
         )
         runner = _FakeRunner(result)
         scanner = BrowserUseScanner(runner=runner)
-        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
 
         out = scanner.scan("http://example.test", task="Open site", max_steps=1)
 
         self.assertFalse(out.get("success"))
         self.assertIn("API key required", str(out.get("error") or ""))
-        self.assertEqual(
-            runner.last_command[:3],
-            ["/usr/bin/browser-use", "--json", "run"],
-        )
+        self.assertEqual(runner.last_command[0], "/opt/browser-use/python")
 
     def test_scan_marks_incomplete_when_done_false_and_no_evidence(self):
         cli_json = (
@@ -191,7 +387,7 @@ class BrowserUseScannerTests(unittest.TestCase):
         )
         runner = _FakeRunner(result)
         scanner = BrowserUseScanner(runner=runner)
-        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
 
         out = scanner.scan("http://example.test", task="Inspect target", max_steps=1)
 
@@ -218,7 +414,7 @@ class BrowserUseScannerTests(unittest.TestCase):
         )
         runner = _FakeRunner(result)
         scanner = BrowserUseScanner(runner=runner)
-        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
 
         out = scanner.scan("http://example.test", task="Inspect target", max_steps=3)
 
@@ -228,9 +424,9 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertEqual(observation.get("steps"), 3)
         self.assertGreaterEqual(int(observation.get("evidence_score") or 0), 1)
 
-    def test_scan_uses_deterministic_probe_when_run_is_incomplete(self):
+    def test_scan_ignores_deprecated_deterministic_fallback_when_run_is_incomplete(self):
         run_incomplete = CommandResult(
-            command="browser-use --json run task --max-steps 2",
+            command="/opt/browser-use/python -c <script>",
             return_code=0,
             stdout=(
                 '{"id":"x4","success":true,"data":{"success":true,'
@@ -239,80 +435,24 @@ class BrowserUseScannerTests(unittest.TestCase):
             stderr="",
             success=True,
         )
-        open_ok = CommandResult(
-            command="browser-use --json open http://example.test",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true}}',
-            stderr="",
-            success=True,
-        )
-        state_ok = CommandResult(
-            command="browser-use --json state",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true}}',
-            stderr="",
-            success=True,
-        )
-        title_root = CommandResult(
-            command="browser-use --json get title",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true,"title":"WebGoat"}}',
-            stderr="",
-            success=True,
-        )
-        html_root = CommandResult(
-            command="browser-use --json get html",
-            return_code=0,
-            stdout=(
-                '{"success":true,"data":{"success":true,'
-                '"html":"<html><body><form action=\\"/login\\"></form>'
-                'javax.servlet.ServletException</body></html>"}}'
-            ),
-            stderr="",
-            success=True,
-        )
-        open_login = CommandResult(
-            command="browser-use --json open http://example.test/login",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true}}',
-            stderr="",
-            success=True,
-        )
-        title_login = CommandResult(
-            command="browser-use --json get title",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true,"title":"Login"}}',
-            stderr="",
-            success=True,
-        )
-
-        runner = _SequenceRunner([run_incomplete, open_ok, state_ok, title_root, html_root, open_login, title_login])
+        runner = _SequenceRunner([run_incomplete])
         scanner = BrowserUseScanner(runner=runner)
-        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
 
-        out = scanner.scan("http://example.test", task="Inspect target", max_steps=2, deterministic_max_paths=1)
+        out = scanner.scan(
+            "http://example.test",
+            task="Inspect target",
+            max_steps=2,
+            allow_deterministic_fallback=True,
+        )
 
-        self.assertTrue(out.get("success"))
-        self.assertEqual(out.get("completed"), False)
+        self.assertFalse(out.get("success"))
+        self.assertIn("did not complete", str(out.get("error") or ""))
+        self.assertEqual(len(runner.calls), 1)
         obs = out.get("observation") if isinstance(out, dict) else {}
-        self.assertEqual(obs.get("fallback_mode"), "deterministic_probe")
-        self.assertGreaterEqual(int(obs.get("fallback_findings_count") or 0), 1)
-        self.assertIn(str(obs.get("fallback_confidence") or ""), {"medium", "high"})
-        findings = out.get("findings") if isinstance(out.get("findings"), list) else []
-        self.assertTrue(any("Form attack surface" in str(f.get("title") or "") for f in findings if isinstance(f, dict)))
-        self.assertTrue(all("confidence" in f for f in findings if isinstance(f, dict)))
+        self.assertNotIn("fallback_mode", obs)
 
     def test_deterministic_probe_prioritizes_task_focus_endpoints(self):
-        run_incomplete = CommandResult(
-            command="browser-use --json run task --max-steps 2",
-            return_code=0,
-            stdout=(
-                '{"id":"x6","success":true,"data":{"success":true,'
-                '"task":"Inspect target","steps":0,"done":false,"result":null}}'
-            ),
-            stderr="",
-            success=True,
-        )
         open_ok = CommandResult(
             command="browser-use --json open http://example.test/WebGoat",
             return_code=0,
@@ -342,7 +482,7 @@ class BrowserUseScannerTests(unittest.TestCase):
             success=True,
         )
 
-        runner = _SequenceRunner([run_incomplete, open_ok, state_ok, title_root, html_root])
+        runner = _SequenceRunner([open_ok, state_ok, title_root, html_root])
         scanner = BrowserUseScanner(runner=runner)
         scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
 
@@ -350,11 +490,16 @@ class BrowserUseScannerTests(unittest.TestCase):
             "Validate endpoint /WebGoat/api/v1/status/config and collect evidence. "
             "Also verify auth behavior."
         )
-        out = scanner.scan(
-            "http://example.test/WebGoat",
-            task=task,
-            max_steps=2,
-            deterministic_max_paths=2,
+        out = scanner._run_deterministic_probe(
+            target_url="http://example.test/WebGoat",
+            objective_text=task,
+            session=None,
+            profile=None,
+            headless=True,
+            max_paths=2,
+            allowed_origins=["http://example.test/"],
+            cancel_event=None,
+            timeout=5,
         )
         self.assertTrue(out.get("success"))
         open_calls = [" ".join(c) for c in runner.calls if isinstance(c, list) and len(c) >= 2 and c[-2] == "open"]
@@ -514,171 +659,27 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertIn("Prometheus runtimeinfo endpoint accessible without authentication", titles)
         self.assertFalse(any(title == "Browser-driven security signal" for title in titles))
 
-    def test_scan_retries_without_session_after_socket_timeout(self):
-        run_timeout = CommandResult(
-            command="browser-use --json --session audit-session run task --max-steps 2",
+    def test_scan_does_not_fallback_to_cli_when_library_command_fails(self):
+        failed = CommandResult(
+            command="/opt/browser-use/python -c <script>",
             return_code=1,
             stdout="",
             stderr="TimeoutError: timed out",
             success=False,
         )
-        retry_ok = CommandResult(
-            command="browser-use --json run task --max-steps 2",
-            return_code=0,
-            stdout=(
-                '{"id":"x5","success":true,"data":{"success":true,'
-                '"task":"Inspect target","steps":2,"done":true,'
-                '"result":"Visited http://example.test/admin"}}'
-            ),
-            stderr="",
-            success=True,
-        )
-        runner = _SequenceRunner([run_timeout, retry_ok])
+        runner = _SequenceRunner([failed])
         scanner = BrowserUseScanner(runner=runner)
-        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
+        scanner._resolve_python_binary = lambda: "/opt/browser-use/python"
 
         out = scanner.scan(
             "http://example.test",
             task="Inspect target",
-            max_steps=2,
-            session="audit-session",
+            allow_deterministic_fallback=True,
         )
 
-        self.assertTrue(out.get("success"))
-        self.assertEqual(len(runner.calls), 2)
-        first_call = runner.calls[0] if runner.calls else []
-        second_call = runner.calls[1] if len(runner.calls) > 1 else []
-        self.assertIn("--session", first_call)
-        self.assertIn("audit-session", first_call)
-        self.assertNotIn("--session", second_call)
-
-    def test_scan_retries_without_session_after_recoverable_cli_payload_failure(self):
-        run_failed = CommandResult(
-            command="browser-use --json --session audit-session run task --max-steps 2",
-            return_code=0,
-            stdout=(
-                '{"id":"x7","success":true,"data":{"success":false,'
-                '"error":"object ChatBrowserUse can\'t be used in \'await\' expression"}}'
-            ),
-            stderr="",
-            success=True,
-        )
-        retry_ok = CommandResult(
-            command="browser-use --json run task --max-steps 2",
-            return_code=0,
-            stdout=(
-                '{"id":"x8","success":true,"data":{"success":true,'
-                '"task":"Inspect target","steps":2,"done":true,'
-                '"result":"Visited http://example.test/admin"}}'
-            ),
-            stderr="",
-            success=True,
-        )
-        runner = _SequenceRunner([run_failed, retry_ok])
-        scanner = BrowserUseScanner(runner=runner)
-        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
-
-        out = scanner.scan(
-            "http://example.test",
-            task="Inspect target",
-            max_steps=2,
-            session="audit-session",
-        )
-
-        self.assertTrue(out.get("success"))
-        self.assertEqual(len(runner.calls), 2)
-        first_call = runner.calls[0] if runner.calls else []
-        second_call = runner.calls[1] if len(runner.calls) > 1 else []
-        self.assertIn("--session", first_call)
-        self.assertIn("audit-session", first_call)
-        self.assertNotIn("--session", second_call)
-
-    def test_scan_uses_deterministic_fallback_after_recoverable_cli_payload_failure(self):
-        run_failed = CommandResult(
-            command="browser-use --json --session audit-session run task --max-steps 2",
-            return_code=0,
-            stdout=(
-                '{"id":"x9","success":true,"data":{"success":false,'
-                '"error":"object ChatBrowserUse can\'t be used in \'await\' expression"}}'
-            ),
-            stderr="",
-            success=True,
-        )
-        retry_failed = CommandResult(
-            command="browser-use --json run task --max-steps 2",
-            return_code=0,
-            stdout=(
-                '{"id":"x10","success":true,"data":{"success":false,'
-                '"error":"object ChatBrowserUse can\'t be used in \'await\' expression"}}'
-            ),
-            stderr="",
-            success=True,
-        )
-        open_ok = CommandResult(
-            command="browser-use --json open http://example.test",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true}}',
-            stderr="",
-            success=True,
-        )
-        state_ok = CommandResult(
-            command="browser-use --json state",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true}}',
-            stderr="",
-            success=True,
-        )
-        title_root = CommandResult(
-            command="browser-use --json get title",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true,"title":"WebGoat"}}',
-            stderr="",
-            success=True,
-        )
-        html_root = CommandResult(
-            command="browser-use --json get html",
-            return_code=0,
-            stdout=(
-                '{"success":true,"data":{"success":true,'
-                '"html":"<html><body><form action=\\"/login\\"></form>'
-                'javax.servlet.ServletException</body></html>"}}'
-            ),
-            stderr="",
-            success=True,
-        )
-        open_login = CommandResult(
-            command="browser-use --json open http://example.test/login",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true}}',
-            stderr="",
-            success=True,
-        )
-        title_login = CommandResult(
-            command="browser-use --json get title",
-            return_code=0,
-            stdout='{"success":true,"data":{"success":true,"title":"Login"}}',
-            stderr="",
-            success=True,
-        )
-        runner = _SequenceRunner(
-            [run_failed, retry_failed, open_ok, state_ok, title_root, html_root, open_login, title_login]
-        )
-        scanner = BrowserUseScanner(runner=runner)
-        scanner._resolve_cli_binary = lambda: "/usr/bin/browser-use"
-
-        out = scanner.scan(
-            "http://example.test",
-            task="Inspect target",
-            max_steps=2,
-            session="audit-session",
-            deterministic_max_paths=1,
-        )
-
-        self.assertTrue(out.get("success"))
-        self.assertEqual(out.get("completed"), False)
-        obs = out.get("observation") if isinstance(out, dict) else {}
-        self.assertEqual(obs.get("fallback_mode"), "deterministic_probe_on_run_failure")
-        self.assertGreaterEqual(int(obs.get("fallback_findings_count") or 0), 1)
+        self.assertFalse(out.get("success"))
+        self.assertIn("timed out", str(out.get("error") or ""))
+        self.assertEqual(len(runner.calls), 1)
 
     def test_deterministic_probe_does_not_seed_generic_login_paths_for_focused_api_target(self):
         scanner = BrowserUseScanner()
@@ -706,7 +707,7 @@ class BrowserUseScannerTests(unittest.TestCase):
         self.assertFalse(any(url.endswith("/signin") for url in urls))
         self.assertFalse(any(url.endswith("/admin") for url in urls))
 
-    def test_scan_uses_deterministic_fallback_when_run_fails(self):
+    def test_session_path_never_runs_or_falls_back_when_requested(self):
         run_timeout = CommandResult(
             command="browser-use --json --session audit-session run task --max-steps 2",
             return_code=1,
@@ -782,11 +783,10 @@ class BrowserUseScannerTests(unittest.TestCase):
             deterministic_max_paths=1,
         )
 
-        self.assertTrue(out.get("success"))
-        self.assertEqual(out.get("completed"), False)
-        obs = out.get("observation") if isinstance(out, dict) else {}
-        self.assertEqual(obs.get("fallback_mode"), "deterministic_probe_on_run_failure")
-        self.assertGreaterEqual(int(obs.get("fallback_findings_count") or 0), 1)
+        self.assertFalse(out.get("success"))
+        self.assertTrue(out.get("policy_blocked"))
+        self.assertIn("Named browser-use sessions", str(out.get("error") or ""))
+        self.assertEqual(runner.calls, [])
 
 
 @unittest.skipUnless(
@@ -867,17 +867,11 @@ class BrowserUseScannerLiveIntegrationTests(unittest.TestCase):
             f"browser-use CLI data.success=false. error={error_text!r} merged={merged[:1600]!r}",
         )
 
-    def test_live_browser_use_smoke_with_session(self):
+    def test_live_browser_use_session_path_fails_closed(self):
         out = self._run_live_scan(session=self.session_name)
-        self.assertTrue(
-            out.get("success"),
-            (
-                "browser-use session live smoke failed (this reproduces Supabash session-path issues if it times out). "
-                f"session={self.session_name!r} error={out.get('error')!r} "
-                f"raw_output={(out.get('raw_output') or '')[:1200]!r}"
-            ),
-        )
-        self.assertIn("observation", out)
+        self.assertFalse(out.get("success"))
+        self.assertTrue(out.get("policy_blocked"))
+        self.assertIn("Named browser-use sessions", str(out.get("error") or ""))
 
 
 if __name__ == "__main__":

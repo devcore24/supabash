@@ -34,6 +34,32 @@ jobs:
         run: |
           supabash benchmark-report tests/fixtures/benchmarks/soc2-positive-report.json tests/fixtures/benchmarks/soc2-positive-expectations.json --json
           supabash benchmark-report tests/fixtures/benchmarks/pci-protected-report.json tests/fixtures/benchmarks/pci-protected-expectations.json --json
+      - name: Lint tracked example reports
+        if: matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          mapfile -t reports < <(
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          required_keys = {"schema_version", "target", "findings", "results"}
+          for path in sorted(Path("example_reports").rglob("*.json")):
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                  continue
+              if isinstance(payload, dict) and required_keys.issubset(payload):
+                  print(path)
+          PY
+          )
+          if (( ${#reports[@]} == 0 )); then
+            echo "No example audit reports were discovered." >&2
+            exit 1
+          fi
+          for report in "${reports[@]}"; do
+            supabash lint-report "$report" --strict --json
+          done
       - name: Run offline test suite
         env:
           TMPDIR: /tmp
@@ -75,9 +101,13 @@ jobs:
           from importlib import resources
           from pathlib import Path
           from supabash.config import config_manager
+          from supabash.tool_registry import load_tool_registry
 
           wordlist = resources.files("supabash").joinpath("data", "wordlists", "common.txt")
           assert wordlist.is_file(), wordlist
           assert Path(config_manager.config_file) == Path("${{ runner.temp }}/installed-config.yaml")
+          registry = load_tool_registry()
+          assert registry.schema_version == 1
+          assert registry.require("nuclei").recommended_version
           PY
           "${RUNNER_TEMP}/wheel-venv/bin/supabash" --help

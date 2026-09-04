@@ -218,8 +218,8 @@
       "tool": "browser_use",
       "status": "success",
       "path": "evidence/results/018-browser_use.json",
-      "sha256": "5746530d58e2335d482d98c2c0e659ec896db6b9b3cd9feac36ca8e35251088a",
-      "bytes": 17574,
+      "sha256": "a318f7d72c25516b447add7186d27acfc12b617c136517008f01e500dcd524a5",
+      "bytes": 17350,
       "created_at": 1772393027.4479866
     },
     {

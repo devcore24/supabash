@@ -125,9 +125,9 @@ class TestIntegrationSupabase(unittest.TestCase):
             self.assertIn("anon", key_types)
             self.assertIn("service_role", key_types)
             exposure_types = {e.get("type") for e in data.get("exposures", [])}
-            self.assertIn("rest_api_public", exposure_types)
-            self.assertIn("rpc_root_public", exposure_types)
-            self.assertIn("rpc_public", exposure_types)
+            self.assertIn("rest_root_reachable", exposure_types)
+            self.assertIn("rpc_root_reachable", exposure_types)
+            self.assertNotIn("rpc_public", exposure_types)
             cleanup_artifact(out)
         finally:
             warnings.showwarning = orig_showwarning

@@ -4,6 +4,7 @@ from typing import Dict, List, Any, Optional
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
 from supabash.tool_settings import resolve_timeout_seconds
+from supabash.tool_registry import resolve_tool_executable
 
 logger = setup_logger(__name__)
 
@@ -20,20 +21,14 @@ class CrackMapExecScanner:
         self.runner = runner if runner else CommandRunner()
         self._executable = None
 
-    def _get_executable(self) -> str:
-        """Detect available executable (netexec or crackmapexec)."""
+    def _get_executable(self) -> Optional[str]:
+        """Resolve a healthy NetExec/CrackMapExec candidate from ToolSpec."""
         if self._executable:
             return self._executable
-
-        # Try netexec first (newer), then crackmapexec
-        for exe in ["netexec", "nxc", "crackmapexec", "cme"]:
-            result = self.runner.run(["which", exe], timeout=5)
-            if result.success and result.stdout.strip():
-                self._executable = exe
-                return exe
-
-        # Default to crackmapexec
-        self._executable = "crackmapexec"
+        self._executable = resolve_tool_executable(
+            "crackmapexec",
+            require_healthy=True,
+        )
         return self._executable
 
     def scan(
@@ -73,6 +68,13 @@ class CrackMapExecScanner:
         logger.info(f"Starting CrackMapExec ({protocol}) on {target}")
 
         exe = self._get_executable()
+        self.last_executable = exe
+        if not exe:
+            return {
+                "success": False,
+                "error": "No compatible NetExec/CrackMapExec executable was found",
+                "command": "",
+            }
         command = [exe, protocol, target]
 
         # Authentication options

@@ -122,34 +122,34 @@ Supabash requires **Linux** (Kali, Ubuntu, Debian) or **WSL2**.
 We provide a bootstrap script to install Python dependencies and system binaries automatically.
 
 ```bash
-git clone https://github.com/yourusername/supabash.git
+git clone https://github.com/devcore24/supabash.git
 cd supabash
 chmod +x install.sh
-sudo ./install.sh
+./install.sh
 ```
 
 or
 
 ```bash
-git clone https://github.com/yourusername/supabash.git && cd supabash && chmod +x install.sh && sudo ./install.sh
+git clone https://github.com/devcore24/supabash.git && cd supabash && chmod +x install.sh && ./install.sh
 ```
 
 
 Notes:
-- The installer can update **Nuclei templates** for your (non-root) user after installing `nuclei` (recommended). Disable with `SUPABASH_UPDATE_NUCLEI_TEMPLATES=0 sudo ./install.sh`.
+- Run the installer as your normal user; it requests `sudo` only for system-level steps and keeps pipx/uv tools plus the project venv in your account.
+- Tool versions come from Supabash's ToolSpec registry. Healthy existing tools are left untouched by default; run `./install.sh --upgrade-tools` to install the tested versions and verify them with deep health checks.
+- Codex CLI authentication is intentionally not installed or modified. The installer only detects it and directs you to `codex login` / `supabash doctor --codex` when setup is incomplete.
+- The installer refreshes **Nuclei templates** for your user on every run (recommended). Disable with `SUPABASH_UPDATE_NUCLEI_TEMPLATES=0 ./install.sh`.
 - If Nuclei ever fails due to missing templates, run `nuclei -update-templates`.
-- The installer now attempts to install **browser-use** (`browser-use` CLI) and runs `browser-use install` (best effort) so agentic authenticated browser checks can run by default.
+- The installer attempts to install **browser-use** in an isolated Python 3.12 environment and runs `browser-use install` (best effort). Guarded scans launch that environment's Python library directly so browser-level origin restrictions are active.
 - The installer also installs a PostgreSQL client (`psql` / `pg_isready`) so Supabash can perform safe Postgres readiness/auth-posture checks during audits.
-- If browser-use is missing after install, run: `pipx install browser-use && pipx ensurepath && browser-use install`
-- `browser-use` may not support `--version` on all releases; validate with `browser-use --help` (or `pipx list | grep browser-use`).
-- If runtime setup fails with `uvx` errors, install `uv` first: `pipx install --force uv` and rerun `browser-use install`.
+- If browser-use is missing or stale after install, run `./install.sh --upgrade-tools`; the installer uses an isolated Python 3.12 runtime and then installs the browser assets.
+- `browser-use` may not support `--version`; `supabash doctor --deep` reads its isolated package metadata and checks its startup probe.
 - For agentic browser tasks, configure a Browser-Use key in one of these ways:
   - export it in the same shell: `export BROWSER_USE_API_KEY=your_browser_use_cloud_key`
   - or set `tools.browser_use.api_key` in `config.yaml`
   - or set `tools.browser_use.api_key_env` to another env var name and let Supabash export it into `BROWSER_USE_API_KEY` before invoking `browser-use`
-- If `browser-use run` still says no LLM/API key, close stale sessions and retry:
-  - `browser-use --json close --all`
-  - `browser-use --json run 'Open https://example.com and stop.' --max-steps 1`
+- If guarded browser scans still report a missing LLM/API key, verify the key in the same shell with `supabash doctor --deep`. Named sessions and direct/custom CLI commands are intentionally not used by guarded scans.
 
 ### Optional: PDF/HTML Report Export (WeasyPrint)
 
@@ -163,8 +163,8 @@ If you want Supabash to export reports to **HTML/PDF** (in addition to JSON/Mark
 - **Project extra:** install with `pip install -e ".[report]"`.
 
 Installer support:
-- Interactive install: run `sudo ./install.sh` and answer **yes** to the optional PDF prompt
-- Non-interactive: `SUPABASH_PDF_EXPORT=1 sudo ./install.sh`
+- Interactive install: run `./install.sh` and answer **yes** to the optional PDF prompt
+- Non-interactive: `SUPABASH_PDF_EXPORT=1 ./install.sh --yes`
 
 Enable exports:
 - Set `core.report_exports.html=true` and/or `core.report_exports.pdf=true` in `config.yaml`
@@ -174,6 +174,8 @@ Enable exports:
 supabash doctor
 supabash doctor --json
 supabash doctor --verbose
+# Run safe local startup probes and compare installed tools with tested versions.
+supabash doctor --deep
 # Include Codex CLI installation and ChatGPT-login checks for the experimental backend.
 supabash doctor --codex
 ```
@@ -188,7 +190,9 @@ supabash doctor --codex
     ```
 3.  (Recommended for agentic authenticated web workflows) install browser-use:
     ```bash
-    pipx install browser-use
+    pipx install uv
+    uv python install 3.12
+    pipx install --python "$(uv python find 3.12)" "browser-use==0.13.7"
     pipx ensurepath
     browser-use install
     ```
@@ -607,9 +611,10 @@ supabash benchmark-report REPORT.json EXPECTATIONS.json [--json] [--output SCORE
 <summary><strong>doctor</strong> — Environment readiness checks</summary>
 
 ```bash
-supabash doctor [--json] [--verbose] [--codex]
+supabash doctor [--json] [--verbose] [--deep] [--codex]
 ```
 
+- `--deep` — run short, non-networking startup probes and compare detected versions with ToolSpec baselines
 - `--codex` — require Codex CLI availability and compatible authentication in readiness results (ChatGPT subscription by default; governed by `codex.require_chatgpt`)
 </details>
 
@@ -651,7 +656,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Config resolution order: `SUPABASH_CONFIG`, an existing `./config.yaml`, a source-checkout `config.yaml`, then `$XDG_CONFIG_HOME/supabash/config.yaml` (or `~/.config/supabash/config.yaml`) (legacy `~/.supabash/config.yaml` is migrated).
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `./debug.log` by default (override with `SUPABASH_LOG_DIR`).
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
-- Experimental Codex planner settings live under `codex`: executable (`command`), process timeout and event/input caps, ChatGPT-auth requirement, and thread persistence. Planner safety requires a standalone terminal, read-only sandboxing, isolated user config and rules, disabled generated context and web/tool features, and an owner-only empty workspace.
+- Experimental Codex planner settings live under `codex`: executable (`command`), process timeout and event/input caps, ChatGPT-auth requirement, and thread persistence. Planner safety requires a standalone terminal, read-only sandboxing, isolated user config and rules, disabled generated context and web/tool features, an owner-only empty workspace, and a minimal child environment that does not inherit ambient credentials.
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
 - Fast discovery tuning: `tools.nmap.fast_discovery`, `tools.nmap.fast_discovery_ports`, `tools.nmap.fast_discovery_max_ports`.
 - Set a default Nuclei throttling rate via `tools.nuclei.rate_limit` (overridden by `--nuclei-rate`).
@@ -660,16 +665,17 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - `katana` is enabled by default and participates in baseline deep web coverage unless you disable `tools.katana.enabled`.
 - Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
 - Keep `tools.browser_use.auth.include_secrets_in_task=false` on shared systems: enabling it embeds login secrets in the local browser-use process arguments even though Supabash redacts persisted output.
-- Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.min_steps_success`, `tools.browser_use.require_done`, `tools.browser_use.auto_session`, `tools.browser_use.headless`, `tools.browser_use.session`, `tools.browser_use.profile`, `tools.browser_use.command`, `tools.browser_use.model`, `tools.browser_use.allow_deterministic_fallback`, `tools.browser_use.deterministic_max_paths`, `tools.browser_use.auth.{enabled,login_url,notes,username_env,password_env,cookie_env,include_secrets_in_task}`.
+- Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.min_steps_success`, `tools.browser_use.require_done`, `tools.browser_use.headless`, `tools.browser_use.profile`, `tools.browser_use.model`, and `tools.browser_use.auth.{enabled,login_url,notes,username_env,password_env,cookie_env,include_secrets_in_task}`. The legacy `auto_session`, `session`, `command`, and deterministic-fallback settings are retained only for config compatibility and are rejected or ignored by guarded scans.
 - Browser-use credentials: set `tools.browser_use.api_key`, or set `tools.browser_use.api_key_env`, or export `BROWSER_USE_API_KEY` in the shell running Supabash. Prefer env vars for shared machines/repos instead of storing live keys in `config.yaml`.
 - Agentic browser-use tasks are evidence-aware: Supabash now passes prior findings + rationale/hypothesis into each browser run, then feeds browser observations back into planner context for the next step.
-- Browser-use resilience: when `run` returns incomplete (`done=false`) and fallback is enabled, Supabash performs deterministic browser probes (`open/state/get`) in the same session to still collect actionable evidence for replanning.
+- Browser-use scope safety is preventive: execution requires the Python-library path with `Browser.allowed_domains`; native CLI, named-session, and custom-command paths fail closed. The old deterministic CLI fallback is disabled because prompt instructions and post-run URL checks cannot prevent an out-of-scope request.
 - Agentic planner quality controls: Supabash tracks duplicate-rate, unique findings, open high-risk cluster count, and post-action gain to decide whether to continue, pivot, or stop.
 - Coverage-debt behavior: unresolved HIGH/CRITICAL clusters are prioritized first, and endpoint-level evidence such as `/api/v1/status/config` or `/rest/v1/` is preserved instead of being collapsed back to host root.
 - SQLMap harvesting is conservative by design: Supabash strips evidence suffixes from discovered URLs and blocks object-store style query candidates such as `list-type`, `prefix`, and `delimiter` from becoming automatic SQLMap targets.
 - Object-store readiness checks no longer treat `HTTP 200 /` alone as a confirmed HIGH anonymous bucket listing; HIGH requires listing-style proof such as S3/MinIO listing markers.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
+- LLM credentials: prefer `llm.<provider>.api_key_env` and export the named variable. OpenAI, Anthropic, and Gemini default to `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY`. A real value in `api_key` takes precedence; empty values and placeholders such as `YOUR_OPENAI_KEY` or `${OPENAI_API_KEY}` are never sent as credentials.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
 - Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
 - Edit allowed hosts via CLI: `supabash config --allow-host 10.0.0.0/24`, `supabash config --remove-host 10.0.0.0/24`, `supabash config --list-allowed-hosts`.

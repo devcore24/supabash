@@ -92,7 +92,10 @@ def attach_evidence_artifact_references(report: Dict[str, Any]) -> None:
         return
     by_tool: Dict[str, List[str]] = {}
     for artifact in evidence_pack.get("artifacts") or []:
-        if not isinstance(artifact, dict) or str(artifact.get("status") or "").lower() != "success":
+        if not isinstance(artifact, dict) or str(artifact.get("status") or "").lower() not in {
+            "success",
+            "failed",
+        }:
             continue
         tool = str(artifact.get("tool") or "").strip().lower()
         path = str(artifact.get("path") or "").strip()

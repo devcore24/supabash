@@ -86,12 +86,12 @@ For `browser_use` actions, Supabash composes an evidence-aware task brief that i
 - Planner rationale/hypothesis/expected evidence
 - Target-specific prior findings (when available)
 - Optional configured auth context hints (`tools.browser_use.auth.*`)
-- Optional auto-session isolation (`tools.browser_use.auto_session=true`) when no explicit session is configured
+- An exact allowed-origin list enforced by the browser-use Python library
 
 After execution, browser observations (completion status, steps, findings/URLs) are added back to run state so the next planner iteration sees what was already tried and what evidence was produced.
-If browser-use returns an incomplete run (`done=false`), Supabash can perform deterministic browser probes (`open/state/get`) as a fallback (`tools.browser_use.allow_deterministic_fallback`) and merge that evidence back into planner context.
+Guarded execution requires the Python-library path with native `Browser.allowed_domains` enforcement. Named sessions, custom commands, and the native CLI fail closed; the former deterministic CLI fallback is deprecated and disabled because it cannot prevent cross-origin navigation.
 Browser-discovered URLs are post-validated with `httpx` before they materially influence gain or cluster closure.
-Deterministic browser fallback can also emit structured endpoint observations for non-HTML/API-style responses when the evidence is strong enough, instead of only emitting discovery URLs.
+Use the structured `httpx` wrapper for deterministic endpoint validation rather than browser CLI fallback.
 
 ### 4.2) Coverage-debt prioritization and stopping
 Supabash tracks open HIGH/CRITICAL finding clusters during the run.

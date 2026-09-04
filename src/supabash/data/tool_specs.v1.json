@@ -1,0 +1,736 @@
+{
+  "schema_version": 1,
+  "registry_version": "2026-08-06",
+  "tools": [
+    {
+      "id": "nmap",
+      "wrapper": "supabash.tools.nmap:NmapScanner",
+      "config_key": "nmap",
+      "aliases": [],
+      "description": "Network discovery and service fingerprinting.",
+      "target_kinds": ["host", "network"],
+      "default_enabled": true,
+      "doctor_required": true,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": ["raw_socket_for_syn_scan"],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["nmap"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:nmap",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "whatweb",
+      "wrapper": "supabash.tools.whatweb:WhatWebScanner",
+      "config_key": "whatweb",
+      "aliases": [],
+      "description": "Web technology fingerprinting.",
+      "target_kinds": ["web"],
+      "default_enabled": true,
+      "doctor_required": true,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["whatweb"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:whatweb",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "nuclei",
+      "wrapper": "supabash.tools.nuclei:NucleiScanner",
+      "config_key": "nuclei",
+      "aliases": [],
+      "description": "Template-driven vulnerability and misconfiguration scanning.",
+      "target_kinds": ["web"],
+      "default_enabled": true,
+      "doctor_required": true,
+      "recommended_version": "3.11.0",
+      "install_method": "github_release",
+      "privileges": [],
+      "datasets": ["nuclei_templates"],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["nuclei"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:nuclei",
+          "version_commands": [["{executable}", "-version"], ["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "-version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "gobuster",
+      "wrapper": "supabash.tools.gobuster:GobusterScanner",
+      "config_key": "gobuster",
+      "aliases": [],
+      "description": "Web content discovery using bounded wordlists.",
+      "target_kinds": ["web"],
+      "default_enabled": true,
+      "doctor_required": true,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": ["web_content_wordlist"],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["gobuster"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:gobuster",
+          "version_commands": [["{executable}", "version"], ["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "sqlmap",
+      "wrapper": "supabash.tools.sqlmap:SqlmapScanner",
+      "config_key": "sqlmap",
+      "aliases": [],
+      "description": "Parameterized URL SQL injection validation.",
+      "target_kinds": ["web"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["sqlmap"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:sqlmap",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "masscan",
+      "wrapper": "supabash.tools.masscan:MasscanScanner",
+      "config_key": "masscan",
+      "aliases": [],
+      "description": "Rate-limited high-speed TCP port discovery.",
+      "target_kinds": ["host", "network"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": ["raw_socket", "root_or_cap_net_raw"],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["masscan"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:masscan",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0, 1], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "rustscan",
+      "wrapper": "supabash.tools.rustscan:RustscanScanner",
+      "config_key": "rustscan",
+      "aliases": [],
+      "description": "Fast port discovery with Nmap handoff.",
+      "target_kinds": ["host", "network"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "2.4.1",
+      "install_method": "mixed",
+      "privileges": ["high_file_descriptor_limit"],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["rustscan"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:rustscan",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "subfinder",
+      "wrapper": "supabash.tools.subfinder:SubfinderScanner",
+      "config_key": "subfinder",
+      "aliases": [],
+      "description": "Passive subdomain discovery.",
+      "target_kinds": ["domain"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": "2.14.0",
+      "install_method": "github_release",
+      "privileges": [],
+      "datasets": ["provider_configuration_optional"],
+      "credentials": ["provider_api_keys_optional"],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["subfinder"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:subfinder",
+          "version_commands": [["{executable}", "-version"], ["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "-version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "httpx",
+      "wrapper": "supabash.tools.httpx:HttpxScanner",
+      "config_key": "httpx",
+      "aliases": [],
+      "description": "HTTP service probing and technology detection.",
+      "target_kinds": ["web", "host"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "1.10.0",
+      "install_method": "github_release",
+      "privileges": [],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["/usr/local/bin/httpx", "/usr/bin/httpx", "httpx"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:httpx",
+          "version_commands": [["{executable}", "-version"], ["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "-version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "nikto",
+      "wrapper": "supabash.tools.nikto:NiktoScanner",
+      "config_key": "nikto",
+      "aliases": [],
+      "description": "Web server configuration and vulnerability checks.",
+      "target_kinds": ["web", "host_port"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": ["nikto_plugins"],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["nikto"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:nikto",
+          "version_commands": [["{executable}", "-Version"]],
+          "health_probe": {"argv": ["{executable}", "-Version"], "success_exit_codes": [0, 1], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "hydra",
+      "wrapper": "supabash.tools.hydra:HydraRunner",
+      "config_key": "hydra",
+      "aliases": [],
+      "description": "Opt-in online credential validation.",
+      "target_kinds": ["service"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": ["credential_lists"],
+      "credentials": ["authorized_test_credentials"],
+      "executables": [
+        {
+          "id": "runner",
+          "candidates": ["hydra"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:hydra",
+          "version_commands": [["{executable}", "-h"]],
+          "health_probe": {"argv": ["{executable}", "-h"], "success_exit_codes": [0, 1, 2, 255], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "medusa",
+      "wrapper": "supabash.tools.medusa:MedusaRunner",
+      "config_key": "medusa",
+      "aliases": [],
+      "description": "Opt-in parallel network credential validation.",
+      "target_kinds": ["service"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": ["credential_lists"],
+      "credentials": ["authorized_test_credentials"],
+      "executables": [
+        {
+          "id": "runner",
+          "candidates": ["medusa"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:medusa",
+          "version_commands": [["{executable}", "-h"]],
+          "health_probe": {"argv": ["{executable}", "-h"], "success_exit_codes": [0, 1, 2], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "trivy",
+      "wrapper": "supabash.tools.trivy:TrivyScanner",
+      "config_key": "trivy",
+      "aliases": [],
+      "description": "Container image vulnerability scanning.",
+      "target_kinds": ["container"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "0.73.0",
+      "install_method": "mixed",
+      "privileges": ["container_registry_access_optional"],
+      "datasets": ["trivy_vulnerability_database"],
+      "credentials": ["private_registry_credentials_optional"],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["trivy"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:trivy",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "scoutsuite",
+      "wrapper": "supabash.tools.scoutsuite:ScoutSuiteScanner",
+      "config_key": "scoutsuite",
+      "aliases": ["scout_suite"],
+      "description": "Opt-in multi-cloud posture assessment.",
+      "target_kinds": ["cloud_account"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "pipx",
+      "privileges": [],
+      "datasets": ["cloud_provider_rules"],
+      "credentials": ["aws_or_azure_or_gcp_credentials"],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["scout", "ScoutSuite"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:scout",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "prowler",
+      "wrapper": "supabash.tools.prowler:ProwlerScanner",
+      "config_key": "prowler",
+      "aliases": [],
+      "description": "Opt-in AWS security posture assessment.",
+      "target_kinds": ["cloud_account"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": "5.36.0",
+      "install_method": "pipx",
+      "privileges": [],
+      "datasets": ["prowler_checks"],
+      "credentials": ["aws_credentials"],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["prowler"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:prowler",
+          "python_distribution": "prowler",
+          "version_commands": [],
+          "health_probe": {"argv": ["{executable}", "aws", "--help"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "sslscan",
+      "wrapper": "supabash.tools.sslscan:SslscanScanner",
+      "config_key": "sslscan",
+      "aliases": [],
+      "description": "TLS protocol and cipher assessment.",
+      "target_kinds": ["host_port"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["sslscan"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:sslscan",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "dnsenum",
+      "wrapper": "supabash.tools.dnsenum:DnsenumScanner",
+      "config_key": "dnsenum",
+      "aliases": [],
+      "description": "DNS record and host enumeration.",
+      "target_kinds": ["domain"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": ["dns_wordlist_optional"],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["dnsenum"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:dnsenum",
+          "version_commands": [["{executable}", "--help"]],
+          "health_probe": {"argv": ["{executable}", "--help"], "success_exit_codes": [0, 1, 2], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "ffuf",
+      "wrapper": "supabash.tools.ffuf:FfufScanner",
+      "config_key": "ffuf",
+      "aliases": [],
+      "description": "Opt-in web content fuzzing and discovery.",
+      "target_kinds": ["web"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": ["web_content_wordlist"],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["ffuf"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:ffuf",
+          "version_commands": [["{executable}", "-V"], ["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "-V"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "katana",
+      "wrapper": "supabash.tools.katana:KatanaScanner",
+      "config_key": "katana",
+      "aliases": [],
+      "description": "Web crawling and endpoint discovery.",
+      "target_kinds": ["web"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "1.6.1",
+      "install_method": "github_release",
+      "privileges": [],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "crawler",
+          "candidates": ["katana"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:katana",
+          "version_commands": [["{executable}", "-version"], ["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "-version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "searchsploit",
+      "wrapper": "supabash.tools.searchsploit:SearchsploitScanner",
+      "config_key": "searchsploit",
+      "aliases": [],
+      "description": "Offline Exploit-DB reference lookup.",
+      "target_kinds": ["service_fingerprint"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": [],
+      "datasets": ["exploitdb"],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "lookup",
+          "candidates": ["searchsploit"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:searchsploit",
+          "version_commands": [],
+          "health_probe": {"argv": ["{executable}", "-h"], "success_exit_codes": [0, 1, 2], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "wpscan",
+      "wrapper": "supabash.tools.wpscan:WPScanScanner",
+      "config_key": "wpscan",
+      "aliases": [],
+      "description": "WordPress configuration and vulnerability scanning.",
+      "target_kinds": ["web"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "4.1.0",
+      "install_method": "mixed",
+      "privileges": [],
+      "datasets": ["wpscan_vulnerability_database"],
+      "credentials": ["wpscan_api_token_optional"],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["wpscan"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:wpscan",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "netdiscover",
+      "wrapper": "supabash.tools.netdiscover:NetdiscoverScanner",
+      "config_key": "netdiscover",
+      "aliases": [],
+      "description": "Local network ARP host discovery.",
+      "target_kinds": ["local_network"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": ["root_or_cap_net_raw", "network_interface"],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["netdiscover"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:netdiscover",
+          "version_commands": [["{executable}", "-h"]],
+          "health_probe": {"argv": ["{executable}", "-h"], "success_exit_codes": [0, 1, 2], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "aircrack_ng",
+      "wrapper": "supabash.tools.aircrack_ng:AircrackNgScanner",
+      "config_key": "aircrack_ng",
+      "aliases": ["aircrack-ng"],
+      "description": "Opt-in wireless network capture using the Aircrack-ng suite.",
+      "target_kinds": ["wireless_interface"],
+      "default_enabled": false,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "system_package",
+      "privileges": ["root_or_cap_net_admin", "monitor_mode_interface"],
+      "datasets": [],
+      "credentials": [],
+      "executables": [
+        {
+          "id": "capture",
+          "candidates": ["airodump-ng"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:airodump-ng",
+          "version_commands": [["{executable}", "--help"]],
+          "health_probe": {"argv": ["{executable}", "--help"], "success_exit_codes": [0, 1, 2], "timeout_seconds": 8}
+        },
+        {
+          "id": "monitor_mode",
+          "candidates": ["airmon-ng"],
+          "required": false,
+          "doctor_check": true,
+          "doctor_name": "bin:airmon-ng",
+          "version_commands": [["{executable}", "--help"]],
+          "health_probe": {"argv": ["{executable}", "--help"], "success_exit_codes": [0, 1, 2], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "enum4linux_ng",
+      "wrapper": "supabash.tools.enum4linux_ng:Enum4linuxNgScanner",
+      "config_key": "enum4linux_ng",
+      "aliases": ["enum4linux-ng", "enum4linux"],
+      "description": "SMB and Windows host enumeration.",
+      "target_kinds": ["host"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "1.3.10",
+      "install_method": "github_release",
+      "privileges": [],
+      "datasets": [],
+      "credentials": ["smb_credentials_optional"],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["enum4linux-ng", "enum4linux"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:enum4linux",
+          "version_commands": [["{executable}", "--version"], ["{executable}", "--help"]],
+          "health_probe": {"argv": ["{executable}", "--help"], "success_exit_codes": [0, 1, 2], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "theharvester",
+      "wrapper": "supabash.tools.theharvester:TheHarvesterScanner",
+      "config_key": "theharvester",
+      "aliases": ["the_harvester"],
+      "description": "Passive OSINT collection for domain targets.",
+      "target_kinds": ["domain"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "4.11.1",
+      "install_method": "mixed",
+      "privileges": [],
+      "datasets": ["osint_provider_configuration_optional"],
+      "credentials": ["provider_api_keys_optional"],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["theHarvester", "theharvester"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:theHarvester",
+          "python_distribution": "theHarvester",
+          "version_commands": [["{executable}", "--version"], ["{executable}", "-h"]],
+          "health_probe": {"argv": ["{executable}", "-h"], "success_exit_codes": [0, 1, 2], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "crackmapexec",
+      "wrapper": "supabash.tools.crackmapexec:CrackMapExecScanner",
+      "config_key": "crackmapexec",
+      "aliases": ["netexec", "nxc", "cme"],
+      "description": "Opt-in Active Directory and Windows service enumeration.",
+      "target_kinds": ["host", "network"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "1.5.1",
+      "install_method": "pipx",
+      "privileges": [],
+      "datasets": ["netexec_modules_optional"],
+      "credentials": ["windows_credentials_optional"],
+      "executables": [
+        {
+          "id": "scanner",
+          "candidates": ["netexec", "nxc", "crackmapexec", "cme"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:crackmapexec",
+          "version_commands": [["{executable}", "--version"]],
+          "health_probe": {"argv": ["{executable}", "--version"], "success_exit_codes": [0, 1], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "browser_use",
+      "wrapper": "supabash.tools.browser_use:BrowserUseScanner",
+      "config_key": "browser_use",
+      "aliases": ["browser-use"],
+      "description": "Browser-driven workflow exploration and evidence collection.",
+      "target_kinds": ["web"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": "0.13.7",
+      "install_method": "pipx",
+      "privileges": ["browser_runtime"],
+      "datasets": ["browser_runtime_assets"],
+      "credentials": ["browser_use_api_key_optional", "engagement_auth_context_optional"],
+      "executables": [
+        {
+          "id": "cli",
+          "candidates": ["browser-use", "browser_use"],
+          "required": true,
+          "doctor_check": true,
+          "doctor_name": "bin:browser-use",
+          "python_distribution": "browser-use",
+          "version_commands": [["{executable}", "--help"]],
+          "health_probe": {"argv": ["{executable}", "--help"], "success_exit_codes": [0], "timeout_seconds": 8}
+        }
+      ]
+    },
+    {
+      "id": "supabase_audit",
+      "wrapper": "supabash.tools.supabase_audit:SupabaseAuditScanner",
+      "config_key": "supabase_audit",
+      "aliases": ["supabase-audit"],
+      "description": "Built-in Supabase exposure and unauthenticated API checks.",
+      "target_kinds": ["web"],
+      "default_enabled": true,
+      "doctor_required": false,
+      "recommended_version": null,
+      "install_method": "internal",
+      "privileges": [],
+      "datasets": [],
+      "credentials": ["supabase_credentials_optional"],
+      "executables": []
+    }
+  ]
+}

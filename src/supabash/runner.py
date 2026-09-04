@@ -5,7 +5,7 @@ import time
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from supabash.logger import setup_logger
-from supabash.redaction import redact_command
+from supabash.redaction import redact_command, redact_sensitive_text
 
 logger = setup_logger(__name__)
 
@@ -183,7 +183,7 @@ class CommandRunner:
             if not is_success:
                 logger.warning(f"Command failed (RC={rc}): {cmd_str}")
                 if err:
-                    logger.debug(f"Stderr: {err}")
+                    logger.debug(f"Stderr: {redact_sensitive_text(err)}")
 
             return CommandResult(
                 command=cmd_str,

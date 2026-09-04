@@ -5,6 +5,9 @@
 
 set -e
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+TOOL_SPEC_MANIFEST="${TOOL_SPEC_MANIFEST:-${SCRIPT_DIR}/src/supabash/data/tool_specs.v1.json}"
+
 RESET="\033[0m"
 BOLD="\033[1m"
 GREEN="\033[32m"
@@ -16,18 +19,30 @@ if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
 fi
 
-RUSTSCAN_VERSION="${RUSTSCAN_VERSION:-2.4.1}"
+NUCLEI_VERSION="${NUCLEI_VERSION:-}"
+NUCLEI_REPO="${NUCLEI_REPO:-projectdiscovery/nuclei}"
+RUSTSCAN_VERSION="${RUSTSCAN_VERSION:-}"
 RUSTSCAN_REPO="${RUSTSCAN_REPO:-bee-san/RustScan}"
-HTTPX_VERSION="${HTTPX_VERSION:-latest}"
+HTTPX_VERSION="${HTTPX_VERSION:-}"
 HTTPX_REPO="${HTTPX_REPO:-projectdiscovery/httpx}"
-SUBFINDER_VERSION="${SUBFINDER_VERSION:-latest}"
+SUBFINDER_VERSION="${SUBFINDER_VERSION:-}"
 SUBFINDER_REPO="${SUBFINDER_REPO:-projectdiscovery/subfinder}"
-KATANA_VERSION="${KATANA_VERSION:-latest}"
+KATANA_VERSION="${KATANA_VERSION:-}"
 KATANA_REPO="${KATANA_REPO:-projectdiscovery/katana}"
-ENUM4LINUX_NG_VERSION="${ENUM4LINUX_NG_VERSION:-v1.3.7}"
+TRIVY_VERSION="${TRIVY_VERSION:-}"
+TRIVY_REPO="${TRIVY_REPO:-aquasecurity/trivy}"
+ENUM4LINUX_NG_VERSION="${ENUM4LINUX_NG_VERSION:-}"
 ENUM4LINUX_NG_REPO="${ENUM4LINUX_NG_REPO:-cddmp/enum4linux-ng}"
+THEHARVESTER_VERSION="${THEHARVESTER_VERSION:-}"
+NETEXEC_VERSION="${NETEXEC_VERSION:-}"
+PROWLER_VERSION="${PROWLER_VERSION:-}"
+BROWSER_USE_VERSION="${BROWSER_USE_VERSION:-}"
+WPSCAN_VERSION="${WPSCAN_VERSION:-}"
+MANAGED_PYTHON_312=""
 # Optional: update nuclei templates for the invoking (non-root) user after install
 SUPABASH_UPDATE_NUCLEI_TEMPLATES="${SUPABASH_UPDATE_NUCLEI_TEMPLATES:-1}"
+# Healthy existing tools are retained; this flag also refreshes healthy versioned tools.
+SUPABASH_UPGRADE_TOOLS="${SUPABASH_UPGRADE_TOOLS:-0}"
 # Optional: install PDF/HTML report export dependencies (WeasyPrint)
 SUPABASH_PDF_EXPORT="${SUPABASH_PDF_EXPORT:-0}"
 
@@ -36,29 +51,41 @@ install_via_go() {
     local name="$1"
     local module="$2"
     local version="$3"
+    local go_binary existing_path
 
-    if command -v "$name" >/dev/null 2>&1; then
+    validate_tool_spec_manifest || return 1
+    existing_path="$(tool_registry_resolve_executable "$name" || true)"
+    if should_retain_existing_tool "$name" "$existing_path" "$name"; then
         return 0
     fi
-    if ! command -v go >/dev/null 2>&1; then
+    go_binary="$(command -v go 2>/dev/null || true)"
+    if [ -z "$go_binary" ]; then
         warn "Go toolchain not found; cannot install ${name} via go install."
         return 1
     fi
 
-    local mod_ref="$module@${version:-latest}"
+    local go_version="${version:-latest}"
+    if [ "$go_version" != "latest" ] && [[ "$go_version" != v* ]]; then
+        go_version="v${go_version}"
+    fi
+    local mod_ref="$module@${go_version}"
     info "Installing ${name} via go install (${mod_ref})..."
 
     local tmpdir
-    tmpdir="$(mktemp -d)"
+    tmpdir="$(run_as_invoking_user mktemp -d "/tmp/supabash-${name}-go.XXXXXX")"
     local gobin
     gobin="${tmpdir}/bin"
-    mkdir -p "$gobin"
+    run_as_invoking_user mkdir -p "$gobin"
 
-    if ! GO111MODULE=on GOBIN="$gobin" go install -v "$mod_ref" >/tmp/${name}-go-install.log 2>&1; then
-        warn "go install failed for ${name}. See /tmp/${name}-go-install.log"
+    local install_log
+    install_log="$(mktemp "${TMPDIR:-/tmp}/supabash-${name}-go.XXXXXX.log")"
+    if ! run_as_invoking_user env GO111MODULE=on GOBIN="$gobin" \
+        "$go_binary" install -v "$mod_ref" >"$install_log" 2>&1; then
+        warn "go install failed for ${name}. See ${install_log}"
         rm -rf "$tmpdir"
         return 1
     fi
+    rm -f "$install_log"
 
     if [ ! -x "${gobin}/${name}" ]; then
         warn "go install finished but ${name} binary not found at ${gobin}/${name}."
@@ -68,7 +95,7 @@ install_via_go() {
 
     $SUDO install -m 0755 "${gobin}/${name}" "/usr/local/bin/${name}"
     rm -rf "$tmpdir"
-    if command -v "$name" >/dev/null 2>&1; then
+    if tool_registry_resolve_executable "$name" >/dev/null 2>&1; then
         success "${name} installed via go install."
         return 0
     fi
@@ -139,9 +166,329 @@ run_as_invoking_user_shell() {
     home="$(invoking_home)"
     cmd="$1"
     if [ "$user" = "$(id -un)" ]; then
-        HOME="$home" bash -lc "export PATH=\"\$PATH:$home/.local/bin:/root/.local/bin\"; $cmd"
+        HOME="$home" bash -lc "export PATH=\"$home/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"; $cmd"
     else
-        sudo -u "$user" -H bash -lc "export PATH=\"\$PATH:$home/.local/bin:/root/.local/bin\"; $cmd"
+        sudo -u "$user" -H bash -lc "export PATH=\"$home/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"; $cmd"
+    fi
+}
+
+invoking_user_has_command() {
+    local name="$1"
+    run_as_invoking_user_shell "command -v '$name' >/dev/null 2>&1"
+}
+
+ensure_invoking_user_pipx() {
+    if ! invoking_user_has_command pipx; then
+        info "Installing pipx..."
+        $SUDO apt-get install -y pipx || \
+            run_as_invoking_user python3 -m pip install --user pipx --break-system-packages 2>/dev/null || \
+            run_as_invoking_user python3 -m pip install --user pipx || true
+    fi
+    if invoking_user_has_command pipx; then
+        run_as_invoking_user_shell "pipx ensurepath >/dev/null 2>&1 || true" || true
+        return 0
+    fi
+    return 1
+}
+
+ensure_invoking_user_uv() {
+    if invoking_user_has_command uv; then
+        return 0
+    fi
+    ensure_invoking_user_pipx || true
+    if invoking_user_has_command pipx && run_as_invoking_user_shell "pipx install --force uv"; then
+        return 0
+    fi
+    run_as_invoking_user python3 -m pip install --user uv --break-system-packages 2>/dev/null || \
+        run_as_invoking_user python3 -m pip install --user uv || true
+    invoking_user_has_command uv
+}
+
+ensure_managed_python_312() {
+    if [ -n "$MANAGED_PYTHON_312" ]; then
+        return 0
+    fi
+    ensure_invoking_user_uv || return 1
+    run_as_invoking_user_shell "uv python install 3.12 >/dev/null" || return 1
+    MANAGED_PYTHON_312="$(run_as_invoking_user_shell "uv python find 3.12" 2>/dev/null | tail -n 1)"
+    if [[ ! "$MANAGED_PYTHON_312" =~ ^/[A-Za-z0-9._/+:-]+$ ]] \
+        || ! run_as_invoking_user_shell "test -x '$MANAGED_PYTHON_312'"; then
+        MANAGED_PYTHON_312=""
+        return 1
+    fi
+}
+
+check_codex_setup() {
+    local version auth_status
+    if ! invoking_user_has_command codex; then
+        warn "Codex CLI is not installed; the optional Codex planner will remain unavailable."
+        warn "Install Codex separately, run 'codex login', then verify with 'supabash doctor --codex'."
+        return 0
+    fi
+
+    version="$(run_as_invoking_user_shell "codex --version" 2>/dev/null | head -n 1 || true)"
+    if [ -n "$version" ]; then
+        success "Codex CLI detected (${version})."
+    else
+        warn "Codex CLI was found but its version could not be read."
+    fi
+
+    auth_status="$(run_as_invoking_user_shell "codex login status" 2>&1 || true)"
+    if grep -qi "logged in using chatgpt" <<<"$auth_status"; then
+        success "Codex is authenticated with ChatGPT."
+    else
+        warn "Codex is not authenticated with a ChatGPT subscription for Supabash."
+        warn "Run 'codex login', then 'supabash doctor --codex' from a standalone terminal."
+    fi
+}
+
+tool_recommended_version() {
+    local tool_id="$1"
+    local value=""
+    validate_tool_spec_manifest || return 1
+    if ! value="$(
+        jq -er --arg id "$tool_id" \
+            '.tools[] | select(.id == $id) | .recommended_version // empty' \
+            -- "$TOOL_SPEC_MANIFEST" 2>/dev/null
+    )"; then
+        warn "ToolSpec registry has no tested version for ${tool_id}."
+        return 1
+    fi
+    printf '%s\n' "$value"
+}
+
+validate_tool_spec_manifest() {
+    local python_binary
+    if ! command -v jq >/dev/null 2>&1; then
+        warn "Cannot validate the ToolSpec registry because jq is unavailable."
+        return 1
+    fi
+    if [ ! -f "$TOOL_SPEC_MANIFEST" ] || [ ! -r "$TOOL_SPEC_MANIFEST" ]; then
+        warn "ToolSpec registry is missing or unreadable: ${TOOL_SPEC_MANIFEST}"
+        return 1
+    fi
+    if ! jq -e '
+        def nonempty_string: type == "string" and length > 0;
+        def nonempty_strings:
+            type == "array" and length > 0 and all(.[]; nonempty_string);
+        def safe_version:
+            type == "string" and test("^[vV]?[0-9][0-9A-Za-z._+-]*$");
+        (.schema_version == 1)
+        and (.registry_version | nonempty_string)
+        and (.tools | type == "array" and length > 0)
+        and (([.tools[].id] | length) == ([.tools[].id] | unique | length))
+        and all(.tools[];
+            (.id | type == "string" and test("^[a-z0-9][a-z0-9_-]*$"))
+            and (.doctor_required | type == "boolean")
+            and ((.recommended_version == null) or (.recommended_version | safe_version))
+            and (.executables | type == "array")
+            and (if .doctor_required then (.executables | length > 0) else true end)
+            and all(.executables[];
+                (.candidates | nonempty_strings)
+                and (.health_probe | type == "object")
+                and (.health_probe.argv | nonempty_strings)
+                and (.health_probe.argv[0] == "{executable}")
+                and (.health_probe.success_exit_codes
+                    | type == "array" and length > 0
+                    and all(.[]; type == "number" and floor == . and . >= 0 and . <= 255))
+                and (.health_probe.timeout_seconds
+                    | type == "number" and floor == . and . >= 1 and . <= 30)
+            )
+        )
+    ' -- "$TOOL_SPEC_MANIFEST" >/dev/null 2>&1; then
+        warn "ToolSpec registry failed installer validation: ${TOOL_SPEC_MANIFEST}"
+        return 1
+    fi
+    python_binary="$(command -v python3 2>/dev/null || true)"
+    if [ -z "$python_binary" ]; then
+        warn "Cannot validate the full ToolSpec schema because Python 3 is unavailable."
+        return 1
+    fi
+    if ! PYTHONPATH="${SCRIPT_DIR}/src" \
+        "$python_binary" -c \
+        'import sys; from pathlib import Path; from supabash.tool_registry import load_tool_registry; load_tool_registry(Path(sys.argv[1]))' \
+        "$TOOL_SPEC_MANIFEST" >/dev/null 2>&1; then
+        warn "ToolSpec registry failed installer validation: ${TOOL_SPEC_MANIFEST}"
+        return 1
+    fi
+}
+
+tool_registry_resolve_executable() {
+    local tool_id="$1" candidate resolved
+    validate_tool_spec_manifest || return 1
+    while IFS= read -r candidate; do
+        resolved="$(command -v "$candidate" 2>/dev/null || true)"
+        if [[ "$resolved" == /* ]] && [ -f "$resolved" ] && [ -x "$resolved" ]; then
+            printf '%s\n' "$resolved"
+            return 0
+        fi
+    done < <(
+        jq -r --arg id "$tool_id" '
+            .tools[]
+            | select(.id == $id or (((.aliases // []) | index($id)) != null))
+            | .executables[0].candidates[]
+        ' -- "$TOOL_SPEC_MANIFEST"
+    )
+    return 1
+}
+
+tool_registry_health_check() {
+    local tool_id="$1" executable="$2" run_for_invoking_user="${3:-0}"
+    local timeout_seconds return_code allowed=0 log_file
+    local -a probe_argv success_codes
+    validate_tool_spec_manifest || return 1
+    mapfile -t probe_argv < <(
+        jq -r --arg id "$tool_id" '.tools[] | select(.id == $id) | .executables[0].health_probe.argv[]' -- "$TOOL_SPEC_MANIFEST"
+    )
+    [ "${#probe_argv[@]}" -gt 0 ] || return 1
+    for index in "${!probe_argv[@]}"; do
+        if [ "${probe_argv[$index]}" = "{executable}" ]; then
+            probe_argv[$index]="$executable"
+        fi
+    done
+    mapfile -t success_codes < <(
+        jq -r --arg id "$tool_id" '.tools[] | select(.id == $id) | .executables[0].health_probe.success_exit_codes[]' -- "$TOOL_SPEC_MANIFEST"
+    )
+    timeout_seconds="$(
+        jq -r --arg id "$tool_id" '.tools[] | select(.id == $id) | .executables[0].health_probe.timeout_seconds' -- "$TOOL_SPEC_MANIFEST"
+    )"
+    log_file="$(mktemp "${TMPDIR:-/tmp}/supabash-health-${tool_id}.XXXXXX.log")"
+    if [ "$run_for_invoking_user" = "1" ]; then
+        if run_as_invoking_user timeout "$timeout_seconds" "${probe_argv[@]}" >"$log_file" 2>&1; then
+            return_code=0
+        else
+            return_code=$?
+        fi
+    elif timeout "$timeout_seconds" "${probe_argv[@]}" >"$log_file" 2>&1; then
+        return_code=0
+    else
+        return_code=$?
+    fi
+    for code in "${success_codes[@]}"; do
+        if [ "$return_code" = "$code" ]; then
+            allowed=1
+            break
+        fi
+    done
+    if grep -Eqi \
+        'traceback \(most recent call last\)|modulenotfounderror:|importerror:|error while loading shared libraries|cannot open shared object file|command not found' \
+        "$log_file"; then
+        allowed=0
+    fi
+    rm -f "$log_file"
+    [ "$allowed" = "1" ]
+}
+
+resolve_invoking_user_command() {
+    local candidate resolved
+    for candidate in "$@"; do
+        resolved="$(run_as_invoking_user_shell "command -v '$candidate'" 2>/dev/null | tail -n 1 || true)"
+        if [[ "$resolved" == /* ]] && [ -x "$resolved" ]; then
+            printf '%s\n' "$resolved"
+            return 0
+        fi
+    done
+    return 1
+}
+
+should_retain_existing_tool() {
+    local tool_id="$1" executable="${2:-}" display_name="${3:-$1}"
+    local run_for_invoking_user="${4:-0}"
+    if [ -z "$executable" ] || [ "$SUPABASH_UPGRADE_TOOLS" = "1" ]; then
+        return 1
+    fi
+    if tool_registry_health_check "$tool_id" "$executable" "$run_for_invoking_user"; then
+        info "${display_name} is already installed and healthy."
+        return 0
+    fi
+    warn "${display_name} is present but failed its startup probe; attempting repair."
+    return 1
+}
+
+load_tool_versions() {
+    validate_tool_spec_manifest || error "Cannot continue with an invalid ToolSpec registry."
+    NUCLEI_VERSION="${NUCLEI_VERSION:-$(tool_recommended_version nuclei)}"
+    RUSTSCAN_VERSION="${RUSTSCAN_VERSION:-$(tool_recommended_version rustscan)}"
+    HTTPX_VERSION="${HTTPX_VERSION:-$(tool_recommended_version httpx)}"
+    SUBFINDER_VERSION="${SUBFINDER_VERSION:-$(tool_recommended_version subfinder)}"
+    KATANA_VERSION="${KATANA_VERSION:-$(tool_recommended_version katana)}"
+    TRIVY_VERSION="${TRIVY_VERSION:-$(tool_recommended_version trivy)}"
+    ENUM4LINUX_NG_VERSION="${ENUM4LINUX_NG_VERSION:-$(tool_recommended_version enum4linux_ng)}"
+    THEHARVESTER_VERSION="${THEHARVESTER_VERSION:-$(tool_recommended_version theharvester)}"
+    NETEXEC_VERSION="${NETEXEC_VERSION:-$(tool_recommended_version crackmapexec)}"
+    PROWLER_VERSION="${PROWLER_VERSION:-$(tool_recommended_version prowler)}"
+    BROWSER_USE_VERSION="${BROWSER_USE_VERSION:-$(tool_recommended_version browser_use)}"
+    WPSCAN_VERSION="${WPSCAN_VERSION:-$(tool_recommended_version wpscan)}"
+    local variable value
+    for variable in NUCLEI_VERSION RUSTSCAN_VERSION HTTPX_VERSION SUBFINDER_VERSION \
+        KATANA_VERSION TRIVY_VERSION ENUM4LINUX_NG_VERSION THEHARVESTER_VERSION \
+        NETEXEC_VERSION PROWLER_VERSION BROWSER_USE_VERSION WPSCAN_VERSION; do
+        value="${!variable}"
+        if [ -z "$value" ] || [[ ! "$value" =~ ^[vV]?[0-9][0-9A-Za-z._+-]*$ ]]; then
+            error "Invalid version value in ${variable}."
+        fi
+    done
+}
+
+install_browser_use() {
+    local browser_user browser_path pipx_python=""
+    validate_tool_spec_manifest || return 1
+    browser_user="$(invoking_user)"
+    browser_path="$(resolve_invoking_user_command browser-use browser_use || true)"
+    if should_retain_existing_tool browser_use "$browser_path" browser-use 1; then
+        return 0
+    fi
+
+    info "Installing/repairing browser-use ${BROWSER_USE_VERSION} for ${browser_user}..."
+    $SUDO apt-get install -y python3-pip python3-venv python3-dev pipx || true
+    if ensure_managed_python_312; then
+        pipx_python="--python '$MANAGED_PYTHON_312'"
+    else
+        warn "Could not provision Python 3.12; browser-use installation may be incompatible with the distro Python."
+    fi
+    if ensure_invoking_user_pipx; then
+        if run_as_invoking_user_shell "pipx install --force ${pipx_python} 'browser-use==${BROWSER_USE_VERSION}'"; then
+            success "browser-use installed via pipx."
+        else
+            warn "pipx install failed. Trying an invoking-user pip fallback..."
+            run_as_invoking_user python3 -m pip install --user "browser-use[cli]==${BROWSER_USE_VERSION}" --break-system-packages || true
+        fi
+    else
+        info "pipx not available for ${browser_user}; trying invoking-user pip..."
+        run_as_invoking_user python3 -m pip install --user "browser-use[cli]==${BROWSER_USE_VERSION}" --break-system-packages || true
+    fi
+
+    # browser-use runtime bootstrap expects uv/uvx.
+    ensure_invoking_user_uv || warn "uv/uvx is unavailable; browser runtime setup may fail."
+
+    # Install browser runtime assets only when installing or repairing the CLI.
+    if invoking_user_has_command browser-use; then
+        info "Installing browser-use runtime assets (this may take a while)..."
+        local browser_log
+        browser_log="$(mktemp "${TMPDIR:-/tmp}/supabash-browser-use.XXXXXX.log")"
+        if ! run_as_invoking_user_shell "browser-use install" >"$browser_log" 2>&1; then
+            warn "browser-use runtime install failed. See ${browser_log}"
+            warn "Run manually: browser-use install"
+        else
+            rm -f "$browser_log"
+        fi
+    elif invoking_user_has_command browser_use; then
+        info "Installing browser_use runtime assets (this may take a while)..."
+        local browser_log
+        browser_log="$(mktemp "${TMPDIR:-/tmp}/supabash-browser-use.XXXXXX.log")"
+        if ! run_as_invoking_user_shell "browser_use install" >"$browser_log" 2>&1; then
+            warn "browser_use runtime install failed. See ${browser_log}"
+            warn "Run manually: browser_use install"
+        else
+            rm -f "$browser_log"
+        fi
+    fi
+
+    if invoking_user_has_command browser-use || invoking_user_has_command browser_use; then
+        success "browser-use CLI available."
+    else
+        warn "browser-use install attempted, but command was not found on PATH."
+        warn "Try: pipx install 'browser-use==${BROWSER_USE_VERSION}' && pipx ensurepath && browser-use install"
     fi
 }
 
@@ -229,17 +576,19 @@ fetch_github_release_json() {
         return 0
     fi
 
-    # Try exact tag, then v-prefixed tag, then latest
+    # A requested version is a compatibility contract. Never silently install a
+    # different "latest" release when the requested tag cannot be found.
     url="https://api.github.com/repos/${repo}/releases/tags/${version}"
     if curl -fsSL "$url" 2>/dev/null; then
         return 0
     fi
-    url="https://api.github.com/repos/${repo}/releases/tags/v${version}"
-    if curl -fsSL "$url" 2>/dev/null; then
-        return 0
+    if [[ "$version" != v* ]]; then
+        url="https://api.github.com/repos/${repo}/releases/tags/v${version}"
+        if curl -fsSL "$url" 2>/dev/null; then
+            return 0
+        fi
     fi
-    url="https://api.github.com/repos/${repo}/releases/latest"
-    curl -fsSL "$url"
+    return 1
 }
 
 pick_release_asset_url() {
@@ -260,19 +609,56 @@ download_url_to_tmp() {
     [ -s "${tmpdir}/${name}" ]
 }
 
+verify_release_asset_checksum() {
+    local release_json="$1"
+    local asset_name="$2"
+    local tmpdir="$3"
+    local checksum_url checksum_name expected actual
+
+    checksum_url="$(pick_release_asset_url "$release_json" '.*checksums.*\.txt$')"
+    if [ -z "$checksum_url" ]; then
+        warn "Release does not publish a checksum file for ${asset_name}."
+        return 1
+    fi
+
+    checksum_name="$(basename "$checksum_url")"
+    if ! download_url_to_tmp "$checksum_url" "$tmpdir" "$checksum_name"; then
+        warn "Could not download checksum file for ${asset_name}."
+        return 1
+    fi
+
+    expected="$(awk -v name="$asset_name" '$2 == name || $2 == "*" name {print $1; exit}' "${tmpdir}/${checksum_name}")"
+    if [[ ! "$expected" =~ ^[[:xdigit:]]{64}$ ]]; then
+        warn "Checksum file does not contain a SHA-256 entry for ${asset_name}."
+        return 1
+    fi
+    actual="$(sha256sum "${tmpdir}/${asset_name}" | awk '{print $1}')"
+    if [ "${actual,,}" != "${expected,,}" ]; then
+        warn "SHA-256 verification failed for ${asset_name}."
+        return 1
+    fi
+    success "Verified SHA-256 checksum for ${asset_name}."
+}
+
 install_github_zip_binary() {
     local name="$1"
     local repo="$2"
     local version="$3"
     local pat_amd64="$4"
     local pat_arm64="$5"
+    local require_checksum="${6:-0}" existing_path
 
-    if command -v "$name" &> /dev/null; then
-        info "${name} is already installed."
+    validate_tool_spec_manifest || return 1
+    existing_path="$(tool_registry_resolve_executable "$name" || true)"
+    if should_retain_existing_tool "$name" "$existing_path" "$name"; then
         return 0
     fi
 
-    info "Installing ${name} from GitHub release..."
+    if [ -n "$existing_path" ]; then
+        info "Updating ${name} from its tested GitHub release..."
+    else
+        info "Installing ${name} from GitHub release..."
+    fi
     local arch asset_url asset_name tmpdir bin_path release_json
     arch="$(uname -m)"
     asset_url=""
@@ -303,6 +689,12 @@ install_github_zip_binary() {
         return 1
     fi
 
+    if [ "$require_checksum" = "1" ] && ! verify_release_asset_checksum "$release_json" "$asset_name" "$tmpdir"; then
+        warn "Refusing to install unverified ${name} release asset."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
     unzip -q "${tmpdir}/${asset_name}" -d "${tmpdir}/${name}" || true
     bin_path="$(find "${tmpdir}/${name}" -maxdepth 4 -type f -name "$name" | head -n 1)"
     if [ -z "$bin_path" ]; then
@@ -313,12 +705,62 @@ install_github_zip_binary() {
 
     $SUDO install -m 0755 "$bin_path" "/usr/local/bin/${name}"
     rm -rf "$tmpdir"
-    if command -v "$name" &> /dev/null; then
+    if tool_registry_resolve_executable "$name" >/dev/null 2>&1; then
         success "${name} installed."
         return 0
     fi
     warn "${name} install attempted, but ${name} is still not on PATH."
     return 1
+}
+
+install_trivy_release() {
+    local existing_path
+    validate_tool_spec_manifest || return 1
+    existing_path="$(command -v trivy 2>/dev/null || true)"
+    if should_retain_existing_tool trivy "$existing_path" Trivy; then
+        return 0
+    fi
+
+    local arch release_version tag asset_name checksum_name base_url tmpdir expected actual
+    arch="$(uname -m)"
+    release_version="${TRIVY_VERSION#v}"
+    tag="v${release_version}"
+    case "$arch" in
+        x86_64|amd64) asset_name="trivy_${release_version}_Linux-64bit.deb" ;;
+        aarch64|arm64) asset_name="trivy_${release_version}_Linux-ARM64.deb" ;;
+        *)
+            warn "Unsupported architecture for Trivy release installer: ${arch}"
+            return 1
+            ;;
+    esac
+    checksum_name="trivy_${release_version}_checksums.txt"
+    base_url="https://github.com/${TRIVY_REPO}/releases/download/${tag}"
+    tmpdir="$(mktemp -d)"
+
+    if ! download_url_to_tmp "${base_url}/${asset_name}" "$tmpdir" "$asset_name" \
+        || ! download_url_to_tmp "${base_url}/${checksum_name}" "$tmpdir" "$checksum_name"; then
+        warn "Failed to download the tested Trivy ${release_version} release and checksum."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    expected="$(awk -v name="$asset_name" '$2 == name || $2 == "*" name {print $1; exit}' "${tmpdir}/${checksum_name}")"
+    actual="$(sha256sum "${tmpdir}/${asset_name}" | awk '{print $1}')"
+    if [[ ! "$expected" =~ ^[[:xdigit:]]{64}$ ]] || [ "${actual,,}" != "${expected,,}" ]; then
+        warn "Refusing to install Trivy: SHA-256 verification failed for ${asset_name}."
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    success "Verified SHA-256 checksum for ${asset_name}."
+
+    if ! $SUDO dpkg -i "${tmpdir}/${asset_name}"; then
+        $SUDO apt-get -f install -y || true
+        $SUDO dpkg -i "${tmpdir}/${asset_name}" || {
+            rm -rf "$tmpdir"
+            return 1
+        }
+    fi
+    rm -rf "$tmpdir"
+    command -v trivy >/dev/null 2>&1
 }
 
 # 2. System Dependencies (APT)
@@ -339,7 +781,6 @@ install_apt_deps() {
         nmap
         masscan
         postgresql-client
-        rustscan
         nikto
         sqlmap
         hydra
@@ -351,8 +792,6 @@ install_apt_deps() {
         dnsenum
         netdiscover
         aircrack-ng
-        theharvester
-        wpscan
         exploitdb # may be unavailable on some distros; handled below
         # Add other standard tools here
     )
@@ -377,67 +816,51 @@ install_apt_deps() {
 
 # 3. External Tools (Nuclei, Trivy)
 install_external_tools() {
+    validate_tool_spec_manifest || return 1
     install_exploitdb
 
-    # Install Nuclei (ProjectDiscovery)
-    if ! command -v nuclei &> /dev/null; then
-        info "Installing Nuclei..."
-        arch="$(uname -m)"
-        if [[ "$arch" != "x86_64" && "$arch" != "amd64" ]]; then
-            warn "Nuclei auto-install currently supports x86_64/amd64 only (arch=$arch). Install manually: https://github.com/projectdiscovery/nuclei/releases"
-        else
-            tmpdir="$(mktemp -d)"
-            nuclei_zip="nuclei_2.9.8_linux_amd64.zip"
-            nuclei_url="https://github.com/projectdiscovery/nuclei/releases/download/v2.9.8/${nuclei_zip}"
-            if download_url_to_tmp "$nuclei_url" "$tmpdir" "$nuclei_zip"; then
-                unzip -q "${tmpdir}/${nuclei_zip}" -d "$tmpdir"
-                if [ -f "${tmpdir}/nuclei" ]; then
-                    $SUDO install -m 0755 "${tmpdir}/nuclei" /usr/local/bin/nuclei
-                    success "Nuclei installed."
-                else
-                    warn "Nuclei archive did not contain expected binary (skipping)."
-                fi
-            else
-                warn "Failed to download Nuclei from ${nuclei_url} (skipping)."
-            fi
-            rm -rf "$tmpdir"
-        fi
+    # Install a compatibility-tested Nuclei engine. ProjectDiscovery releases
+    # publish checksums, which are required before replacing the executable.
+    if ! install_github_zip_binary "nuclei" "$NUCLEI_REPO" "$NUCLEI_VERSION" '^nuclei_.*_linux_amd64\.zip$' '^nuclei_.*_linux_arm64\.zip$' 1; then
+        warn "Falling back to go install for Nuclei (if Go is available)."
+        install_via_go "nuclei" "github.com/projectdiscovery/nuclei/v3/cmd/nuclei" "$NUCLEI_VERSION" || true
+    fi
 
-        if command -v nuclei &> /dev/null; then
-            if [ "$SUPABASH_UPDATE_NUCLEI_TEMPLATES" = "1" ]; then
-                info "Updating Nuclei templates for the invoking user (best-effort)..."
-                if [ -n "${SUDO_USER:-}" ] && command -v sudo &> /dev/null; then
-                    sudo -u "$SUDO_USER" -H nuclei -update-templates >/dev/null 2>&1 || warn "Nuclei template update failed; run: nuclei -update-templates"
-                else
-                    nuclei -update-templates >/dev/null 2>&1 || warn "Nuclei template update failed; run: nuclei -update-templates"
-                fi
-            else
-                info "Skipping Nuclei template update (set SUPABASH_UPDATE_NUCLEI_TEMPLATES=1 to enable)."
-            fi
+    # Templates evolve independently from the engine, so refresh them on every
+    # installer run (unless explicitly disabled), not just on first install.
+    if command -v nuclei &> /dev/null; then
+        if [ "$SUPABASH_UPDATE_NUCLEI_TEMPLATES" = "1" ]; then
+            info "Updating Nuclei templates for the invoking user (best-effort)..."
+            run_as_invoking_user_shell "nuclei -update-templates >/dev/null 2>&1" || \
+                warn "Nuclei template update failed; run: nuclei -update-templates"
+        else
+            info "Skipping Nuclei template update (set SUPABASH_UPDATE_NUCLEI_TEMPLATES=1 to enable)."
         fi
-    else
-        info "Nuclei is already installed."
     fi
 
     # Install httpx (ProjectDiscovery HTTP probing)
-    if ! install_github_zip_binary "httpx" "$HTTPX_REPO" "$HTTPX_VERSION" '^httpx_.*_linux_amd64\\.zip$' '^httpx_.*_linux_arm64\\.zip$'; then
+    if ! install_github_zip_binary "httpx" "$HTTPX_REPO" "$HTTPX_VERSION" '^httpx_.*_linux_amd64\.zip$' '^httpx_.*_linux_arm64\.zip$' 1; then
         warn "Falling back to go install for httpx (if Go is available)."
         install_via_go "httpx" "github.com/projectdiscovery/httpx/cmd/httpx" "$HTTPX_VERSION" || true
     fi
 
     # Install subfinder (ProjectDiscovery subdomain discovery)
-    if ! install_github_zip_binary "subfinder" "$SUBFINDER_REPO" "$SUBFINDER_VERSION" '^subfinder_.*_linux_amd64\\.zip$' '^subfinder_.*_linux_arm64\\.zip$'; then
+    if ! install_github_zip_binary "subfinder" "$SUBFINDER_REPO" "$SUBFINDER_VERSION" '^subfinder_.*_linux_amd64\.zip$' '^subfinder_.*_linux_arm64\.zip$' 1; then
         warn "Falling back to go install for subfinder (if Go is available)."
         install_via_go "subfinder" "github.com/projectdiscovery/subfinder/v2/cmd/subfinder" "$SUBFINDER_VERSION" || true
     fi
 
     # Install katana (ProjectDiscovery crawler)
-    if ! install_github_zip_binary "katana" "$KATANA_REPO" "$KATANA_VERSION" '^katana_.*_linux_amd64\\.zip$' '^katana_.*_linux_arm64\\.zip$'; then
+    if ! install_github_zip_binary "katana" "$KATANA_REPO" "$KATANA_VERSION" '^katana_.*_linux_amd64\.zip$' '^katana_.*_linux_arm64\.zip$' 1; then
         warn "Falling back to go install for katana (if Go is available)."
         install_via_go "katana" "github.com/projectdiscovery/katana/cmd/katana" "$KATANA_VERSION" || true
     fi
 
-    # Install Trivy (Container Scanner)
+    # Install Trivy from its compatibility-tested, checksummed release. Keep the
+    # official APT repository as a fresh-install fallback when GitHub is unavailable.
+    if ! install_trivy_release; then
+        warn "Could not install the tested Trivy ${TRIVY_VERSION} release."
+    fi
     if ! command -v trivy &> /dev/null; then
         info "Installing Trivy..."
         $SUDO apt-get install -y wget apt-transport-https gnupg lsb-release
@@ -452,20 +875,15 @@ install_external_tools() {
         $SUDO apt-get update
         $SUDO apt-get install -y trivy
         success "Trivy installed."
-    else
-        info "Trivy is already installed."
     fi
 
     migrate_trivy_keyring
 
     # Install RustScan (optional fast port scanner)
-    if ! command -v rustscan &> /dev/null; then
-        if apt_pkg_available "rustscan"; then
-            info "Installing RustScan via APT..."
-            $SUDO apt-get install -y rustscan
-            success "RustScan installed."
-        else
-            info "Installing RustScan from GitHub release..."
+    local rustscan_path
+    rustscan_path="$(command -v rustscan 2>/dev/null || true)"
+    if ! should_retain_existing_tool rustscan "$rustscan_path" RustScan; then
+            info "Installing RustScan from its tested GitHub release..."
             arch="$(uname -m)"
 
             asset_url=""
@@ -475,14 +893,14 @@ install_external_tools() {
                 release_json="$(fetch_github_release_json "$RUSTSCAN_REPO" "$RUSTSCAN_VERSION" || true)"
                 if [ -n "$release_json" ]; then
                     if [[ "$arch" == "x86_64" || "$arch" == "amd64" ]]; then
-                        for pat in '^rustscan\\.deb\\.zip$' '^x86_64-linux-rustscan\\.tar\\.gz(\\.1)?\\.zip$' '^x86-linux-rustscan\\.zip$'; do
+                        for pat in '^rustscan\.deb\.zip$' '^x86_64-linux-rustscan\.tar\.gz(\.1)?\.zip$' '^x86-linux-rustscan\.zip$'; do
                             asset_url="$(pick_release_asset_url "$release_json" "$pat")"
                             if [ -n "$asset_url" ]; then
                                 break
                             fi
                         done
                     elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
-                        for pat in '^aarch64-linux-rustscan\\.zip$' '^arm64-linux-rustscan\\.zip$'; do
+                        for pat in '^aarch64-linux-rustscan\.zip$' '^arm64-linux-rustscan\.zip$'; do
                             asset_url="$(pick_release_asset_url "$release_json" "$pat")"
                             if [ -n "$asset_url" ]; then
                                 break
@@ -578,168 +996,134 @@ install_external_tools() {
                     warn "RustScan install attempted, but rustscan is still not on PATH."
                 fi
             fi
-        fi
-    else
-        info "RustScan is already installed."
     fi
 
     # Install WPScan (WordPress scanner) - fallback to gem if not in APT
-    if ! command -v wpscan &> /dev/null; then
-        if apt_pkg_available "wpscan"; then
-            info "WPScan will be installed via APT (handled in install_apt_deps)."
-        else
-            info "Installing WPScan via Ruby gem (fallback)..."
+    local wpscan_path
+    wpscan_path="$(command -v wpscan 2>/dev/null || true)"
+    if ! should_retain_existing_tool wpscan "$wpscan_path" WPScan; then
+            info "Installing WPScan ${WPSCAN_VERSION} via Ruby gem..."
             # Install Ruby development packages required for native extensions
             info "Installing Ruby and build dependencies for WPScan..."
             $SUDO apt-get install -y ruby ruby-dev build-essential libcurl4-openssl-dev libxml2 libxml2-dev libxslt1-dev zlib1g-dev libyajl-dev || true
 
             if command -v gem &> /dev/null; then
-                $SUDO gem install wpscan --no-document || warn "Failed to install WPScan via gem. Install manually: sudo gem install wpscan"
+                $SUDO gem install wpscan -v "$WPSCAN_VERSION" --no-document || \
+                    warn "Failed to install WPScan via gem. Install manually: sudo gem install wpscan -v ${WPSCAN_VERSION}"
                 if command -v wpscan &> /dev/null; then
                     success "WPScan installed via gem."
                 else
-                    warn "WPScan gem installed but not found on PATH. Try: sudo gem install wpscan"
+                    warn "WPScan gem installed but not found on PATH. Try: sudo gem install wpscan -v ${WPSCAN_VERSION}"
                 fi
             else
                 warn "Ruby gem not available; cannot install WPScan. Install manually."
             fi
-        fi
-    else
-        info "WPScan is already installed."
     fi
 
-    # Install theHarvester (OSINT tool) - install from GitHub (PyPI package is outdated placeholder)
-    if ! command -v theHarvester &> /dev/null && ! command -v theharvester &> /dev/null; then
-        if apt_pkg_available "theharvester"; then
-            info "theHarvester will be installed via APT (handled in install_apt_deps)."
+    # theHarvester 4.x uses pyproject/uv and Python >=3.12. Install it in an
+    # isolated, invoking-user tool environment instead of modifying system
+    # Python or relying on the removed requirements.txt layout.
+    local theharvester_path
+    theharvester_path="$(resolve_invoking_user_command theHarvester theharvester || true)"
+    if ! should_retain_existing_tool theharvester "$theharvester_path" theHarvester 1; then
+        if [ -n "$theharvester_path" ] && [ "$SUPABASH_UPGRADE_TOOLS" = "1" ]; then
+            info "Updating theHarvester ${THEHARVESTER_VERSION} in an isolated uv tool environment..."
         else
-            info "Installing theHarvester from GitHub..."
-            local theharvester_dir="/opt/theHarvester"
-
-            # Install Python dependencies for theHarvester
-            $SUDO apt-get install -y python3-pip python3-venv python3-dev || true
-
-            if [ -d "$theharvester_dir" ]; then
-                info "Updating existing theHarvester installation..."
-                (cd "$theharvester_dir" && $SUDO git pull --ff-only) || warn "Failed to update theHarvester."
-            else
-                $SUDO git clone https://github.com/laramies/theHarvester.git "$theharvester_dir" || {
-                    warn "Failed to clone theHarvester. Install manually: https://github.com/laramies/theHarvester"
-                }
-            fi
-
-            if [ -d "$theharvester_dir" ]; then
-                # Install dependencies in the system or create a wrapper
-                if [ -f "$theharvester_dir/requirements.txt" ]; then
-                    info "Installing theHarvester Python dependencies..."
-                    $SUDO pip3 install -r "$theharvester_dir/requirements.txt" --break-system-packages 2>/dev/null || \
-                    $SUDO pip3 install -r "$theharvester_dir/requirements.txt" || true
-                fi
-
-                # Create wrapper script
-                $SUDO tee /usr/local/bin/theHarvester > /dev/null << 'HARVESTER_EOF'
-#!/bin/bash
-cd /opt/theHarvester
-python3 theHarvester.py "$@"
-HARVESTER_EOF
-                $SUDO chmod +x /usr/local/bin/theHarvester
-                $SUDO ln -sf /usr/local/bin/theHarvester /usr/local/bin/theharvester 2>/dev/null || true
-
-                if command -v theHarvester &> /dev/null; then
-                    success "theHarvester installed."
-                else
-                    warn "theHarvester installed to /opt but wrapper not working. Run manually: cd /opt/theHarvester && python3 theHarvester.py"
-                fi
-            fi
+            info "Installing/repairing theHarvester ${THEHARVESTER_VERSION} in an isolated uv tool environment..."
         fi
-    else
-        info "theHarvester is already installed."
+        if ensure_invoking_user_uv && run_as_invoking_user_shell \
+            "uv tool install --force --python 3.12 'git+https://github.com/laramies/theHarvester.git@${THEHARVESTER_VERSION}'"; then
+            if run_as_invoking_user_shell "theHarvester -h >/dev/null 2>&1 || theharvester -h >/dev/null 2>&1"; then
+                success "theHarvester installed and passed its health probe."
+            else
+                warn "theHarvester installation completed but its health probe failed."
+            fi
+        else
+            warn "Failed to install theHarvester with uv."
+            warn "Run: uv tool install --force --python 3.12 'git+https://github.com/laramies/theHarvester.git@${THEHARVESTER_VERSION}'"
+        fi
     fi
 
     # Install CrackMapExec/NetExec (AD/Windows post-exploitation)
-    if ! command -v crackmapexec &> /dev/null && ! command -v netexec &> /dev/null && ! command -v cme &> /dev/null && ! command -v nxc &> /dev/null; then
+    local netexec_path
+    netexec_path="$(resolve_invoking_user_command netexec nxc crackmapexec cme || true)"
+    if ! should_retain_existing_tool crackmapexec "$netexec_path" "CrackMapExec/NetExec" 1; then
         info "Installing CrackMapExec/NetExec..."
+        local netexec_ref="$NETEXEC_VERSION"
+        local netexec_python=""
+        if [[ "$netexec_ref" != v* ]]; then
+            netexec_ref="v${netexec_ref}"
+        fi
+        if ensure_managed_python_312; then
+            netexec_python="--python '$MANAGED_PYTHON_312'"
+        fi
 
         # Install system dependencies required by NetExec/CME
         info "Installing system dependencies for NetExec..."
         $SUDO apt-get install -y python3-dev libffi-dev libssl-dev libxml2-dev libxslt1-dev \
             libkrb5-dev krb5-user libpq-dev build-essential pipx || true
 
-        # Ensure pipx is available and configured
-        if ! command -v pipx &> /dev/null; then
-            info "Installing pipx..."
-            $SUDO apt-get install -y pipx || pip3 install --user pipx --break-system-packages 2>/dev/null || pip3 install --user pipx || true
-        fi
-
-        # Ensure pipx path is set
-        if command -v pipx &> /dev/null; then
-            pipx ensurepath 2>/dev/null || true
-            export PATH="$PATH:$HOME/.local/bin:/root/.local/bin"
-
+        if ensure_invoking_user_pipx; then
             info "Installing NetExec via pipx (this may take a while)..."
-            # NetExec is the actively maintained fork of CrackMapExec
-            # Try with verbose output to see errors
-            if pipx install netexec; then
-                success "NetExec installed via pipx."
+            local pipx_force=""
+            if [ "$SUPABASH_UPGRADE_TOOLS" = "1" ]; then
+                pipx_force="--force"
+            fi
+            # NetExec is not published on PyPI. Install the compatibility-tested
+            # upstream tag rather than silently tracking the mutable main branch.
+            if run_as_invoking_user_shell \
+                "pipx install ${pipx_force} ${netexec_python} 'git+https://github.com/Pennyw0rth/NetExec.git@${netexec_ref}'"; then
+                success "NetExec ${NETEXEC_VERSION} installed via pipx from GitHub."
             else
-                info "NetExec install failed, trying git-based install..."
-                # Try installing from git directly
-                if pipx install git+https://github.com/Pennyw0rth/NetExec.git; then
-                    success "NetExec installed via pipx from GitHub."
-                elif pipx install crackmapexec; then
-                    success "CrackMapExec installed via pipx."
+                warn "pipx install failed. Trying an invoking-user pip fallback..."
+                if run_as_invoking_user python3 -m pip install --user \
+                    "git+https://github.com/Pennyw0rth/NetExec.git@${netexec_ref}" \
+                    --break-system-packages; then
+                    success "NetExec ${NETEXEC_VERSION} installed via pip from GitHub."
                 else
-                    warn "pipx install failed. Trying pip3 with --break-system-packages..."
-                    # Final fallback: pip3 to system
-                    if pip3 install netexec --break-system-packages; then
-                        success "NetExec installed via pip3."
-                    elif pip3 install git+https://github.com/Pennyw0rth/NetExec.git --break-system-packages; then
-                        success "NetExec installed via pip3 from GitHub."
-                    else
-                        warn "All NetExec installation methods failed."
-                        warn "Install manually: pipx install git+https://github.com/Pennyw0rth/NetExec.git"
-                    fi
+                    warn "All NetExec installation methods failed."
+                    warn "Run: pipx install 'git+https://github.com/Pennyw0rth/NetExec.git@${netexec_ref}'"
                 fi
             fi
         else
-            # Fallback to pip with --break-system-packages for Ubuntu 24.04+
-            info "pipx not available, trying pip3..."
-            if pip3 install netexec --break-system-packages; then
-                success "NetExec installed via pip3."
-            elif pip3 install git+https://github.com/Pennyw0rth/NetExec.git --break-system-packages; then
-                success "NetExec installed via pip3 from GitHub."
+            info "pipx not available, trying invoking-user pip..."
+            if run_as_invoking_user python3 -m pip install --user \
+                "git+https://github.com/Pennyw0rth/NetExec.git@${netexec_ref}" \
+                --break-system-packages; then
+                success "NetExec ${NETEXEC_VERSION} installed via pip from GitHub."
             else
                 warn "Failed to install NetExec/CrackMapExec via pip."
-                warn "Install manually: pip3 install git+https://github.com/Pennyw0rth/NetExec.git --break-system-packages"
+                warn "Run: pipx install 'git+https://github.com/Pennyw0rth/NetExec.git@${netexec_ref}'"
             fi
         fi
 
         # Check if installation succeeded
-        if command -v netexec &> /dev/null || command -v nxc &> /dev/null; then
+        if run_as_invoking_user_shell "command -v netexec >/dev/null 2>&1 || command -v nxc >/dev/null 2>&1"; then
             success "NetExec installed and available."
-        elif command -v crackmapexec &> /dev/null || command -v cme &> /dev/null; then
+        elif run_as_invoking_user_shell "command -v crackmapexec >/dev/null 2>&1 || command -v cme >/dev/null 2>&1"; then
             success "CrackMapExec installed and available."
-        elif [ -f "$HOME/.local/bin/netexec" ] || [ -f "$HOME/.local/bin/nxc" ]; then
-            success "NetExec installed to ~/.local/bin (add to PATH: export PATH=\$PATH:\$HOME/.local/bin)"
         else
             warn "CrackMapExec/NetExec not found on PATH after install."
-            warn "Try: pipx install netexec && pipx ensurepath"
+            warn "Try: pipx install 'git+https://github.com/Pennyw0rth/NetExec.git@${netexec_ref}' && pipx ensurepath"
         fi
-    else
-        info "CrackMapExec/NetExec is already installed."
     fi
 
     # Install ScoutSuite (multi-cloud audit)
-    if ! command -v scout &> /dev/null && ! command -v ScoutSuite &> /dev/null; then
+    if ! run_as_invoking_user_shell "command -v scout >/dev/null 2>&1 || command -v ScoutSuite >/dev/null 2>&1"; then
         info "Installing ScoutSuite..."
         $SUDO apt-get install -y python3-pip python3-venv python3-dev || true
-        if command -v pipx &> /dev/null; then
-            pipx install scoutsuite || pipx install ScoutSuite || true
+        if ensure_invoking_user_pipx; then
+            local pipx_force=""
+            if [ "$SUPABASH_UPGRADE_TOOLS" = "1" ]; then
+                pipx_force="--force"
+            fi
+            run_as_invoking_user_shell "pipx install ${pipx_force} scoutsuite" || \
+                run_as_invoking_user_shell "pipx install ${pipx_force} ScoutSuite" || true
         else
-            $SUDO pip3 install scoutsuite --break-system-packages 2>/dev/null || \
-            $SUDO pip3 install scoutsuite || true
+            run_as_invoking_user python3 -m pip install --user scoutsuite --break-system-packages 2>/dev/null || \
+                run_as_invoking_user python3 -m pip install --user scoutsuite || true
         fi
-        if command -v scout &> /dev/null || command -v ScoutSuite &> /dev/null; then
+        if run_as_invoking_user_shell "command -v scout >/dev/null 2>&1 || command -v ScoutSuite >/dev/null 2>&1"; then
             success "ScoutSuite installed."
         else
             warn "ScoutSuite install attempted, but 'scout' is not on PATH. Try: pipx install scoutsuite"
@@ -749,94 +1133,38 @@ HARVESTER_EOF
     fi
 
     # Install Prowler (AWS audits)
-    if ! command -v prowler &> /dev/null; then
+    local prowler_path
+    prowler_path="$(resolve_invoking_user_command prowler || true)"
+    if ! should_retain_existing_tool prowler "$prowler_path" Prowler 1; then
         info "Installing Prowler..."
         $SUDO apt-get install -y python3-pip python3-venv python3-dev || true
-        if command -v pipx &> /dev/null; then
-            pipx install prowler || true
+        if ensure_invoking_user_pipx; then
+            local pipx_force="" prowler_python=""
+            if [ "$SUPABASH_UPGRADE_TOOLS" = "1" ]; then
+                pipx_force="--force"
+            fi
+            if ensure_managed_python_312; then
+                prowler_python="--python '$MANAGED_PYTHON_312'"
+            fi
+            run_as_invoking_user_shell "pipx install ${pipx_force} ${prowler_python} 'prowler==${PROWLER_VERSION}'" || true
         else
-            $SUDO pip3 install prowler --break-system-packages 2>/dev/null || \
-            $SUDO pip3 install prowler || true
+            run_as_invoking_user python3 -m pip install --user "prowler==${PROWLER_VERSION}" --break-system-packages 2>/dev/null || \
+                run_as_invoking_user python3 -m pip install --user "prowler==${PROWLER_VERSION}" || true
         fi
-        if command -v prowler &> /dev/null; then
+        if invoking_user_has_command prowler; then
             success "Prowler installed."
         else
             warn "Prowler install attempted, but 'prowler' is not on PATH. Try: pipx install prowler"
         fi
-    else
-        info "Prowler is already installed."
     fi
 
-    # Install browser-use CLI (browser-driven authenticated checks in agentic mode)
-    # Use --force so reruns can repair/update a stale/broken installation.
-    local browser_user browser_home
-    browser_user="$(invoking_user)"
-    browser_home="$(invoking_home)"
-
-    info "Installing/updating browser-use CLI..."
-    $SUDO apt-get install -y python3-pip python3-venv python3-dev pipx || true
-
-    # Ensure pipx is available and configured
-    if ! run_as_invoking_user_shell "command -v pipx >/dev/null 2>&1"; then
-        info "Installing pipx..."
-        $SUDO apt-get install -y pipx || run_as_invoking_user python3 -m pip install --user pipx || true
-    fi
-    if run_as_invoking_user_shell "command -v pipx >/dev/null 2>&1"; then
-        run_as_invoking_user_shell "pipx ensurepath >/dev/null 2>&1 || true" || true
-        export PATH="$PATH:${browser_home}/.local/bin:/root/.local/bin"
-    fi
-
-    if run_as_invoking_user_shell "command -v pipx >/dev/null 2>&1"; then
-        if run_as_invoking_user_shell "pipx install --force browser-use"; then
-            success "browser-use installed/updated via pipx."
-        else
-            warn "pipx install --force browser-use failed. Trying pip3 fallback..."
-            run_as_invoking_user python3 -m pip install --user "browser-use[cli]" || true
-        fi
-    else
-        info "pipx not available for user ${browser_user}, trying pip --user..."
-        run_as_invoking_user python3 -m pip install --user "browser-use[cli]" || true
-    fi
-
-    # browser-use runtime bootstrap expects uv/uvx.
-    if ! run_as_invoking_user_shell "command -v uvx >/dev/null 2>&1"; then
-        info "Installing uv/uvx (required by browser-use install)..."
-        if run_as_invoking_user_shell "command -v pipx >/dev/null 2>&1"; then
-            if run_as_invoking_user_shell "pipx install --force uv"; then
-                success "uv/uvx installed via pipx."
-            else
-                warn "pipx install --force uv failed. Trying pip3 fallback..."
-                run_as_invoking_user python3 -m pip install --user uv || true
-            fi
-        else
-            run_as_invoking_user python3 -m pip install --user uv || true
-        fi
-    fi
-
-    # Install browser runtime assets for browser-use (best-effort; can be heavy).
-    if run_as_invoking_user_shell "command -v browser-use >/dev/null 2>&1"; then
-        info "Installing browser-use runtime assets (this may take a while)..."
-        if ! run_as_invoking_user_shell "browser-use install" >/tmp/supabash-browser-use-install.log 2>&1; then
-            warn "browser-use runtime install failed. See /tmp/supabash-browser-use-install.log"
-            warn "Run manually: browser-use install"
-        fi
-    elif run_as_invoking_user_shell "command -v browser_use >/dev/null 2>&1"; then
-        info "Installing browser_use runtime assets (this may take a while)..."
-        if ! run_as_invoking_user_shell "browser_use install" >/tmp/supabash-browser-use-install.log 2>&1; then
-            warn "browser_use runtime install failed. See /tmp/supabash-browser-use-install.log"
-            warn "Run manually: browser_use install"
-        fi
-    fi
-
-    if run_as_invoking_user_shell "command -v browser-use >/dev/null 2>&1 || command -v browser_use >/dev/null 2>&1"; then
-        success "browser-use CLI available."
-    else
-        warn "browser-use install attempted, but command was not found on PATH."
-        warn "Try: pipx install browser-use && pipx ensurepath && browser-use install"
-    fi
+    # Install browser-use CLI (browser-driven authenticated checks in agentic mode).
+    install_browser_use
 
     # Install enum4linux-ng (optional SMB enumeration helper)
-    if ! command -v enum4linux-ng &> /dev/null && ! command -v enum4linux &> /dev/null; then
+    local enum4linux_path
+    enum4linux_path="$(command -v enum4linux-ng 2>/dev/null || command -v enum4linux 2>/dev/null || true)"
+    if ! should_retain_existing_tool enum4linux_ng "$enum4linux_path" enum4linux-ng; then
         info "Installing enum4linux-ng from GitHub..."
         # Dependencies used by enum4linux-ng
         ENUM_DEPS=(
@@ -858,13 +1186,14 @@ HARVESTER_EOF
 
         tmpdir="$(mktemp -d)"
         script_url=""
-        for ref in "$ENUM4LINUX_NG_VERSION" "main" "master"; do
-            url="https://raw.githubusercontent.com/${ENUM4LINUX_NG_REPO}/${ref}/enum4linux-ng.py"
-            if download_url_to_tmp "$url" "$tmpdir" "enum4linux-ng.py"; then
-                script_url="$url"
-                break
-            fi
-        done
+        enum_ref="$ENUM4LINUX_NG_VERSION"
+        if [[ "$enum_ref" != v* ]]; then
+            enum_ref="v${enum_ref}"
+        fi
+        url="https://raw.githubusercontent.com/${ENUM4LINUX_NG_REPO}/${enum_ref}/enum4linux-ng.py"
+        if download_url_to_tmp "$url" "$tmpdir" "enum4linux-ng.py"; then
+            script_url="$url"
+        fi
 
         if [ -n "$script_url" ]; then
             $SUDO install -m 0755 "${tmpdir}/enum4linux-ng.py" /usr/local/bin/enum4linux-ng
@@ -873,23 +1202,21 @@ HARVESTER_EOF
             warn "Failed to download enum4linux-ng script. Install manually: https://github.com/${ENUM4LINUX_NG_REPO}"
         fi
         rm -rf "$tmpdir"
-    else
-        info "enum4linux-ng/enum4linux already installed."
     fi
 }
 
 # 4. Python Environment
 setup_python_env() {
+    local project_dir
+    project_dir="$(pwd)"
     info "Setting up Python virtual environment..."
     if [ ! -d "venv" ]; then
-        python3 -m venv venv
+        run_as_invoking_user python3 -m venv "${project_dir}/venv"
     fi
-    
-    source venv/bin/activate
-    
+
     info "Installing Python dependencies from requirements.txt..."
-    pip install --upgrade pip
-    pip install -r requirements.txt
+    run_as_invoking_user "${project_dir}/venv/bin/python" -m pip install --upgrade pip
+    run_as_invoking_user "${project_dir}/venv/bin/python" -m pip install -r "${project_dir}/requirements.txt"
     
     success "Python environment ready."
 }
@@ -938,22 +1265,150 @@ install_optional_pdf_export() {
         warn "venv/ not found; creating Python environment first."
         setup_python_env
     fi
-    source venv/bin/activate
-
     # Python packages: WeasyPrint + Markdown->HTML converter
     info "Installing Python packages for PDF export (weasyprint, markdown)..."
-    if python3 -c "import weasyprint" >/dev/null 2>&1; then
+    if run_as_invoking_user "$(pwd)/venv/bin/python" -c "import weasyprint" >/dev/null 2>&1; then
         info "WeasyPrint is already installed in this venv."
     else
-        pip install weasyprint
+        run_as_invoking_user "$(pwd)/venv/bin/python" -m pip install weasyprint
     fi
-    if python3 -c "import markdown" >/dev/null 2>&1; then
+    if run_as_invoking_user "$(pwd)/venv/bin/python" -c "import markdown" >/dev/null 2>&1; then
         info "markdown is already installed in this venv."
     else
-        pip install markdown
+        run_as_invoking_user "$(pwd)/venv/bin/python" -m pip install markdown
     fi
 
     success "Optional PDF/HTML export dependencies installed."
+}
+
+verify_required_tool_health() {
+    local failures=() tool_id resolved candidate timeout_seconds return_code log_file allowed
+    local recommended_version detected_version lowest_version
+    local -a candidates probe_argv success_codes
+    validate_tool_spec_manifest || return 1
+
+    while IFS= read -r tool_id; do
+        resolved=""
+        mapfile -t candidates < <(
+            jq -r --arg id "$tool_id" '.tools[] | select(.id == $id) | .executables[0].candidates[]' -- "$TOOL_SPEC_MANIFEST"
+        )
+        for candidate in "${candidates[@]}"; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                resolved="$(command -v "$candidate")"
+                break
+            fi
+        done
+        if [ -z "$resolved" ]; then
+            warn "Required tool ${tool_id} is missing."
+            failures+=("$tool_id")
+            continue
+        fi
+
+        mapfile -t probe_argv < <(
+            jq -r --arg id "$tool_id" '.tools[] | select(.id == $id) | .executables[0].health_probe.argv[]' -- "$TOOL_SPEC_MANIFEST"
+        )
+        for index in "${!probe_argv[@]}"; do
+            if [ "${probe_argv[$index]}" = "{executable}" ]; then
+                probe_argv[$index]="$resolved"
+            fi
+        done
+        mapfile -t success_codes < <(
+            jq -r --arg id "$tool_id" '.tools[] | select(.id == $id) | .executables[0].health_probe.success_exit_codes[]' -- "$TOOL_SPEC_MANIFEST"
+        )
+        timeout_seconds="$(
+            jq -r --arg id "$tool_id" '.tools[] | select(.id == $id) | .executables[0].health_probe.timeout_seconds' -- "$TOOL_SPEC_MANIFEST"
+        )"
+        log_file="$(mktemp "${TMPDIR:-/tmp}/supabash-health-${tool_id}.XXXXXX.log")"
+        if timeout "$timeout_seconds" "${probe_argv[@]}" >"$log_file" 2>&1; then
+            return_code=0
+        else
+            return_code=$?
+        fi
+        allowed=0
+        for code in "${success_codes[@]}"; do
+            if [ "$return_code" = "$code" ]; then
+                allowed=1
+                break
+            fi
+        done
+        if [ "$allowed" != "1" ] || grep -Eqi \
+            'traceback \(most recent call last\)|modulenotfounderror:|importerror:|error while loading shared libraries|cannot open shared object file|command not found' \
+            "$log_file"; then
+            warn "Required tool ${tool_id} failed its safe startup probe (exit ${return_code})."
+            failures+=("$tool_id")
+        else
+            recommended_version="$(
+                jq -r --arg id "$tool_id" \
+                    '.tools[] | select(.id == $id) | .recommended_version // empty' \
+                    -- "$TOOL_SPEC_MANIFEST"
+            )"
+            if [ -n "$recommended_version" ]; then
+                detected_version="$(
+                    grep -Eo '[vV]?[0-9]+([.][0-9]+)+' "$log_file" \
+                        | head -n 1 \
+                        | sed -E 's/^[vV]//'
+                )"
+                recommended_version="${recommended_version#v}"
+                recommended_version="${recommended_version#V}"
+                if [ -z "$detected_version" ]; then
+                    warn "Required tool ${tool_id} passed startup but its version could not be verified."
+                    failures+=("$tool_id")
+                else
+                    lowest_version="$(
+                        printf '%s\n%s\n' "$detected_version" "$recommended_version" \
+                            | sort -V \
+                            | head -n 1
+                    )"
+                    if [ "$lowest_version" != "$recommended_version" ]; then
+                        warn "Required tool ${tool_id} ${detected_version} is older than the tested baseline ${recommended_version}."
+                        warn "Rerun with ./install.sh --upgrade-tools to update versioned tools."
+                        failures+=("$tool_id")
+                    fi
+                fi
+            fi
+        fi
+        rm -f "$log_file"
+    done < <(jq -r '.tools[] | select(.doctor_required == true) | .id' -- "$TOOL_SPEC_MANIFEST")
+
+    if [ "${#failures[@]}" -gt 0 ]; then
+        warn "Required tool verification failed: ${failures[*]}"
+        return 1
+    fi
+    success "Required Supabash tools passed startup health checks."
+}
+
+verify_versioned_tool_upgrades() {
+    if [ "$SUPABASH_UPGRADE_TOOLS" != "1" ]; then
+        return 0
+    fi
+    local doctor_command doctor_json project_python
+    local -a failures
+    doctor_json="$(mktemp "${TMPDIR:-/tmp}/supabash-upgrade-doctor.XXXXXX.json")"
+    project_python="$(pwd)/venv/bin/python"
+    printf -v doctor_command \
+        'env PYTHONPATH=%q %q -m supabash doctor --deep --json' \
+        "${SCRIPT_DIR}/src" "$project_python"
+    run_as_invoking_user_shell "$doctor_command" >"$doctor_json" 2>/dev/null || true
+    if ! jq -e '.checks | type == "array"' "$doctor_json" >/dev/null 2>&1; then
+        warn "Could not parse deep-doctor results after tool upgrades."
+        rm -f "$doctor_json"
+        return 1
+    fi
+    mapfile -t failures < <(
+        jq -r '
+          .checks[]
+          | select((.name | startswith("bin:")) and (.details.recommended_version != null))
+          | select((.ok != true) or ((.details.detected_version // "") == ""))
+          | "\(.details.tool // .name): \(.message)"
+        ' "$doctor_json"
+    )
+    rm -f "$doctor_json"
+    if [ "${#failures[@]}" -gt 0 ]; then
+        warn "One or more versioned tool upgrades could not be verified:"
+        printf '  - %s\n' "${failures[@]}"
+        return 1
+    fi
+    success "Versioned tools match or exceed their ToolSpec baselines."
 }
 
 # 5. Global Entry Point
@@ -972,13 +1427,15 @@ while [ -L "\$SOURCE" ]; do # resolve \$SOURCE until the file is no longer a sym
 done
 DIR=\$( cd -P "\$( dirname "\$SOURCE" )" >/dev/null 2>&1 && pwd )
 
-# Activate venv and run python module
-source "\$DIR/venv/bin/activate"
-export PYTHONPATH="\$DIR/src:\$PYTHONPATH"
-python3 -m supabash "\$@"
+# Use Supabash's interpreter without modifying the caller's scanner PATH.
+export PYTHONPATH="\$DIR/src\${PYTHONPATH:+:\$PYTHONPATH}"
+exec "\$DIR/venv/bin/python" -m supabash "\$@"
 EOF
 
     chmod +x supabash_runner
+    if [ "$(id -u)" -eq 0 ] && [ "$(invoking_user)" != "root" ]; then
+        $SUDO chown "$(invoking_user):$(id -gn "$(invoking_user)")" supabash_runner
+    fi
     
     # Link it to /usr/local/bin
     if [ -L "/usr/local/bin/supabash" ]; then
@@ -990,24 +1447,70 @@ EOF
 }
 
 # Main Execution
+usage() {
+    cat <<'EOF'
+Usage: ./install.sh [--upgrade-tools] [--yes]
+
+  --upgrade-tools  Reinstall/update versioned third-party tools to ToolSpec baselines.
+  --yes            Accept the system-modification confirmation.
+  -h, --help       Show this help.
+
+Environment equivalents:
+  SUPABASH_UPGRADE_TOOLS=1
+  SUPABASH_UPDATE_NUCLEI_TEMPLATES=0
+  SUPABASH_PDF_EXPORT=1
+EOF
+}
+
 main() {
+    local assume_yes=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --upgrade-tools)
+                SUPABASH_UPGRADE_TOOLS=1
+                ;;
+            --yes)
+                assume_yes=1
+                ;;
+            -h|--help)
+                usage
+                return 0
+                ;;
+            *)
+                error "Unknown installer option: $1"
+                ;;
+        esac
+        shift
+    done
+
+    # Make relative project paths deterministic even when the installer is
+    # invoked as /path/to/install.sh from another working directory.
+    cd "$SCRIPT_DIR"
+
     echo -e "${BOLD}Supabash Installer${RESET}"
     echo "=================="
     
     detect_os
     
     # Ask for confirmation before installing system packages
-    read -p "This script will install system packages and modify your system. Continue? [y/N] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        info "Aborted by user."
-        exit 0
+    if [ "$assume_yes" != "1" ]; then
+        read -p "This script will install system packages and modify your system. Continue? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            info "Aborted by user."
+            exit 0
+        fi
     fi
 
     install_apt_deps
+    load_tool_versions
     install_external_tools
     setup_python_env
+    # Codex authentication is user-owned and must never be automated by this installer.
+    check_codex_setup
     install_optional_pdf_export
+    verify_required_tool_health || error "Installation finished with missing or broken required tools."
+    verify_versioned_tool_upgrades || error "One or more requested tool upgrades failed verification."
     setup_symlink
     
     echo
@@ -1015,4 +1518,6 @@ main() {
     echo "Try running: supabash --help"
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

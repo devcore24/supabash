@@ -1,4 +1,8 @@
 import json
+import shlex
+import tempfile
+from contextlib import nullcontext
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
@@ -36,37 +40,47 @@ class SqlmapScanner:
         """
         logger.info(f"Starting sqlmap on {target}")
 
-        command = ["sqlmap", "-u", target, "--batch", "--disable-coloring", "--output-dir=/tmp/sqlmap"]
+        output_context = (
+            nullcontext(str(Path(output_dir).expanduser()))
+            if output_dir
+            else tempfile.TemporaryDirectory(prefix="supabash-sqlmap-")
+        )
+        with output_context as resolved_output_dir:
+            command = [
+                "sqlmap",
+                "-u",
+                target,
+                "--batch",
+                "--disable-coloring",
+                f"--output-dir={resolved_output_dir}",
+            ]
 
-        if output_dir:
-            command[-1] = f"--output-dir={output_dir}"
+            if arguments:
+                command.extend(shlex.split(arguments))
 
-        if arguments:
-            command.extend(arguments.split())
+            timeout = resolve_timeout_seconds(timeout_seconds, default=1800)
+            kwargs = {"timeout": timeout}
+            if cancel_event is not None:
+                kwargs["cancel_event"] = cancel_event
+            result: CommandResult = self.runner.run(command, **kwargs)
 
-        timeout = resolve_timeout_seconds(timeout_seconds, default=1800)
-        kwargs = {"timeout": timeout}
-        if cancel_event is not None:
-            kwargs["cancel_event"] = cancel_event
-        result: CommandResult = self.runner.run(command, **kwargs)
+            if not result.success:
+                logger.error(f"sqlmap failed: {result.stderr}")
+                err = result.stderr
+                if not err:
+                    err = result.stdout or ""
+                if not err:
+                    err = f"Command failed (RC={result.return_code}): {result.command}"
+                return {
+                    "success": False,
+                    "error": err,
+                    "canceled": bool(getattr(result, "canceled", False)),
+                    "raw_output": result.stdout,
+                    "command": result.command,
+                }
 
-        if not result.success:
-            logger.error(f"sqlmap failed: {result.stderr}")
-            err = result.stderr
-            if not err:
-                err = result.stdout or ""
-            if not err:
-                err = f"Command failed (RC={result.return_code}): {result.command}"
-            return {
-                "success": False,
-                "error": err,
-                "canceled": bool(getattr(result, "canceled", False)),
-                "raw_output": result.stdout,
-                "command": result.command,
-            }
-
-        parsed = self._parse_output(result.stdout)
-        return {"success": True, "findings": parsed, "command": result.command}
+            parsed = self._parse_output(result.stdout)
+            return {"success": True, "findings": parsed, "command": result.command}
 
     def _parse_output(self, output: str) -> List[Dict[str, Any]]:
         """

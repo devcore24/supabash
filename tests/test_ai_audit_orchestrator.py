@@ -2320,7 +2320,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertIn("Output requirements:", task)
         self.assertEqual(first_call.get("kwargs", {}).get("require_done"), True)
         self.assertEqual(first_call.get("kwargs", {}).get("min_steps_success"), 1)
-        self.assertEqual(first_call.get("kwargs", {}).get("allow_deterministic_fallback"), True)
+        self.assertEqual(first_call.get("kwargs", {}).get("allow_deterministic_fallback"), False)
         self.assertEqual(first_call.get("kwargs", {}).get("deterministic_max_paths"), 8)
 
     def test_browser_use_fallback_no_cluster_closure_blocks_repeat_on_same_target(self):
@@ -3566,7 +3566,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         ]
         self.assertFalse(actions)
 
-    def test_agentic_browser_use_uses_configured_session_profile_and_auth_context(self):
+    def test_agentic_browser_use_uses_configured_profile_and_auth_context(self):
         scanners = _build_scanners()
         browser = FakeBrowserUseScanner()
         scanners["browser_use"] = browser
@@ -3584,7 +3584,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
                     "timeout_seconds": 900,
                     "max_steps": 25,
                     "headless": True,
-                    "session": "supabash-session",
+                    "session": "",
                     "profile": "supabash-profile",
                     "auth": {
                         "enabled": True,
@@ -3609,8 +3609,9 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         self.assertTrue(browser.calls)
         call = browser.calls[0]
         kwargs = call.get("kwargs", {})
-        self.assertEqual(kwargs.get("session"), "supabash-session")
+        self.assertIsNone(kwargs.get("session"))
         self.assertEqual(kwargs.get("profile"), "supabash-profile")
+        self.assertEqual(kwargs.get("allowed_origins"), [call.get("target")])
         task = str(kwargs.get("task") or "")
         self.assertIn("Authentication context is configured for this run.", task)
         self.assertIn("Preferred login URL: http://localhost:9090/login", task)
@@ -3647,7 +3648,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
         kwargs = call.get("kwargs", {})
         self.assertIsNone(kwargs.get("session"))
 
-    def test_agentic_browser_use_auto_session_when_library_path_unavailable(self):
+    def test_agentic_browser_use_skips_non_enforcing_cli_only_scanner(self):
         scanners = _build_scanners()
         browser = FakeBrowserUseCliOnlyScanner()
         scanners["browser_use"] = browser
@@ -3667,11 +3668,7 @@ class TestAIAuditOrchestrator(unittest.TestCase):
             run_browser_use=True,
         )
 
-        self.assertTrue(browser.calls)
-        call = browser.calls[0]
-        kwargs = call.get("kwargs", {})
-        session_name = str(kwargs.get("session") or "")
-        self.assertTrue(session_name.startswith("supabash-"))
+        self.assertFalse(browser.calls)
 
     def test_agentic_browser_use_exports_configured_api_key_and_restores_env(self):
         scanners = _build_scanners()

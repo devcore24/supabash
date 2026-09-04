@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 import sys
 import os
+import threading
+import tempfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -53,7 +56,70 @@ class FakeHttpxVersionScanner:
         return "/usr/local/bin/httpx"
 
 
+class FakeHttpxScanTimeExecutable:
+    last_executable = "/scan-time/bin/httpx"
+
+    def _resolve_httpx_binary(self):
+        return "/later/bin/httpx"
+
+
+class FakeMissingHttpxScanner:
+    last_executable = None
+
+    def _resolve_httpx_binary(self):
+        return None
+
+
 class TestAuditOrchestrator(unittest.TestCase):
+    def test_readiness_http_probe_does_not_follow_redirects(self):
+        class RedirectHandler(BaseHTTPRequestHandler):
+            final_hits = 0
+
+            def do_GET(self):
+                if self.path == "/redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "/final")
+                    self.end_headers()
+                    return
+                type(self).final_hits += 1
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"followed")
+
+            def log_message(self, format, *args):
+                return
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/redirect"
+            status, _body, error = AuditOrchestrator(scanners={}, llm_client=None)._http_probe_status(url)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+        self.assertEqual(status, 302)
+        self.assertIsNone(error)
+        self.assertEqual(RedirectHandler.final_hits, 0)
+
+    def test_run_tool_enforces_explicit_global_disable(self):
+        calls = []
+        llm = SimpleNamespace(
+            config=SimpleNamespace(config={"tools": {"hydra": {"enabled": False}}})
+        )
+        orch = AuditOrchestrator(scanners={}, llm_client=llm)
+
+        result = orch._run_tool(
+            "hydra",
+            lambda: calls.append("executed") or {"success": True},
+        )
+
+        self.assertEqual(calls, [])
+        self.assertTrue(result.get("skipped"))
+        self.assertIn("Disabled by config", str(result.get("reason")))
+
     def test_runs_scanners_and_writes_file(self, tmp_path=None):
         scanners = {
             "nmap": FakeScanner("nmap"),
@@ -1386,6 +1452,116 @@ class TestAuditOrchestrator(unittest.TestCase):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
         self.assertEqual(orch._extract_tool_version_value("gobuster", "3.6\n"), "3.6")
 
+    def test_extract_tool_version_value_ignores_hydra_license_version(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        sample = "Hydra v9.5 (c) THC\nReleased under AGPL v3.0\n"
+
+        self.assertEqual(orch._extract_tool_version_value("hydra", sample), "9.5")
+
+    def test_collect_findings_surfaces_incomplete_prowler_coverage(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        aggregate = {
+            "results": [
+                {
+                    "tool": "prowler",
+                    "success": True,
+                    "data": {
+                        "scan_data": {
+                            "coverage_complete": False,
+                            "findings": [],
+                            "parse_diagnostics": [
+                                {"path": "/evidence/prowler.json", "status": "parsed_with_warnings"}
+                            ],
+                        },
+                    },
+                }
+            ]
+        }
+
+        findings = orch._collect_findings(aggregate)
+
+        coverage = next(item for item in findings if item.get("title") == "Prowler scan coverage incomplete")
+        self.assertEqual(coverage.get("severity"), "INFO")
+        self.assertIn("/evidence/prowler.json", coverage.get("evidence", ""))
+
+    def test_collect_findings_preserves_prowler_remediation_and_identity(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        aggregate = {
+            "results": [
+                {
+                    "tool": "prowler",
+                    "success": True,
+                    "data": {
+                        "scan_data": {
+                            "coverage_complete": True,
+                            "findings": [
+                                {
+                                    "severity": "HIGH",
+                                    "title": "Public bucket",
+                                    "evidence": "resource=bucket-a, status=fail",
+                                    "description": "The bucket is public.",
+                                    "remediation": "Enable public-access blocking.",
+                                    "check_id": "s3_public_access",
+                                    "resource": "bucket-a",
+                                }
+                            ],
+                        }
+                    },
+                }
+            ]
+        }
+
+        finding = next(
+            item
+            for item in orch._collect_findings(aggregate)
+            if item.get("title") == "Public bucket"
+        )
+
+        self.assertEqual(finding.get("recommendation"), "Enable public-access blocking.")
+        self.assertEqual(finding.get("description"), "The bucket is public.")
+        self.assertEqual(finding.get("check_id"), "s3_public_access")
+        self.assertEqual(finding.get("resource"), "bucket-a")
+
+    def test_evidence_pack_hashes_raw_prowler_ocsf_artifact(self):
+        orch = AuditOrchestrator(scanners={}, llm_client=None)
+        with tempfile.TemporaryDirectory() as directory:
+            report_root = Path(directory)
+            output = report_root / "audit.json"
+            prowler_root = report_root / "prowler" / "prowler-run-test"
+            prowler_root.mkdir(parents=True)
+            raw_path = prowler_root / "results.ocsf.json"
+            raw_path.write_text("[]", encoding="utf-8")
+            aggregate = {
+                "schema_version": "1.0",
+                "results": [
+                    {
+                        "tool": "prowler",
+                        "success": True,
+                        "data": {
+                            "success": True,
+                            "scan_data": {
+                                "output_dir": str(prowler_root),
+                                "results_paths": [str(raw_path)],
+                                "findings": [],
+                            },
+                        },
+                    }
+                ],
+            }
+
+            orch._write_evidence_pack(aggregate, output)
+
+            manifest_path = report_root / aggregate["evidence_pack"]["manifest"]
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            raw_artifact = next(
+                item
+                for item in manifest["artifacts"]
+                if item.get("kind") == "tool_raw_result"
+            )
+            self.assertEqual(raw_artifact.get("format"), "ocsf-json")
+            self.assertEqual(raw_artifact.get("bytes"), 2)
+            self.assertEqual(raw_artifact.get("path"), str(raw_path.relative_to(report_root)))
+
     def test_best_effort_tool_version_returns_none_for_usage_only_output(self):
         orch = AuditOrchestrator(scanners={}, llm_client=None)
 
@@ -1404,6 +1580,76 @@ class TestAuditOrchestrator(unittest.TestCase):
         self.assertTrue(cmds)
         self.assertEqual(cmds[0], ["/usr/local/bin/httpx", "-version"])
         self.assertEqual(cmds[1], ["/usr/local/bin/httpx", "--version"])
+
+    def test_httpx_evidence_keeps_the_scan_time_executable(self):
+        orch = AuditOrchestrator(
+            scanners={"httpx": FakeHttpxScanTimeExecutable()},
+            llm_client=None,
+        )
+
+        cmds = orch._version_commands_for_tool("httpx")
+
+        self.assertEqual(cmds[0], ["/scan-time/bin/httpx", "-version"])
+        self.assertEqual(cmds[1], ["/scan-time/bin/httpx", "--version"])
+
+    def test_httpx_evidence_does_not_fall_back_to_unverified_path_candidate(self):
+        orch = AuditOrchestrator(
+            scanners={"httpx": FakeMissingHttpxScanner()},
+            llm_client=None,
+        )
+        with patch(
+            "supabash.audit.shutil.which",
+            return_value="/project/venv/bin/httpx",
+        ):
+            cmds = orch._version_commands_for_tool("httpx")
+
+        self.assertEqual(cmds, [])
+
+    def test_alias_tool_evidence_keeps_the_scan_time_executable(self):
+        orch = AuditOrchestrator(
+            scanners={
+                "crackmapexec": SimpleNamespace(
+                    last_executable="/scan-time/bin/nxc"
+                ),
+                "enum4linux-ng": SimpleNamespace(
+                    last_executable="/scan-time/bin/enum4linux-ng"
+                ),
+            },
+            llm_client=None,
+        )
+
+        crackmapexec_cmds = orch._version_commands_for_tool("crackmapexec")
+        enum4linux_cmds = orch._version_commands_for_tool("enum4linux_ng")
+
+        self.assertEqual(
+            crackmapexec_cmds,
+            [["/scan-time/bin/nxc", "--version"]],
+        )
+        self.assertEqual(
+            enum4linux_cmds[0],
+            ["/scan-time/bin/enum4linux-ng", "--version"],
+        )
+
+    def test_python_distribution_evidence_uses_scan_time_alias_executable(self):
+        orch = AuditOrchestrator(
+            scanners={
+                "theharvester": SimpleNamespace(
+                    last_executable="/scan-time/bin/theharvester"
+                )
+            },
+            llm_client=None,
+        )
+        with patch(
+            "supabash.audit.python_distribution_version",
+            return_value="4.11.1",
+        ) as distribution_version:
+            version = orch._best_effort_tool_version("theharvester")
+
+        self.assertEqual(version, "4.11.1")
+        distribution_version.assert_called_once_with(
+            "/scan-time/bin/theharvester",
+            "theHarvester",
+        )
 
 
 if __name__ == "__main__":

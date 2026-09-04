@@ -27,15 +27,15 @@ import time
 from pathlib import Path
 
 args = sys.argv[1:]
-mode = os.environ.get("FAKE_CODEX_MODE", "success")
-capture_path = os.environ.get("FAKE_CODEX_CAPTURE")
+mode = os.environ.get("SUPABASH_CODEX_CHILD_TEST_MODE", "success")
+capture_path = os.environ.get("SUPABASH_CODEX_CHILD_TEST_CAPTURE")
 
 if args == ["--version"]:
     print("codex-cli 99.1.0")
     raise SystemExit(0)
 
 if args == ["login", "status"]:
-    auth = os.environ.get("FAKE_CODEX_AUTH", "chatgpt")
+    auth = os.environ.get("SUPABASH_CODEX_CHILD_TEST_AUTH", "chatgpt")
     if auth == "chatgpt":
         print("Logged in using ChatGPT")
         raise SystemExit(0)
@@ -46,15 +46,15 @@ if args == ["login", "status"]:
     raise SystemExit(1)
 
 if args == ["exec", "--help"]:
-	help_text = "resume --json --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules --strict-config --output-schema --output-last-message"
-	if os.environ.get("FAKE_CODEX_HELP_MISSING"):
-		help_text = "--json"
-	print(help_text)
-	raise SystemExit(0)
+    help_text = "resume --json --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules --strict-config --output-schema --output-last-message"
+    if os.environ.get("SUPABASH_CODEX_CHILD_TEST_HELP_MISSING"):
+        help_text = "--json"
+    print(help_text)
+    raise SystemExit(0)
 
 if mode == "no_read":
-	time.sleep(30)
-	raise SystemExit(0)
+    time.sleep(30)
+    raise SystemExit(0)
 
 prompt = sys.stdin.read()
 schema_path = Path(args[args.index("--output-schema") + 1])
@@ -62,9 +62,9 @@ output_path = Path(args[args.index("--output-last-message") + 1])
 capture = {
     "argv": args,
     "stdin": prompt,
-	"child_guard": os.environ.get("SUPABASH_CODEX_CHILD"),
-	"codex_env": sorted(key for key in os.environ if key.startswith("CODEX_")),
-	"openai_env": sorted(key for key in os.environ if key.startswith("OPENAI_")),
+    "child_guard": os.environ.get("SUPABASH_CODEX_CHILD"),
+    "codex_env": sorted(key for key in os.environ if key.startswith("CODEX_")),
+    "openai_env": sorted(key for key in os.environ if key.startswith("OPENAI_")),
     "schema_mode": stat.S_IMODE(schema_path.stat().st_mode),
     "output_mode": stat.S_IMODE(output_path.stat().st_mode),
     "schema": json.loads(schema_path.read_text(encoding="utf-8")),
@@ -77,7 +77,7 @@ if mode == "hang":
     raise SystemExit(0)
 
 if mode != "empty_jsonl" and mode != "scalar" and mode != "invalid_utf8":
-	print(json.dumps({"type": "thread.started", "thread_id": "fake-thread"}), flush=True)
+    print(json.dumps({"type": "thread.started", "thread_id": "fake-thread"}), flush=True)
 if mode == "nonzero":
     print("Authorization: Bearer abcdefghijklmnop", file=sys.stderr, flush=True)
     raise SystemExit(9)
@@ -89,39 +89,39 @@ if mode == "policy_middle":
     print(json.dumps({
         "type": "item.completed",
         "item": {"type": "command_execution", "command": "should-not-run"},
-	}), flush=True)
+    }), flush=True)
 
 if mode == "scalar":
-	print(json.dumps("not-an-object"), flush=True)
+    print(json.dumps("not-an-object"), flush=True)
 elif mode == "invalid_utf8":
-	sys.stdout.buffer.write(b"\xff\n")
-	sys.stdout.buffer.flush()
+    sys.stdout.buffer.write(b"\xff\n")
+    sys.stdout.buffer.flush()
 elif mode == "unknown_item":
-	print(json.dumps({"type": "item.completed", "item": {"type": "future_remote_action"}}), flush=True)
-	print(json.dumps({"type": "turn.completed", "usage": {}}), flush=True)
+    print(json.dumps({"type": "item.completed", "item": {"type": "future_remote_action"}}), flush=True)
+    print(json.dumps({"type": "turn.completed", "usage": {}}), flush=True)
 elif mode == "unknown_event":
-	print(json.dumps({"type": "future_tool_call"}), flush=True)
-	print(json.dumps({"type": "turn.completed", "usage": {}}), flush=True)
+    print(json.dumps({"type": "future_tool_call"}), flush=True)
+    print(json.dumps({"type": "turn.completed", "usage": {}}), flush=True)
 elif mode == "scalar_item":
-	print(json.dumps({"type": "item.completed", "item": "command_execution"}), flush=True)
-	print(json.dumps({"type": "turn.completed", "usage": {}}), flush=True)
+    print(json.dumps({"type": "item.completed", "item": "command_execution"}), flush=True)
+    print(json.dumps({"type": "turn.completed", "usage": {}}), flush=True)
 elif mode == "error_event":
-	print(json.dumps({"type": "turn.failed", "error": {"message": "model turn failed"}}), flush=True)
+    print(json.dumps({"type": "turn.failed", "error": {"message": "model turn failed"}}), flush=True)
 else:
-	if mode == "linger":
-		subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
-	print(json.dumps({
-		"type": "item.completed",
-		"item": {
-			"type": "agent_message",
-			"text": "{\\\"summary\\\":\\\"fallback\\\"}",
-			"token": "event-secret",
-		},
-	}), flush=True)
-	print(json.dumps({
-		"type": "turn.completed",
-		"usage": {"input_tokens": 12, "output_tokens": 4},
-	}), flush=True)
+    if mode == "linger":
+        subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    print(json.dumps({
+        "type": "item.completed",
+        "item": {
+            "type": "agent_message",
+            "text": "{\\\"summary\\\":\\\"fallback\\\"}",
+            "token": "event-secret",
+        },
+    }), flush=True)
+    print(json.dumps({
+        "type": "turn.completed",
+        "usage": {"input_tokens": 12, "output_tokens": 4},
+    }), flush=True)
 output_path.write_text(
     json.dumps({"summary": "ok", "token": "final-secret"}),
     encoding="utf-8",
@@ -164,6 +164,12 @@ def make_runtime(
         "preflight_timeout_seconds": 2.0,
         "poll_interval_seconds": 0.02,
         "terminate_grace_seconds": 0.2,
+        "passthrough_environment": (
+            "SUPABASH_CODEX_CHILD_TEST_MODE",
+            "SUPABASH_CODEX_CHILD_TEST_CAPTURE",
+            "SUPABASH_CODEX_CHILD_TEST_AUTH",
+            "SUPABASH_CODEX_CHILD_TEST_HELP_MISSING",
+        ),
     }
     values.update(overrides)
     return CodexRuntime(CodexRuntimeConfig(**values))
@@ -177,7 +183,10 @@ def test_success_uses_stdin_strict_argv_and_private_artifacts(
     runtime = make_runtime(fake_codex, tmp_path)
     with patch.dict(
         os.environ,
-        {"FAKE_CODEX_CAPTURE": str(capture_path), "FAKE_CODEX_AUTH": "chatgpt"},
+        {
+            "SUPABASH_CODEX_CHILD_TEST_CAPTURE": str(capture_path),
+            "SUPABASH_CODEX_CHILD_TEST_AUTH": "chatgpt",
+        },
         clear=False,
     ):
         inspected = runtime.inspect()
@@ -238,7 +247,11 @@ def test_resume_argv_and_configurable_user_config(
         model="gpt-test",
         persistent_thread=True,
     )
-    with patch.dict(os.environ, {"FAKE_CODEX_CAPTURE": str(capture_path)}, clear=False):
+    with patch.dict(
+        os.environ,
+        {"SUPABASH_CODEX_CHILD_TEST_CAPTURE": str(capture_path)},
+        clear=False,
+    ):
         result = runtime.run("continue", SCHEMA, thread_id="prior-thread")
 
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
@@ -255,7 +268,9 @@ def test_malformed_jsonl_is_preserved_and_rejected_fail_closed(
     tmp_path: Path,
 ) -> None:
     runtime = make_runtime(fake_codex, tmp_path)
-    with patch.dict(os.environ, {"FAKE_CODEX_MODE": "malformed"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_MODE": "malformed"}, clear=False
+    ):
         result = runtime.run("prompt", SCHEMA)
 
     assert result.success is False
@@ -283,7 +298,9 @@ def test_incomplete_or_invalid_jsonl_protocol_is_rejected(
     mode: str,
 ) -> None:
     runtime = make_runtime(fake_codex, tmp_path)
-    with patch.dict(os.environ, {"FAKE_CODEX_MODE": mode}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_MODE": mode}, clear=False
+    ):
         result = runtime.run("prompt", SCHEMA)
 
     assert result.success is False
@@ -314,7 +331,11 @@ def test_policy_activity_is_tracked_even_when_middle_events_are_discarded(
     tmp_path: Path,
 ) -> None:
     runtime = make_runtime(fake_codex, tmp_path, max_events=2)
-    with patch.dict(os.environ, {"FAKE_CODEX_MODE": "policy_middle"}, clear=False):
+    with patch.dict(
+        os.environ,
+        {"SUPABASH_CODEX_CHILD_TEST_MODE": "policy_middle"},
+        clear=False,
+    ):
         result = runtime.run("prompt", SCHEMA)
 
     assert result.success is False
@@ -329,7 +350,9 @@ def test_policy_activity_is_tracked_even_when_middle_events_are_discarded(
 
 def test_nonzero_exit_keeps_redacted_stderr(fake_codex: Path, tmp_path: Path) -> None:
     runtime = make_runtime(fake_codex, tmp_path)
-    with patch.dict(os.environ, {"FAKE_CODEX_MODE": "nonzero"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_MODE": "nonzero"}, clear=False
+    ):
         result = runtime.run("prompt", SCHEMA)
 
     assert result.success is False
@@ -341,7 +364,9 @@ def test_nonzero_exit_keeps_redacted_stderr(fake_codex: Path, tmp_path: Path) ->
 
 def test_preflight_requires_chatgpt_by_default(fake_codex: Path, tmp_path: Path) -> None:
     runtime = make_runtime(fake_codex, tmp_path)
-    with patch.dict(os.environ, {"FAKE_CODEX_AUTH": "api"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_AUTH": "api"}, clear=False
+    ):
         inspected = runtime.inspect()
         with pytest.raises(CodexRuntimeError, match="ChatGPT subscription"):
             runtime.preflight()
@@ -353,7 +378,9 @@ def test_preflight_requires_chatgpt_by_default(fake_codex: Path, tmp_path: Path)
 
 def test_preflight_can_allow_api_key(fake_codex: Path, tmp_path: Path) -> None:
     runtime = make_runtime(fake_codex, tmp_path, require_chatgpt=False)
-    with patch.dict(os.environ, {"FAKE_CODEX_AUTH": "api"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_AUTH": "api"}, clear=False
+    ):
         assert runtime.preflight().ready is True
 
 
@@ -377,9 +404,13 @@ def test_preflight_and_run_reject_nonempty_global_codex_instructions(
 
 def test_preflight_refresh_invalidates_a_ready_cache(fake_codex: Path, tmp_path: Path) -> None:
     runtime = make_runtime(fake_codex, tmp_path)
-    with patch.dict(os.environ, {"FAKE_CODEX_AUTH": "chatgpt"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_AUTH": "chatgpt"}, clear=False
+    ):
         assert runtime.inspect().ready is True
-    with patch.dict(os.environ, {"FAKE_CODEX_AUTH": "api"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_AUTH": "api"}, clear=False
+    ):
         assert runtime.inspect().auth_mode == "chatgpt"
         refreshed = runtime.inspect(refresh=True)
     assert refreshed.auth_mode == "api_key"
@@ -388,7 +419,11 @@ def test_preflight_refresh_invalidates_a_ready_cache(fake_codex: Path, tmp_path:
 
 def test_preflight_rejects_missing_exec_capabilities(fake_codex: Path, tmp_path: Path) -> None:
     runtime = make_runtime(fake_codex, tmp_path)
-    with patch.dict(os.environ, {"FAKE_CODEX_HELP_MISSING": "1"}, clear=False):
+    with patch.dict(
+        os.environ,
+        {"SUPABASH_CODEX_CHILD_TEST_HELP_MISSING": "1"},
+        clear=False,
+    ):
         inspected = runtime.inspect(refresh=True)
     assert inspected.ready is False
     assert inspected.capabilities_ok is False
@@ -397,7 +432,9 @@ def test_preflight_rejects_missing_exec_capabilities(fake_codex: Path, tmp_path:
 
 def test_timeout_kills_process_group(fake_codex: Path, tmp_path: Path) -> None:
     runtime = make_runtime(fake_codex, tmp_path, timeout_seconds=0.2)
-    with patch.dict(os.environ, {"FAKE_CODEX_MODE": "hang"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_MODE": "hang"}, clear=False
+    ):
         result = runtime.run("prompt", SCHEMA)
 
     assert result.success is False
@@ -415,7 +452,9 @@ def test_timeout_covers_a_child_that_never_reads_stdin(fake_codex: Path, tmp_pat
         max_input_chars=1_000_000,
     )
     started = time.monotonic()
-    with patch.dict(os.environ, {"FAKE_CODEX_MODE": "no_read"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_MODE": "no_read"}, clear=False
+    ):
         result = runtime.run("x" * 900_000, SCHEMA)
     elapsed = time.monotonic() - started
 
@@ -433,7 +472,9 @@ def test_lingering_descendant_pipe_is_rejected_and_terminated(
         tmp_path,
         terminate_grace_seconds=0.1,
     )
-    with patch.dict(os.environ, {"FAKE_CODEX_MODE": "linger"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_MODE": "linger"}, clear=False
+    ):
         result = runtime.run("prompt", SCHEMA)
 
     assert result.success is False
@@ -451,7 +492,9 @@ def test_cancel_event_kills_process_group(fake_codex: Path, tmp_path: Path) -> N
 
     thread = threading.Thread(target=cancel_soon, daemon=True)
     thread.start()
-    with patch.dict(os.environ, {"FAKE_CODEX_MODE": "hang"}, clear=False):
+    with patch.dict(
+        os.environ, {"SUPABASH_CODEX_CHILD_TEST_MODE": "hang"}, clear=False
+    ):
         result = runtime.run("prompt", SCHEMA, cancel_event=cancel)
 
     assert result.success is False
@@ -498,7 +541,7 @@ def test_child_environment_strips_parent_codex_and_openai_variables(
     with patch.dict(
         os.environ,
         {
-            "FAKE_CODEX_CAPTURE": str(capture_path),
+            "SUPABASH_CODEX_CHILD_TEST_CAPTURE": str(capture_path),
             "CODEX_CI": "1",
             "CODEX_RANDOM_PARENT_SETTING": "private",
             "OPENAI_API_KEY": "should-not-reach-child",
@@ -512,13 +555,71 @@ def test_child_environment_strips_parent_codex_and_openai_variables(
     assert capture["openai_env"] == []
 
 
+def test_child_environment_uses_allowlist_and_drops_unrelated_secrets(
+    fake_codex: Path,
+    tmp_path: Path,
+) -> None:
+    runtime = make_runtime(fake_codex, tmp_path)
+    with patch.dict(
+        os.environ,
+        {
+            "AWS_SECRET_ACCESS_KEY": "aws-secret",
+            "GH_TOKEN": "github-secret",
+            "DATABASE_URL": "postgres://secret",
+            "BROWSER_USE_API_KEY": "browser-secret",
+            "HTTPS_PROXY": "http://proxy.example",
+        },
+        clear=False,
+    ):
+        child = runtime._child_env()
+
+    for key in ("AWS_SECRET_ACCESS_KEY", "GH_TOKEN", "DATABASE_URL", "BROWSER_USE_API_KEY"):
+        assert key not in child
+    assert child["HTTPS_PROXY"] == "http://proxy.example"
+    assert child["CODEX_HOME"] == str(tmp_path / "codex-home")
+    assert child["SUPABASH_CODEX_CHILD"] == "1"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["OPENAI_API_KEY", "AWS_PROFILE", "supabash_codex_child_test_value"],
+)
+def test_child_environment_rejects_non_namespaced_passthrough(
+    fake_codex: Path,
+    tmp_path: Path,
+    name: str,
+) -> None:
+    with pytest.raises(ValueError, match="SUPABASH_CODEX_CHILD_"):
+        make_runtime(fake_codex, tmp_path, passthrough_environment=(name,))
+
+
+def test_child_environment_allows_explicit_inert_namespace(
+    fake_codex: Path,
+    tmp_path: Path,
+) -> None:
+    name = "SUPABASH_CODEX_CHILD_TEST_VALUE"
+    runtime = make_runtime(
+        fake_codex,
+        tmp_path,
+        passthrough_environment=(name,),
+    )
+    with patch.dict(os.environ, {name: "test-only"}, clear=False):
+        child = runtime._child_env()
+
+    assert child[name] == "test-only"
+
+
 def test_ephemeral_mode_is_explicit_and_cannot_resume(
     fake_codex: Path,
     tmp_path: Path,
 ) -> None:
     capture_path = tmp_path / "capture.json"
     runtime = make_runtime(fake_codex, tmp_path, persistent_thread=False)
-    with patch.dict(os.environ, {"FAKE_CODEX_CAPTURE": str(capture_path)}, clear=False):
+    with patch.dict(
+        os.environ,
+        {"SUPABASH_CODEX_CHILD_TEST_CAPTURE": str(capture_path)},
+        clear=False,
+    ):
         assert runtime.run("prompt", SCHEMA).success is True
     capture = json.loads(capture_path.read_text(encoding="utf-8"))
     assert "--ephemeral" in capture["argv"]

@@ -874,6 +874,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
 
             browser_use_cfg = self._tool_config("browser_use")
             browser_use_command = str(browser_use_cfg.get("command") or "").strip()
+            browser_use_session = str(browser_use_cfg.get("session") or "").strip()
             browser_use_available = False
             if self._has_scanner("browser_use"):
                 browser_use_scanner = self.scanners.get("browser_use")
@@ -881,6 +882,14 @@ class AIAuditOrchestrator(AuditOrchestrator):
                 if callable(checker):
                     try:
                         browser_use_available = bool(checker(command_override=browser_use_command or None))
+                        prefers_library = getattr(browser_use_scanner, "prefers_library_run", None)
+                        if browser_use_available and callable(prefers_library):
+                            browser_use_available = bool(
+                                prefers_library(
+                                    command_override=browser_use_command or None,
+                                    explicit_session=browser_use_session or None,
+                                )
+                            )
                     except Exception:
                         browser_use_available = False
 
@@ -949,7 +958,6 @@ class AIAuditOrchestrator(AuditOrchestrator):
                     "max_steps",
                     "headless",
                     "model",
-                    "browser_session",
                     "browser_profile",
                 }
 
@@ -997,28 +1005,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         "cookie": cookie if include_secrets else "",
                     }
 
-                def _auto_browser_session_name(target_url: str) -> str:
-                    text = str(target_url or "").strip()
-                    host = ""
-                    if text:
-                        parse_input = text if "://" in text else f"http://{text}"
-                        try:
-                            parsed = urlparse(parse_input)
-                            host = str(parsed.hostname or "").strip().lower()
-                        except Exception:
-                            host = ""
-                    host = re.sub(r"[^a-z0-9]+", "-", host).strip("-") if host else "target"
-                    if not host:
-                        host = "target"
-                    return f"supabash-{host}-{int(time.time())}"
-
                 browser_default_session = str(browser_use_cfg.get("session") or "").strip() or None
                 browser_default_profile = str(browser_use_cfg.get("profile") or "").strip() or None
                 browser_auth_default = _browser_use_auth_context(browser_use_cfg)
-                browser_auto_session_default = _as_bool(browser_use_cfg.get("auto_session"), True)
-                browser_allow_fallback_default = _as_bool(
-                    browser_use_cfg.get("allow_deterministic_fallback"), True
-                )
+                # Retained in report metadata for compatibility; automatic native-CLI
+                # sessions are disabled because they cannot enforce exact origins.
+                browser_auto_session_default = False
+                browser_allow_fallback_default = False
                 try:
                     browser_deterministic_max_paths_default = int(browser_use_cfg.get("deterministic_max_paths", 8))
                 except Exception:
@@ -1061,7 +1054,6 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                                         "max_steps": {"type": "integer"},
                                                         "headless": {"type": "boolean"},
                                                         "model": {"type": "string"},
-                                                        "browser_session": {"type": "string"},
                                                         "browser_profile": {"type": "string"},
                                                     },
                                                     "required": ["profile"],
@@ -1649,8 +1641,8 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         lines.extend(
                             [
                                 "- Treat this as a focused API/config validation target, not a generic login crawl.",
-                                "- Start at the exact target URL and stay on the same origin (same host:port) unless it explicitly redirects there.",
-                                "- Prioritize the focused endpoint, directly related same-origin API paths already evidenced, and any real redirects/links observed during the session.",
+                                "- Start at the exact target URL and stay on the same origin (same host:port). Do not follow cross-origin redirects; record their destination and stop.",
+                                "- Prioritize the focused endpoint, directly related same-origin API paths already evidenced, and same-origin redirects/links observed during the session.",
                                 "- Do not speculate generic /login, /signin, /admin, or manager-style paths unless they are actually linked or returned by the target.",
                                 "- Capture status/content-type/body markers, auth barriers, and any machine-readable configuration or API responses.",
                                 "- Do not brute-force credentials or run destructive actions.",
@@ -1660,7 +1652,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                         lines.extend(
                             [
                                 "- Start at the target URL and map reachable same-origin paths/forms.",
-                                "- Stay on the target origin (same host:port) unless the selected target itself redirects there.",
+                                "- Stay on the target origin (same host:port). Do not follow cross-origin redirects; record their destination and stop.",
                                 "- For each discovered form, capture action URL, method, parameter names, and client-side validation clues.",
                                 "- Trace likely backing API endpoints (XHR/fetch paths, REST/GraphQL routes, form action targets) and note auth behavior.",
                                 "- Validate auth barriers, default/admin entry points, debug/error disclosures, and session behavior.",
@@ -2125,37 +2117,13 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                 if not browser_api_key and browser_api_key_env:
                                     browser_api_key = str(os.getenv(browser_api_key_env) or "").strip() or None
                                 browser_session = (
-                                    str(args.get("browser_session") or browser_cfg_local.get("session") or "").strip() or None
+                                    str(browser_cfg_local.get("session") or "").strip() or None
                                 )
-                                browser_auto_session = _as_bool(browser_cfg_local.get("auto_session"), True)
-                                browser_prefers_library_run = False
-                                if tool == "browser_use":
-                                    browser_scanner = self.scanners.get("browser_use")
-                                    prefers_library = getattr(browser_scanner, "prefers_library_run", None)
-                                    if callable(prefers_library):
-                                        try:
-                                            browser_prefers_library_run = bool(
-                                                prefers_library(
-                                                    command_override=browser_command,
-                                                    explicit_session=browser_session,
-                                                )
-                                            )
-                                        except Exception:
-                                            browser_prefers_library_run = False
-                                if (
-                                    tool == "browser_use"
-                                    and not browser_session
-                                    and browser_auto_session
-                                    and not browser_prefers_library_run
-                                ):
-                                    browser_session = _auto_browser_session_name(target)
                                 browser_profile = (
                                     str(args.get("browser_profile") or browser_cfg_local.get("profile") or "").strip() or None
                                 )
                                 browser_auth_ctx = _browser_use_auth_context(browser_cfg_local)
-                                browser_allow_fallback = _as_bool(
-                                    browser_cfg_local.get("allow_deterministic_fallback"), True
-                                )
+                                browser_allow_fallback = False
                                 browser_deterministic_max_paths = clamp_int(
                                     browser_cfg_local.get("deterministic_max_paths"), 8, 1, 24
                                 )
@@ -2309,6 +2277,7 @@ class AIAuditOrchestrator(AuditOrchestrator):
                                                 min_steps_success=browser_min_steps_success,
                                                 allow_deterministic_fallback=browser_allow_fallback,
                                                 deterministic_max_paths=browser_deterministic_max_paths,
+                                                allowed_origins=[target],
                                                 cancel_event=cancel_event,
                                                 timeout_seconds=self._tool_timeout_seconds("browser_use"),
                                             )

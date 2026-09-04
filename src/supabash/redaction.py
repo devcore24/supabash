@@ -46,6 +46,7 @@ _SENSITIVE_FIELD_NAMES = {
     "accesstoken",
     "apikey",
     "apitoken",
+    "authtoken",
     "authorization",
     "bearertoken",
     "clientsecret",
@@ -58,10 +59,38 @@ _SENSITIVE_FIELD_NAMES = {
     "refreshtoken",
     "secret",
     "secretaccesskey",
+    "secretkey",
+    "sessiontoken",
+    "servicerolekey",
+    "setcookie",
+    "token",
+    "xapikey",
+    "xapitoken",
+}
+_SENSITIVE_FIELD_SUFFIXES = {
+    "accesstoken",
+    "apikey",
+    "apitoken",
+    "authtoken",
+    "authorization",
+    "bearertoken",
+    "clientsecret",
+    "cookie",
+    "password",
+    "passwd",
+    "privatekey",
+    "refreshtoken",
+    "secret",
+    "secretaccesskey",
+    "secretkey",
+    "sessiontoken",
     "servicerolekey",
     "setcookie",
     "token",
 }
+_ARGV_FIELD_NAMES = {"argv", "args", "arguments"}
+_COMMAND_FIELD_NAMES = {"command", *_ARGV_FIELD_NAMES}
+_COMMAND_COLLECTION_FIELD_NAMES = {"commands"}
 _SECRET_LABEL = (
     r"password|passwd|api[_-]?key|api[_-]?token|bearer[_-]?token|"
     r"cookie|set-cookie|hashes?|client[_-]?secret|private[_-]?key|"
@@ -93,7 +122,30 @@ _URL_QUERY_SECRET_RE = re.compile(
     r"x-amz-security-token)=)(?P<value>[^&#\s'\"<>]+)"
 )
 _SUPABASE_SECRET_RE = re.compile(r"\bsb_secret_[a-zA-Z0-9_-]+\b")
-
+_UNLABELED_SECRET_RES = (
+    # OpenAI project, service-account, and legacy API keys.
+    re.compile(
+        r"(?<![A-Za-z0-9_-])sk-(?:(?:proj|svcacct)-)?"
+        r"[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"
+    ),
+    # GitHub classic/app tokens and fine-grained personal access tokens.
+    re.compile(r"(?<![A-Za-z0-9_])gh[pousr]_[A-Za-z0-9]{20,}(?![A-Za-z0-9])"),
+    re.compile(r"(?<![A-Za-z0-9_])github_pat_[A-Za-z0-9_]{20,}(?![A-Za-z0-9_])"),
+    # AWS long-lived and temporary access-key identifiers.
+    re.compile(r"(?<![A-Z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])"),
+    # Google API keys.
+    re.compile(r"(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])"),
+    # Slack tokens (bot, app, user, refresh, and session families).
+    re.compile(r"(?<![A-Za-z0-9-])xox[a-z]-[A-Za-z0-9-]{10,}(?![A-Za-z0-9-])"),
+    # Stripe live secret and restricted keys. Publishable pk_live_ values are not secrets.
+    re.compile(r"(?<![A-Za-z0-9_])(?:sk|rk)_live_[A-Za-z0-9]{16,}(?![A-Za-z0-9])"),
+)
+_PEM_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN (?P<label>(?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY)-----"
+    r".*?"
+    r"-----END (?P=label)-----",
+    flags=re.DOTALL,
+)
 
 
 def _tool_name(argv: Sequence[str]) -> str:
@@ -113,6 +165,17 @@ def _redact_url_userinfo(value: str) -> Tuple[str, bool]:
 
     safe, count = _URL_USERINFO_RE.subn(replacement, text)
     return safe, bool(count)
+
+
+def _redact_unlabeled_secrets(value: str) -> Tuple[str, bool]:
+    """Redact high-confidence token formats that do not need a field label."""
+    safe = str(value)
+    changed = False
+    for pattern in _UNLABELED_SECRET_RES:
+        safe, count = pattern.subn(REDACTED, safe)
+        changed = changed or bool(count)
+    safe, count = _PEM_PRIVATE_KEY_RE.subn(REDACTED, safe)
+    return safe, changed or bool(count)
 
 
 def redact_argv(argv: Sequence[Any]) -> Tuple[List[str], bool]:
@@ -174,12 +237,13 @@ def redact_argv(argv: Sequence[Any]) -> Tuple[List[str], bool]:
         )
         safe_url, jwt_count = _JWT_RE.subn(REDACTED, safe_url)
         safe_url, supabase_count = _SUPABASE_SECRET_RE.subn(REDACTED, safe_url)
+        safe_url, unlabeled_changed = _redact_unlabeled_secrets(safe_url)
         redacted.append(safe_url)
         changed = changed or url_changed or bool(
             query_count
             or jwt_count
             or supabase_count
-        )
+        ) or unlabeled_changed
 
     return redacted, changed
 
@@ -266,11 +330,28 @@ def redact_sensitive_text(value: Any) -> str:
         _replace_secret_match,
         safe,
     )
-    return _SUPABASE_SECRET_RE.sub(REDACTED, _JWT_RE.sub(REDACTED, safe))
+    safe = _SUPABASE_SECRET_RE.sub(REDACTED, _JWT_RE.sub(REDACTED, safe))
+    safe, _ = _redact_unlabeled_secrets(safe)
+    return safe
 
 
 def _normalized_field_name(value: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def is_sensitive_field_name(value: Any) -> bool:
+    """Return whether a structured-data field name conventionally holds a secret."""
+    normalized = _normalized_field_name(value)
+    return normalized in _SENSITIVE_FIELD_NAMES or any(
+        normalized.endswith(suffix) for suffix in _SENSITIVE_FIELD_SUFFIXES
+    )
+
+
+def text_contains_unredacted_secret(value: Any) -> bool:
+    """Detect high-confidence credential material without returning the value."""
+    if not isinstance(value, str) or not value:
+        return False
+    return redact_sensitive_text(value) != value
 
 
 def redact_sensitive_data(value: Any, *, _command_context: bool = False) -> Any:
@@ -279,13 +360,23 @@ def redact_sensitive_data(value: Any, *, _command_context: bool = False) -> Any:
         sanitized: Dict[Any, Any] = {}
         for key, item in value.items():
             normalized_key = _normalized_field_name(key)
-            if normalized_key in _SENSITIVE_FIELD_NAMES and item not in (None, ""):
+            if is_sensitive_field_name(key) and item not in (None, ""):
                 sanitized[key] = REDACTED
+                continue
+            if (
+                normalized_key in _COMMAND_FIELD_NAMES
+                and isinstance(item, (list, tuple))
+                and all(not isinstance(part, (dict, list, tuple)) for part in item)
+            ):
+                safe_argv, _ = redact_argv(item)
+                sanitized[key] = tuple(safe_argv) if isinstance(item, tuple) else safe_argv
                 continue
             sanitized[key] = redact_sensitive_data(
                 item,
                 _command_context=(
-                    _command_context or normalized_key in {"command", "commands"}
+                    _command_context
+                    or normalized_key in _COMMAND_FIELD_NAMES
+                    or normalized_key in _COMMAND_COLLECTION_FIELD_NAMES
                 ),
             )
         return sanitized
@@ -315,6 +406,23 @@ def find_sensitive_data_paths(
     """Return paths containing credential material without exposing the values."""
     findings: List[str] = []
 
+    def add_finding(finding_path: str) -> None:
+        if finding_path not in findings and len(findings) < max(0, int(limit)):
+            findings.append(finding_path)
+
+    def command_value_has_secret(item: Any) -> bool:
+        if isinstance(item, str):
+            return command_contains_unredacted_secret(
+                item
+            ) or text_contains_unredacted_secret(item)
+        if (
+            isinstance(item, (list, tuple))
+            and all(not isinstance(part, (dict, list, tuple)) for part in item)
+        ):
+            _, changed = redact_argv(item)
+            return changed
+        return False
+
     def visit(item: Any, current_path: str) -> None:
         if len(findings) >= max(0, int(limit)):
             return
@@ -322,11 +430,28 @@ def find_sensitive_data_paths(
             for key, child in item.items():
                 normalized_key = _normalized_field_name(key)
                 child_path = f"{current_path}.{key}"
-                if normalized_key in {"command", "commands"}:
+                if normalized_key in _COMMAND_COLLECTION_FIELD_NAMES:
+                    if isinstance(child, (list, tuple)):
+                        for index, command_item in enumerate(child):
+                            command_path = f"{child_path}[{index}]"
+                            if command_value_has_secret(command_item):
+                                add_finding(command_path)
+                            else:
+                                visit(command_item, command_path)
+                    elif command_value_has_secret(child):
+                        add_finding(child_path)
+                    else:
+                        visit(child, child_path)
                     continue
-                if normalized_key in _SENSITIVE_FIELD_NAMES and child not in (None, ""):
+                if normalized_key in _COMMAND_FIELD_NAMES:
+                    if command_value_has_secret(child):
+                        add_finding(child_path)
+                    else:
+                        visit(child, child_path)
+                    continue
+                if is_sensitive_field_name(key) and child not in (None, ""):
                     if not _looks_redacted_or_masked(child):
-                        findings.append(child_path)
+                        add_finding(child_path)
                     continue
                 visit(child, child_path)
             return
@@ -334,8 +459,8 @@ def find_sensitive_data_paths(
             for index, child in enumerate(item):
                 visit(child, f"{current_path}[{index}]")
             return
-        if isinstance(item, str) and redact_sensitive_text(item) != item:
-            findings.append(current_path)
+        if isinstance(item, str) and text_contains_unredacted_secret(item):
+            add_finding(current_path)
 
     visit(value, path)
     return findings

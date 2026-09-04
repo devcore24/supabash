@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional
 from supabash.logger import setup_logger
 from supabash.runner import CommandResult, CommandRunner
 from supabash.tool_settings import resolve_timeout_seconds
+from supabash.tool_registry import resolve_tool_executable
 
 logger = setup_logger(__name__)
 
@@ -30,7 +31,16 @@ class Enum4linuxNgScanner:
 
         logger.info(f"Starting enum4linux-ng on {target}")
 
-        command = ["enum4linux-ng", "-A", target]
+        executable = resolve_tool_executable("enum4linux_ng", require_healthy=True)
+        self.last_executable = executable
+        if not executable:
+            return {
+                "success": False,
+                "error": "No compatible enum4linux executable was found",
+                "command": "",
+            }
+
+        command = [executable, "-A", target]
         if arguments:
             command.extend(arguments.split())
 
@@ -56,4 +66,5 @@ class Enum4linuxNgScanner:
             "success": True,
             "raw_output": result.stdout,
             "command": result.command,
+            "executable": executable,
         }

@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
 from supabash.tool_settings import resolve_timeout_seconds
+from supabash.tool_registry import resolve_tool_executable
 
 logger = setup_logger(__name__)
 
@@ -44,7 +45,17 @@ class ScoutSuiteScanner:
         else:
             out_dir = Path(tempfile.mkdtemp(prefix="scoutsuite-"))
 
-        command = ["scout", provider, "--no-browser", "--report-dir", str(out_dir)]
+        executable = resolve_tool_executable("scoutsuite", require_healthy=True)
+        self.last_executable = executable
+        if not executable:
+            return {
+                "success": False,
+                "error": "No compatible ScoutSuite executable was found",
+                "command": "",
+                "report_dir": str(out_dir),
+            }
+
+        command = [executable, provider, "--no-browser", "--report-dir", str(out_dir)]
         if arguments:
             command.extend(arguments.split())
 
@@ -79,6 +90,7 @@ class ScoutSuiteScanner:
                 "findings": findings,
             },
             "command": result.command,
+            "executable": executable,
         }
 
     def _load_results(self, report_dir: Path) -> (Optional[Dict[str, Any]], Optional[Path]):

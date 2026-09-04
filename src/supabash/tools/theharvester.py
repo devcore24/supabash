@@ -5,6 +5,7 @@ from typing import Dict, List, Any, Optional
 from supabash.runner import CommandRunner, CommandResult
 from supabash.logger import setup_logger
 from supabash.tool_settings import resolve_timeout_seconds
+from supabash.tool_registry import resolve_tool_executable
 
 logger = setup_logger(__name__)
 
@@ -48,8 +49,17 @@ class TheHarvesterScanner:
         if not sources:
             sources = "anubis,baidu,bing,bingapi,bufferoverun,certspotter,crtsh,dnsdumpster,duckduckgo,hackertarget,otx,rapiddns,sublist3r,threatcrowd,urlscan,virustotal,yahoo"
 
+        executable = resolve_tool_executable("theharvester", require_healthy=True)
+        self.last_executable = executable
+        if not executable:
+            return {
+                "success": False,
+                "error": "No compatible theHarvester executable was found",
+                "command": "",
+            }
+
         command = [
-            "theHarvester",
+            executable,
             "-d", domain,
             "-b", sources,
             "-l", str(limit),
@@ -83,6 +93,7 @@ class TheHarvesterScanner:
             "success": True,
             "scan_data": parsed,
             "command": result.command,
+            "executable": executable,
         }
 
     def _parse_output(self, output: str, domain: str) -> Dict[str, Any]:

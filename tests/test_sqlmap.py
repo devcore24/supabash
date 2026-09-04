@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock
 import sys
 import os
+from pathlib import Path
 
 # Add src to python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
@@ -48,6 +49,27 @@ class TestSqlmapScanner(unittest.TestCase):
         result = self.scanner.scan("bad")
         self.assertFalse(result["success"])
         self.assertEqual(result["error"], "error")
+
+    def test_default_output_directory_is_private_unique_and_removed(self):
+        observed = {}
+
+        def run(command, **_kwargs):
+            output_arg = next(arg for arg in command if arg.startswith("--output-dir="))
+            output_path = Path(output_arg.split("=", 1)[1])
+            observed["path"] = output_path
+            self.assertTrue(output_path.is_dir())
+            self.assertEqual(output_path.stat().st_mode & 0o777, 0o700)
+            return CommandResult(
+                command="sqlmap", return_code=0, stdout="", stderr="", success=True
+            )
+
+        self.mock_runner.run.side_effect = run
+
+        result = self.scanner.scan("http://example.com/?id=1")
+
+        self.assertTrue(result["success"])
+        self.assertIn("supabash-sqlmap-", observed["path"].name)
+        self.assertFalse(observed["path"].exists())
 
 
 if __name__ == '__main__':

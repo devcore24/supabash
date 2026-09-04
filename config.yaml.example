@@ -21,17 +21,22 @@ llm:
   local_only: false
   provider: openai
   anthropic:
-    api_key: YOUR_ANTHROPIC_KEY
+    # A non-placeholder inline key takes precedence over api_key_env.
+    api_key: ""
+    api_key_env: ANTHROPIC_API_KEY
     model: claude-opus-4-5
     api_base: https://api.anthropic.com/v1
   gemini:
-    api_key: YOUR_GEMINI_KEY
+    api_key: ""
+    api_key_env: GEMINI_API_KEY
     model: gemini-3-pro
   openai:
-    api_key: YOUR_OPENAI_KEY
+    api_key: ""
+    api_key_env: OPENAI_API_KEY
     model: gpt-5.1
   mistral:
-    api_key: YOUR_MISTRAL_KEY
+    api_key: ""
+    api_key_env: MISTRAL_API_KEY
     model: mistral-large-2512
     api_base: https://api.mistral.ai/v1
   ollama:
@@ -137,20 +142,24 @@ tools:
     max_steps: 25
     min_steps_success: 1
     require_done: true
-    auto_session: true
+    # Deprecated compatibility key. Guarded scans never create native CLI sessions.
+    auto_session: false
     headless: true
+    # Named sessions use the native CLI and are rejected by guarded scans.
     session: ""
+    # Profiles remain supported by the policy-enforcing Python-library path.
     profile: ""
     model: ""
-    # Optional: Supabash exports this as BROWSER_USE_API_KEY before running browser-use.
+    # Optional: Supabash exports this as BROWSER_USE_API_KEY for the isolated Python runtime.
     # Prefer a lab/test key here if you choose to store it in config.
     api_key: ""
     # Optional: read from another env var and export into BROWSER_USE_API_KEY (used when api_key is empty).
     api_key_env: ""
-    allow_deterministic_fallback: true
+    # Deprecated compatibility key. Native CLI fallback is disabled because it cannot
+    # enforce exact-origin boundaries before navigation.
+    allow_deterministic_fallback: false
     deterministic_max_paths: 8
-    # Optional command template supports placeholders:
-    # {target}, {task}, {max_steps}, {headless}, {model}, {session}, {profile}
+    # Deprecated compatibility key. Custom commands are rejected by guarded scans.
     command: ""
     auth:
       enabled: false
@@ -195,6 +204,8 @@ tools:
     enabled: true
     timeout_seconds: 10
     max_pages: 5
+    # Only these explicit backends (plus direct *.supabase.co targets) receive
+    # read-only REST/RPC root probes. Backends discovered in page content are reported only.
     # extra_urls: ["http://127.0.0.1:4001"]
   hydra:
     enabled: false

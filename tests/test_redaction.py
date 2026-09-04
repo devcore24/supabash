@@ -4,6 +4,7 @@ import json
 from supabash.redaction import (
     REDACTED,
     command_contains_unredacted_secret,
+    find_sensitive_data_paths,
     redact_argv,
     redact_command_text,
     redact_sensitive_data,
@@ -119,6 +120,74 @@ class TestCommandRedaction(unittest.TestCase):
         self.assertNotIn("horse", safe)
         self.assertNotIn("battery", safe)
         self.assertNotIn("staple", safe)
+
+    def test_unlabeled_provider_token_canaries_and_pem_are_redacted(self):
+        pem_begin = "-----BEGIN " + "PRIVATE KEY-----"
+        pem_end = "-----END " + "PRIVATE KEY-----"
+        canaries = {
+            "openai_project": "sk-proj-" + ("A" * 48),
+            "openai_legacy": "sk-" + ("B" * 48),
+            "github_classic": "ghp_" + ("C" * 36),
+            "github_fine_grained": "github_pat_" + ("D" * 40),
+            "aws_long_lived": "AKIA" + ("E" * 16),
+            "aws_temporary": "ASIA" + ("F" * 16),
+            "google": "AIza" + ("G" * 35),
+            "slack": "xoxb-1234567890-" + ("H" * 24),
+            "stripe": "sk_live_" + ("I" * 24),
+            "pem": (
+                f"{pem_begin}\n"
+                "QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n"
+                f"{pem_end}"
+            ),
+        }
+
+        for name, canary in canaries.items():
+            with self.subTest(name=name):
+                safe = redact_sensitive_text(f"captured={canary}")
+                self.assertNotIn(canary, safe)
+                self.assertIn(REDACTED, safe)
+                self.assertEqual(
+                    find_sensitive_data_paths({"evidence": canary}),
+                    ["$.evidence"],
+                )
+
+    def test_command_and_argv_fields_are_scanned_for_secrets(self):
+        payload = {
+            "command": "scanner --api-key raw-command-secret localhost",
+            "argv": ["scanner", "--api-key", "raw-argv-secret", "localhost"],
+            "commands": [
+                "scanner --token raw-list-secret localhost",
+                "scanner --port 443 localhost",
+            ],
+            "safe_command": "scanner --api-key '<redacted>' localhost",
+        }
+
+        self.assertEqual(
+            find_sensitive_data_paths(payload),
+            ["$.command", "$.argv", "$.commands[0]"],
+        )
+
+        safe = redact_sensitive_data(payload)
+        serialized = json.dumps(safe)
+        for secret in ("raw-command-secret", "raw-argv-secret", "raw-list-secret"):
+            self.assertNotIn(secret, serialized)
+        self.assertEqual(safe["argv"][2], REDACTED)
+
+    def test_provider_prefixed_secret_fields_are_detected_without_token_budget_noise(self):
+        payload = {
+            "openai_api_key": "opaque-literal",
+            "aws_secret_access_key": "another-opaque-literal",
+            "token_budget": 10_000,
+        }
+
+        self.assertEqual(
+            find_sensitive_data_paths(payload),
+            ["$.openai_api_key", "$.aws_secret_access_key"],
+        )
+        safe = redact_sensitive_data(payload)
+        self.assertEqual(safe["openai_api_key"], REDACTED)
+        self.assertEqual(safe["aws_secret_access_key"], REDACTED)
+        self.assertEqual(safe["token_budget"], 10_000)
 
 if __name__ == "__main__":
     unittest.main()
