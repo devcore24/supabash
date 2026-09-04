@@ -17,6 +17,15 @@ _DEFAULT_API_KEY_ENV = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+}
+# LiteLLM can infer some providers from model names, but generic/local names and
+# several vendor model names require an explicit provider prefix.
+_LITELLM_MODEL_PREFIX = {
+    "gemini": "gemini",
+    "mistral": "mistral",
+    "ollama": "ollama",
+    "lmstudio": "openai",
 }
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _ENV_REFERENCE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}\Z")
@@ -61,6 +70,26 @@ def _normalize_env_name(value: Any) -> Optional[str]:
             "LLM api_key_env must contain only a valid environment variable name."
         )
     return normalized
+
+
+def _litellm_model_name(provider: Any, model: Any) -> str:
+    """Return an unambiguous LiteLLM model route for a configured provider."""
+    normalized_model = str(model or "").strip()
+    if not normalized_model:
+        return normalized_model
+    normalized_provider = str(provider or "").strip().lower()
+    prefix = _LITELLM_MODEL_PREFIX.get(normalized_provider)
+    if not prefix:
+        return normalized_model
+    # Ollama and LM Studio model IDs can contain slashes of their own. For these
+    # local backends only the exact LiteLLM route prefix means "already routed."
+    if normalized_provider in {"ollama", "lmstudio"}:
+        if normalized_model.startswith(f"{prefix}/"):
+            return normalized_model
+        return f"{prefix}/{normalized_model}"
+    if "/" in normalized_model:
+        return normalized_model
+    return f"{prefix}/{normalized_model}"
 
 
 class ToolCallingNotSupported(RuntimeError):
@@ -141,6 +170,7 @@ class LLMClient:
         return {
             "provider": provider,
             "model": model,
+            "litellm_model": _litellm_model_name(provider, model),
             "api_key": api_key,
             "api_base": api_base,
         }
@@ -158,7 +188,7 @@ class LLMClient:
 
         try:
             settings = self._active_settings()
-            model = settings.get("model")
+            model = settings.get("litellm_model") or settings.get("model")
             if model:
                 info = litellm.get_model_info(model)
                 if isinstance(info, dict):
@@ -177,7 +207,7 @@ class LLMClient:
         """
         try:
             settings = self._active_settings()
-            model = settings.get("model") or ""
+            model = settings.get("litellm_model") or settings.get("model") or ""
             if not model:
                 return None
             token_counter = getattr(litellm, "token_counter", None)
@@ -320,7 +350,7 @@ class LLMClient:
                     "_cached_meta": meta,
                 }
         kwargs = {
-            "model": settings["model"],
+            "model": settings["litellm_model"],
             "messages": messages,
             "temperature": temperature,
         }
@@ -373,7 +403,7 @@ class LLMClient:
         """
         settings = self._active_settings()
         kwargs: Dict[str, Any] = {
-            "model": settings["model"],
+            "model": settings["litellm_model"],
             "messages": messages,
             "temperature": temperature,
             "tools": tools,

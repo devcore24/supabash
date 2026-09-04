@@ -9,6 +9,12 @@ core:
   - 127.0.0.1
   consent_accepted: false
   allow_public_ips: false
+  # Hard ceilings applied in aggressive mode.
+  aggressive_caps:
+    max_nuclei_rate: 20
+    default_nuclei_rate: 10
+    max_gobuster_threads: 50
+    max_parallel_workers: 6
 llm:
   enabled: true
   max_input_chars: 12000
@@ -25,7 +31,7 @@ llm:
     api_key: ""
     api_key_env: ANTHROPIC_API_KEY
     model: claude-opus-4-5
-    api_base: https://api.anthropic.com/v1
+    api_base: https://api.anthropic.com
   gemini:
     api_key: ""
     api_key_env: GEMINI_API_KEY
@@ -59,6 +65,8 @@ chat:
 # validates scope, executes its wrappers, and owns evidence/report generation.
 codex:
   command: codex
+  # Optional explicit Codex model override. Leave null to use Codex's available default.
+  model: null
   # Optional auth-only home for maximum isolation. Authenticate it separately with:
   # CODEX_HOME=/path/to/auth-only-home codex login
   # Global AGENTS.md/AGENTS.override.md files in the effective home must be absent or empty.
@@ -100,15 +108,25 @@ tools:
   nmap:
     enabled: true
     timeout_seconds: 600
+    fast_discovery: true
+    fast_discovery_ports: 1-65535
+    fast_discovery_max_ports: 256
   masscan:
     enabled: true
     timeout_seconds: 600
+    rate: 1000
+    ports: 1-65535
   rustscan:
     enabled: true
     timeout_seconds: 600
+    batch: 2000
+    ports: 1-65535
   subfinder:
     enabled: false
     timeout_seconds: 600
+    max_candidates: 200
+    max_promoted_hosts: 40
+    resolve_validation: true
   httpx:
     enabled: true
     timeout_seconds: 300
@@ -165,6 +183,11 @@ tools:
       enabled: false
       login_url: ""
       notes: ""
+      # Direct values are supported for a private, owner-only config. Keep them
+      # blank in this example and prefer the env fields for shared deployments.
+      username: ""
+      password: ""
+      cookie: ""
       username_env: ""
       password_env: ""
       cookie_env: ""
@@ -195,18 +218,22 @@ tools:
     enabled: false
     timeout_seconds: 3600
     provider: aws
-    # arguments: "--regions us-east-1"
+    arguments: ""
   prowler:
     enabled: false
     timeout_seconds: 3600
-    # arguments: "--severity high"
+    arguments: ""
   supabase_audit:
     enabled: true
     timeout_seconds: 10
     max_pages: 5
     # Only these explicit backends (plus direct *.supabase.co targets) receive
     # read-only REST/RPC root probes. Backends discovered in page content are reported only.
-    # extra_urls: ["http://127.0.0.1:4001"]
+    extra_urls: []
+    # Example: extra_urls: ["http://127.0.0.1:4001"]
+  readiness_probe:
+    enabled: true
+    max_web_targets: 30
   hydra:
     enabled: false
     timeout_seconds: 3600
@@ -217,10 +244,16 @@ tools:
     enabled: true
     timeout_seconds: 1200
     # Optional: WPScan API token for vulnerability data
-    # api_token: YOUR_WPSCAN_API_TOKEN
+    api_token: ""
+    enumerate: ""
+    arguments: ""
   theharvester:
     enabled: true
     timeout_seconds: 900
+    sources: ""
+    limit: 500
+    start: 0
+    arguments: ""
   netdiscover:
     enabled: true
     timeout_seconds: 300
@@ -228,8 +261,8 @@ tools:
     enabled: false
     timeout_seconds: 120
     airmon: false
-    # channel: "6"
-    # arguments: "--band abg"
+    channel: ""
+    arguments: ""
   crackmapexec:
     enabled: true
     timeout_seconds: 600

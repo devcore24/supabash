@@ -87,6 +87,9 @@ DEFAULT_CONFIG = {
     # wrapper execution, evidence collection, and report generation.
     "codex": {
         "command": "codex",
+        # Optional explicit Codex CLI model override. None lets Codex choose its
+        # own available default for the authenticated account.
+        "model": None,
         # Optional dedicated auth-only Codex home. Authenticate this home separately
         # and keep global AGENTS files absent/empty so planner context stays isolated.
         "codex_home": None,
@@ -257,36 +260,42 @@ DEFAULT_CONFIG = {
         "cache_enabled": False,
         "cache_ttl_seconds": 3600,
         "cache_max_entries": 500,
-        "provider": "openai",  # active provider: openai, anthropic, gemini, ollama, lmstudio
+        "provider": "openai",  # active provider: openai, anthropic, gemini, mistral, ollama, lmstudio
         "openai": {
             "api_key": "",
             "api_key_env": "OPENAI_API_KEY",
-            "model": "gpt-4-turbo"
+            "model": "gpt-5.1",
         },
         "anthropic": {
             "api_key": "",
             "api_key_env": "ANTHROPIC_API_KEY",
-            "model": "claude-3-opus-20240229"
+            "model": "claude-opus-4-5",
+            "api_base": "https://api.anthropic.com",
         },
         "gemini": {
             "api_key": "",
             "api_key_env": "GEMINI_API_KEY",
-            "model": "gemini-1.5-pro-latest"
+            "model": "gemini-3-pro",
+        },
+        "mistral": {
+            "api_key": "",
+            "api_key_env": "MISTRAL_API_KEY",
+            "model": "mistral-large-2512",
+            "api_base": "https://api.mistral.ai/v1",
         },
         # Local models via Ollama (no API key required)
         "ollama": {
             "api_key": None,
             "model": "ollama/llama3.1",
             "api_base": "http://localhost:11434",
-        }
-        ,
+        },
         # Local models via LM Studio (OpenAI-compatible; no API key required)
         "lmstudio": {
             "api_key": None,
             "model": "local-model",
             "api_base": "http://localhost:1234/v1",
-        }
-    }
+        },
+    },
 }
 
 class ConfigManager:

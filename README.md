@@ -626,7 +626,7 @@ supabash config [OPTIONS]
 ```
 
 - Options:
-  - `--provider`, `-p` — active LLM provider (e.g. `openai|ollama|lmstudio`)
+  - `--provider`, `-p` — active LLM provider (e.g. `openai|anthropic|gemini|mistral|ollama|lmstudio`)
   - `--key`, `-k` — API key for the selected/active provider
   - `--model`, `-m` — model for the selected/active provider
   - `--api-base` — API base URL (OpenAI-compatible backends)
@@ -656,7 +656,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Config resolution order: `SUPABASH_CONFIG`, an existing `./config.yaml`, a source-checkout `config.yaml`, then `$XDG_CONFIG_HOME/supabash/config.yaml` (or `~/.config/supabash/config.yaml`) (legacy `~/.supabash/config.yaml` is migrated).
 - Control verbosity via `core.log_level` (`INFO`, `DEBUG`, etc.); logs are written to `./debug.log` by default (override with `SUPABASH_LOG_DIR`).
 - Enable/disable tools globally via `tools.<tool>.enabled` (see `config.yaml.example`).
-- Experimental Codex planner settings live under `codex`: executable (`command`), process timeout and event/input caps, ChatGPT-auth requirement, and thread persistence. Planner safety requires a standalone terminal, read-only sandboxing, isolated user config and rules, disabled generated context and web/tool features, an owner-only empty workspace, and a minimal child environment that does not inherit ambient credentials.
+- Experimental Codex planner settings live under `codex`: executable (`command`), optional model override (`model`), process timeout and event/input caps, ChatGPT-auth requirement, and thread persistence. Leave `codex.model: null` to let Codex use its available default. Planner safety requires a standalone terminal, read-only sandboxing, isolated user config and rules, disabled generated context and web/tool features, an owner-only empty workspace, and a minimal child environment that does not inherit ambient credentials.
 - Set per-tool timeouts via `tools.<tool>.timeout_seconds` (0 disables the timeout).
 - Fast discovery tuning: `tools.nmap.fast_discovery`, `tools.nmap.fast_discovery_ports`, `tools.nmap.fast_discovery_max_ports`.
 - Set a default Nuclei throttling rate via `tools.nuclei.rate_limit` (overridden by `--nuclei-rate`).
@@ -666,7 +666,7 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Domain expansion tuning (when enabled): `tools.subfinder.max_candidates`, `tools.subfinder.max_promoted_hosts`, `tools.subfinder.resolve_validation`.
 - Keep `tools.browser_use.auth.include_secrets_in_task=false` on shared systems: enabling it embeds login secrets in the local browser-use process arguments even though Supabash redacts persisted output.
 - Browser-use tuning: `tools.browser_use.enabled`, `tools.browser_use.timeout_seconds`, `tools.browser_use.max_steps`, `tools.browser_use.min_steps_success`, `tools.browser_use.require_done`, `tools.browser_use.headless`, `tools.browser_use.profile`, `tools.browser_use.model`, and `tools.browser_use.auth.{enabled,login_url,notes,username_env,password_env,cookie_env,include_secrets_in_task}`. The legacy `auto_session`, `session`, `command`, and deterministic-fallback settings are retained only for config compatibility and are rejected or ignored by guarded scans.
-- Browser-use credentials: set `tools.browser_use.api_key`, or set `tools.browser_use.api_key_env`, or export `BROWSER_USE_API_KEY` in the shell running Supabash. Prefer env vars for shared machines/repos instead of storing live keys in `config.yaml`.
+- Browser-use credentials: set `tools.browser_use.api_key`, or set `tools.browser_use.api_key_env`, or export `BROWSER_USE_API_KEY` in the shell running Supabash. A private, Git-ignored, owner-only `config.yaml` may contain an inline key; prefer env vars for shared machines, repositories, and deployments.
 - Agentic browser-use tasks are evidence-aware: Supabash now passes prior findings + rationale/hypothesis into each browser run, then feeds browser observations back into planner context for the next step.
 - Browser-use scope safety is preventive: execution requires the Python-library path with `Browser.allowed_domains`; native CLI, named-session, and custom-command paths fail closed. The old deterministic CLI fallback is disabled because prompt instructions and post-run URL checks cannot prevent an out-of-scope request.
 - Agentic planner quality controls: Supabash tracks duplicate-rate, unique findings, open high-risk cluster count, and post-action gain to decide whether to continue, pivot, or stop.
@@ -675,11 +675,12 @@ supabash scan 192.168.1.10 --scanner rustscan --profile stealth --rustscan-batch
 - Object-store readiness checks no longer treat `HTTP 200 /` alone as a confirmed HIGH anonymous bucket listing; HIGH requires listing-style proof such as S3/MinIO listing markers.
 - Offline/no-LLM mode: set `llm.enabled=false` in `config.yaml` or pass `--no-llm` on `audit`/`ai-audit`.
 - Local-only LLM mode (privacy): set `llm.local_only=true` to allow only `ollama`/`lmstudio` providers.
-- LLM credentials: prefer `llm.<provider>.api_key_env` and export the named variable. OpenAI, Anthropic, and Gemini default to `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `GEMINI_API_KEY`. A real value in `api_key` takes precedence; empty values and placeholders such as `YOUR_OPENAI_KEY` or `${OPENAI_API_KEY}` are never sent as credentials.
+- LLM credentials: a private, Git-ignored, owner-only `config.yaml` may store keys directly in `llm.<provider>.api_key`; no `.env` file is required, and the Doctor reports this only as an advisory warning. For shared or deployed configs, use `llm.<provider>.api_key_env` and export the named variable. OpenAI, Anthropic, Gemini, and Mistral default to `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and `MISTRAL_API_KEY`. A real inline value takes precedence; empty values and placeholders such as `YOUR_OPENAI_KEY` or `${OPENAI_API_KEY}` are never sent as credentials.
 - Restrict scope via `core.allowed_hosts` (IPs/hosts/CIDRs/wildcards like `*.corp.local`); add your own infra there. Use `--force` on `scan`/`audit` to bypass.
 - Public IP guardrail: IP-literal public targets are blocked by default; enable with `core.allow_public_ips=true`, `supabash config --allow-public-ips`, or per-run `--allow-public` (only if authorized).
 - Edit allowed hosts via CLI: `supabash config --allow-host 10.0.0.0/24`, `supabash config --remove-host 10.0.0.0/24`, `supabash config --list-allowed-hosts`.
 - Manage providers, API keys, and models with `supabash config`.
+- Switching a provider/model does not require re-entering its existing key: `supabash config --provider openai --model MODEL_NAME`. Avoid passing live keys with `--key` on shared shells because command arguments may be retained in shell history.
 - Local models (Ollama): `supabash config --provider ollama --model ollama/llama3.1 --api-base http://localhost:11434` (no API key required).
 - Local models (LM Studio): `supabash config --provider lmstudio --model local-model --api-base http://localhost:1234/v1` (no API key required; uses OpenAI-compatible API).
 - Manage scan safety: consent prompts are remembered in `core.consent_accepted` after the first interactive acceptance (use `supabash config --reset-consent` to re-prompt); `--yes` skips prompting for a single run.

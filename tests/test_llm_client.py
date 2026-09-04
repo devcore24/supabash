@@ -3,9 +3,11 @@ from unittest.mock import patch
 import sys
 import os
 
+import litellm
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 
-from supabash.llm import LLMClient
+from supabash.llm import LLMClient, _litellm_model_name
 
 
 class DummyConfig:
@@ -97,6 +99,7 @@ class TestLLMClient(unittest.TestCase):
             "openai": "OPENAI_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "gemini": "GEMINI_API_KEY",
+            "mistral": "MISTRAL_API_KEY",
         }
         for provider, env_name in defaults.items():
             with self.subTest(provider=provider):
@@ -172,9 +175,56 @@ class TestLLMClient(unittest.TestCase):
             content = client.chat(messages)
             self.assertEqual(content, "hi")
             _, kwargs = mock_completion.call_args
-            self.assertEqual(kwargs["model"], "local-model")
+            self.assertEqual(kwargs["model"], "openai/local-model")
             self.assertEqual(kwargs["api_base"], "http://localhost:1234/v1")
             self.assertNotIn("api_key", kwargs)
+
+    def test_ambiguous_provider_models_get_explicit_litellm_routes(self):
+        cases = {
+            ("gemini", "gemini-3-pro"): "gemini/gemini-3-pro",
+            ("mistral", "mistral-large-2512"): "mistral/mistral-large-2512",
+            ("ollama", "llama3.1"): "ollama/llama3.1",
+            ("ollama", "hf.co/bartowski/model.gguf"): "ollama/hf.co/bartowski/model.gguf",
+            ("lmstudio", "local-model"): "openai/local-model",
+            ("lmstudio", "lmstudio-community/model"): "openai/lmstudio-community/model",
+            ("gemini", "vertex_ai/gemini-pro"): "vertex_ai/gemini-pro",
+            ("custom", "provider/model"): "provider/model",
+        }
+
+        for (provider, model), expected in cases.items():
+            with self.subTest(provider=provider, model=model):
+                self.assertEqual(_litellm_model_name(provider, model), expected)
+
+        resolvable = {
+            ("gemini", "gemini-3-pro"): "gemini",
+            ("mistral", "mistral-large-2512"): "mistral",
+            ("ollama", "llama3.1"): "ollama",
+            ("ollama", "hf.co/bartowski/model.gguf"): "ollama",
+            ("lmstudio", "local-model"): "openai",
+            ("lmstudio", "lmstudio-community/model"): "openai",
+        }
+        for (provider, model), expected_provider in resolvable.items():
+            with self.subTest(provider=provider, integration=True):
+                routed_model = _litellm_model_name(provider, model)
+                _, resolved_provider, _, _ = litellm.get_llm_provider(model=routed_model)
+                self.assertEqual(resolved_provider, expected_provider)
+
+    def test_remote_ambiguous_models_are_routed_when_dispatched(self):
+        cases = {
+            ("gemini", "gemini-3-pro"): "gemini/gemini-3-pro",
+            ("mistral", "mistral-large-2512"): "mistral/mistral-large-2512",
+        }
+
+        for (provider, model), expected in cases.items():
+            with self.subTest(provider=provider):
+                client = LLMClient(config=DummyConfig(provider=provider, model=model))
+                with patch("supabash.llm.litellm.completion") as mock_completion:
+                    mock_completion.return_value = {
+                        "choices": [{"message": {"content": "hi"}}]
+                    }
+                    client.chat([{"role": "user", "content": "hello"}])
+
+                self.assertEqual(mock_completion.call_args.kwargs["model"], expected)
 
     def test_missing_model_raises(self):
         cfg = DummyConfig(model=None)

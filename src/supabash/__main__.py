@@ -1064,7 +1064,7 @@ def ai_audit(
 
 @app.command()
 def config(
-    provider: str = typer.Option(None, "--provider", "-p", help="Set active LLM provider (openai, anthropic, gemini, ollama, lmstudio, or custom)"),
+    provider: str = typer.Option(None, "--provider", "-p", help="Set active LLM provider (openai, anthropic, gemini, mistral, ollama, lmstudio, or custom)"),
     key: str = typer.Option(None, "--key", "-k", help="Set API Key for the selected/active provider"),
     model: str = typer.Option(None, "--model", "-m", help="Set Model name for the selected/active provider"),
     api_base: str = typer.Option(None, "--api-base", help="Set API base URL for the selected/active provider"),
@@ -1142,7 +1142,7 @@ def config(
             current_llm = config_manager.get_llm_config()
             target_provider = provider if provider is not None else current_llm["provider"]
 
-            if target_provider not in ["openai", "anthropic", "gemini", "ollama", "lmstudio"]:
+            if target_provider not in ["openai", "anthropic", "gemini", "mistral", "ollama", "lmstudio"]:
                 console.print(f"[yellow]Warning: {target_provider!r} is not a standard provider.[/yellow]")
 
             provider_updates = {}
@@ -2313,7 +2313,10 @@ def doctor(
         (
             "no inline credentials detected"
             if not sensitive_config_paths
-            else "inline credentials detected; use environment variables and rotate shared values"
+            else (
+                "inline credentials detected; keep this config private and owner-only "
+                "(use environment variables for shared or deployed configs)"
+            )
         ),
         required=False,
         details={"paths": sensitive_config_paths, "count": len(sensitive_config_paths)},

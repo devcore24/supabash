@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import yaml
 from typer.testing import CliRunner
 
 import supabash.__main__ as main_module
@@ -17,6 +18,13 @@ from supabash.session_state import default_chat_state_path
 
 
 class TestConfigPaths(unittest.TestCase):
+    def test_example_matches_default_config_and_contains_no_secrets(self):
+        example_path = Path(__file__).resolve().parents[1] / "config.yaml.example"
+        example = yaml.safe_load(example_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(example, DEFAULT_CONFIG)
+        self.assertEqual(main_module._inline_config_secret_paths(example), [])
+
     def test_explicit_config_override_wins(self):
         with tempfile.TemporaryDirectory() as td:
             expected = Path(td) / "custom.yaml"
@@ -227,6 +235,50 @@ class TestConfigPaths(unittest.TestCase):
                 candidate = save.call_args.args[0]
                 self.assertIsNot(candidate, manager.config)
                 self.assertNotEqual(candidate, base)
+
+    def test_model_update_preserves_existing_inline_key(self):
+        manager = ConfigManager.__new__(ConfigManager)
+        manager.config = {
+            "llm": {
+                "provider": "openai",
+                "openai": {
+                    "api_key": "existing-secret",
+                    "model": "old-model",
+                },
+            },
+        }
+
+        with patch.object(manager, "save_config", return_value=True) as save:
+            saved = manager.configure_llm_provider("openai", model="new-model")
+
+        self.assertTrue(saved)
+        candidate = save.call_args.args[0]
+        self.assertEqual(candidate["llm"]["openai"]["api_key"], "existing-secret")
+        self.assertEqual(candidate["llm"]["openai"]["model"], "new-model")
+        self.assertEqual(manager.config["llm"]["openai"]["model"], "old-model")
+
+    def test_mistral_is_treated_as_a_standard_cli_provider(self):
+        manager = Mock()
+        manager.config_file = Path("/tmp/config.yaml")
+        manager.get_llm_config.return_value = {
+            "provider": "openai",
+            "config": {"api_key": "existing-secret", "model": "old-model"},
+        }
+        manager.configure_llm_provider.return_value = True
+
+        with patch.object(main_module, "config_manager", manager):
+            result = CliRunner().invoke(
+                main_module.app,
+                ["config", "--provider", "mistral", "--model", "mistral-test"],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("not a standard provider", result.output)
+        manager.configure_llm_provider.assert_called_once_with(
+            "mistral",
+            make_active=True,
+            model="mistral-test",
+        )
 
     def test_noninteractive_config_failure_exits_without_success_claim(self):
         manager = Mock()
